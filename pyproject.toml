@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "lassynth",
+    "pytest-randomly>=4.0.1",
 ]
 
 [tool.uv.sources]
