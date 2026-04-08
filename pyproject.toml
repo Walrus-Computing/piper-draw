@@ -5,6 +5,17 @@ description = "Interactively draw pipe diagrams for lattice surgery."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "pytest-randomly>=4.0.1",
     "stim>=1.15.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.0",
+    "pytest-randomly>=4.0.1",
+]
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
