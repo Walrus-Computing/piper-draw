@@ -12,5 +12,10 @@ Lint with `ruff check .` and format with `ruff format .`.
 ### API Structure
 `__init__.py` files should be considered as the outward-facing API. Consequently all functions and classes that are meant to be exposed beyond a (sub)module should be imported (made available) in the respective `__init__.py` file.
 
+### Testing
+We use `pytest`. For random numbers in test we use `pytest-randomly`, which sets a unique seed for each test run, such that failing tests are reproducible, but the seed is not fix.
+Whenever using a random number in a test, make sure to invoke it from a seed obtained from `tests/randomly_utils.get_seeds()`.
+You can feed this seed into your random number generator, e.g., `numpy.random.default_rng(seed)`.
+
 ## Dependencies
 We use `uv` to manage dependencies and virtual environments. Use `uv sync` to install all dependencies, use `uv sync --no-dev` to only install the production dependencies.
