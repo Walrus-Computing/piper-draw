@@ -9,7 +9,7 @@ The user can then press the **Export to Collada (.dae)** button.
 This package contains a test that verifies the exported `.dae` file is correctly understood by the TQEC package.
 
 ## Usage
-- Start the app locally and build your diagram in the browser.
+- Start the app locally and build your diagram in the browser using `piperdraw` in the command line.
 - Assemble stack elements with drag-and-drop.
 - Export the design via the Collada export button.
 - Run the provided validation test to check `.dae` compatibility.
