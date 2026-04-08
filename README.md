@@ -9,5 +9,8 @@ In VSCode, you should get linting by installing the dependencies (which includes
 
 Lint with `ruff check .` and format with `ruff format .`.
 
+### Structure
+`__init__.py` files should be considered as the outward-facing API. Consequently all functions and classes that are meant to be exposed beyond a (sub)module should be imported (made available) in the respective `__init__.py` file.
+
 ## Dependenies
 We use `uv` to manage dependencies and virtual environments. Use `uv sync` to install all dependencies, use `uv sync --no-dev` to only install the production dependencies.
