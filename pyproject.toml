@@ -5,6 +5,7 @@ description = "Interactively draw pipe diagrams for lattice surgery."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "networkx>=3.2",
     "stim>=1.15.0",
 ]
 
@@ -21,3 +22,6 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
