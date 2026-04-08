@@ -5,9 +5,6 @@ description = "Interactively draw pipe diagrams for lattice surgery."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "lassynth",
     "pytest-randomly>=4.0.1",
+    "stim>=1.15.0",
 ]
-
-[tool.uv.sources]
-lassynth = { path = "../isca24_SAT_scalpel", editable = true }
