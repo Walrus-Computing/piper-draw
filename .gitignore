@@ -11,3 +11,7 @@ wheels/
 
 .python-version
 .vscode
+
+# GUI / Node.js
+piper_draw/gui/node_modules/
+piper_draw/gui/dist/
