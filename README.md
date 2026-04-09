@@ -17,5 +17,7 @@ We use `pytest`. For random numbers in test we use `pytest-randomly`, which sets
 Whenever using a random number in a test, make sure to invoke it from a seed obtained from `tests/randomly_utils.get_seeds()`.
 You can feed this seed into your random number generator, e.g., `numpy.random.default_rng(seed)`.
 
+The `tests` directory structure should generally reflect the same structure as the `piper_draw` directory.
+
 ## Dependencies
 We use `uv` to manage dependencies and virtual environments. Use `uv sync` to install all dependencies, use `uv sync --no-dev` to only install the production dependencies.

@@ -7,16 +7,11 @@ class PipeDiagram:
     def __init__(self) -> None:
         self._graph: nx.Graph = nx.Graph()
 
-    def add_block(
-        self,
-        coordinates: tuple[int, int, int],
-        block_type: str = "regular",
-    ) -> Block:
+    def add_block(self, block: Block) -> None:
+        coordinates = block.coordinates
         if coordinates in self._graph:
             raise ValueError(f"Block already exists at {coordinates}.")
-        block = Block(coordinates, block_type)
         self._graph.add_node(coordinates, block=block)
-        return block
 
     def remove_block(self, coordinates: tuple[int, int, int]) -> None:
         if coordinates not in self._graph:
@@ -53,11 +48,14 @@ class PipeDiagram:
             )
         self._graph.remove_edge(coord_a, coord_b)
 
-    def neighbors(self, coordinates: tuple[int, int, int]) -> list[Block]:
+    def neighbors(
+        self, coordinates: tuple[int, int, int]
+    ) -> list[Block]:
         if coordinates not in self._graph:
             raise KeyError(f"No block at {coordinates}.")
         return [
-            self._graph.nodes[n]["block"] for n in self._graph.neighbors(coordinates)
+            self._graph.nodes[n]["block"]
+            for n in self._graph.neighbors(coordinates)
         ]
 
     @property
