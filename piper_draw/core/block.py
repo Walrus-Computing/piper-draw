@@ -19,14 +19,13 @@ class Block:
 
     def __post_init__(self) -> None:
         coords = self.coordinates
-        if (
-            len(coords) != 3
-            or not all(isinstance(c, int) for c in coords)
-        ):
+        violations = (
+            not isinstance(coords, tuple),
+            len(coords) != 3,
+            not all(isinstance(c, int) for c in coords)
+        )
+        if any(violations):
             raise TypeError("coordinates must be a 3-tuple of ints.")
-
-    def __hash__(self) -> int:
-        return hash(self.coordinates)
 
 
 @dataclass(frozen=True, slots=True)

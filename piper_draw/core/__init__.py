@@ -1,2 +1,2 @@
-from .block import Block, Face, FaceState, SingleVoxelBlock, YBlock
+from .block import Block, FaceState, SingleVoxelBlock, YBlock
 from .pipe_diagram import PipeDiagram

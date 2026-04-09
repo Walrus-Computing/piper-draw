@@ -1,1 +1,1 @@
-from .core import Block, Face, FaceState, PipeDiagram, SingleVoxelBlock, YBlock
+from .core import Block, FaceState, PipeDiagram, SingleVoxelBlock, YBlock
