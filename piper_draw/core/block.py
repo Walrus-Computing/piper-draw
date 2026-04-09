@@ -4,17 +4,13 @@ from enum import Enum
 
 class FaceState(Enum):
     OPEN = "open"
+    '''Indicates that this face is to be merged with another open face.'''
     BLUE = "blue"
+    '''Z boundary (where Z-stabilizers with support 2 live)'''
     RED = "red"
-
-
-class Face(Enum):
-    NORTH = "north"
-    SOUTH = "south"
-    EAST = "east"
-    WEST = "west"
-    TOP = "top"
-    BOTTOM = "bottom"
+    '''X boundary (where X-stabilizers with support 2 live)'''
+    NULL = "null"
+    '''Temporary placeholder. Needs to set eventually for a valid pipediagram.'''
 
 
 @dataclass(frozen=True, slots=True)
