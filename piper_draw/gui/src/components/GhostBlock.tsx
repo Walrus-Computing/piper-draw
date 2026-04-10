@@ -1,15 +1,18 @@
 import { useMemo } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
-import { tqecToThree, createCubeGeometry } from "../types";
+import { tqecToThree, createBlockGeometry } from "../types";
+import type { BlockType } from "../types";
 
 /** Box edges + both diagonals on every face. */
-function createDeleteOutlineGeometry(): THREE.BufferGeometry {
-  const h = 0.5;
-  // 8 corners of a unit cube centered at origin
+function createDeleteOutlineGeometry(blockType: BlockType): THREE.BufferGeometry {
+  const hx = 0.5, hz = 0.5;
+  // TQEC Z → Three.js Y: half-height in Y for YHalfCube
+  const hy = blockType === "Y" ? 0.25 : 0.5;
+  // 8 corners of the box centered at origin
   const c = [
-    [-h, -h, -h], [h, -h, -h], [h, h, -h], [-h, h, -h], // front face (z=-h)
-    [-h, -h, h],  [h, -h, h],  [h, h, h],  [-h, h, h],   // back face  (z=+h)
+    [-hx, -hy, -hz], [hx, -hy, -hz], [hx, hy, -hz], [-hx, hy, -hz], // front face (z=-hz)
+    [-hx, -hy, hz],  [hx, -hy, hz],  [hx, hy, hz],  [-hx, hy, hz],   // back face  (z=+hz)
   ];
   // 12 box edges
   const edges: [number, number][] = [
@@ -47,9 +50,13 @@ export function GhostBlock() {
   const hoveredGridPos = useBlockStore((s) => s.hoveredGridPos);
   const mode = useBlockStore((s) => s.mode);
   const cubeType = useBlockStore((s) => s.cubeType);
+  const hoveredBlockType = useBlockStore((s) => s.hoveredBlockType);
 
-  const deleteOutline = useMemo(() => createDeleteOutlineGeometry(), []);
-  const ghostGeometry = useMemo(() => createCubeGeometry(cubeType), [cubeType]);
+  // In delete mode, use the hovered block's type; in place mode, use selected type
+  const activeType = mode === "delete" && hoveredBlockType ? hoveredBlockType : cubeType;
+
+  const deleteOutline = useMemo(() => createDeleteOutlineGeometry(activeType), [activeType]);
+  const ghostGeometry = useMemo(() => createBlockGeometry(activeType), [activeType]);
   const ghostMaterial = useMemo(
     () =>
       new THREE.MeshStandardMaterial({
@@ -63,7 +70,7 @@ export function GhostBlock() {
 
   if (!hoveredGridPos) return null;
 
-  const [x, y, z] = tqecToThree(hoveredGridPos);
+  const [x, y, z] = tqecToThree(hoveredGridPos, activeType);
   const isDelete = mode === "delete";
 
   return (
@@ -72,7 +79,7 @@ export function GhostBlock() {
         <>
           {/* Transparent red tint — block colors show through */}
           <mesh scale={1.01}>
-            <boxGeometry args={[1, 1, 1]} />
+            <boxGeometry args={[1, activeType === "Y" ? 0.5 : 1, 1]} />
             <meshStandardMaterial
               color="#ff4444"
               transparent

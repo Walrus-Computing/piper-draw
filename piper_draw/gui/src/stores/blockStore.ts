@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Position3D, Block, CubeType } from "../types";
+import type { Position3D, Block, BlockType } from "../types";
 import { posKey } from "../types";
 
 export type Mode = "place" | "delete";
@@ -7,12 +7,13 @@ export type Mode = "place" | "delete";
 interface BlockStore {
   blocks: Map<string, Block>;
   mode: Mode;
-  cubeType: CubeType;
+  cubeType: BlockType;
   hoveredGridPos: Position3D | null;
+  hoveredBlockType: BlockType | null;
 
   setMode: (mode: Mode) => void;
-  setCubeType: (cubeType: CubeType) => void;
-  setHoveredGridPos: (pos: Position3D | null) => void;
+  setCubeType: (cubeType: BlockType) => void;
+  setHoveredGridPos: (pos: Position3D | null, blockType?: BlockType) => void;
   addBlock: (pos: Position3D) => void;
   removeBlock: (pos: Position3D) => void;
 }
@@ -22,10 +23,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   mode: "place",
   cubeType: "XZZ",
   hoveredGridPos: null,
+  hoveredBlockType: null,
 
   setMode: (mode) => set({ mode }),
   setCubeType: (cubeType) => set({ cubeType }),
-  setHoveredGridPos: (pos) => set({ hoveredGridPos: pos }),
+  setHoveredGridPos: (pos, blockType) => set({ hoveredGridPos: pos, hoveredBlockType: blockType ?? null }),
 
   addBlock: (pos) =>
     set((state) => {

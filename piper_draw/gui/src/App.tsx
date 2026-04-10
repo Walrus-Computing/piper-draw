@@ -13,7 +13,7 @@ import { FpsDisplay, FpsSampler } from "./components/FpsCounter";
 import { OrientationGizmo } from "./components/OrientationGizmo";
 import { useBlockStore } from "./stores/blockStore";
 import { CUBE_TYPES } from "./types";
-import type { CubeType } from "./types";
+import type { BlockType } from "./types";
 
 const X_HEX = "#ff4444";
 const Z_HEX = "#4488ff";
@@ -69,6 +69,66 @@ function CubePreview({ cubeType }: { cubeType: string }) {
     </svg>
   );
 }
+
+const Y_HEX = "#44cc44";
+
+/** Isometric half-cube (half-height in Z/temporal) preview, all green. */
+function YHalfCubePreview() {
+  // Same isometric angles as CubePreview but sideH halved; same total SVG height
+  const dx = 9, topH = 5, sideH = 5;
+  const fullSideH = 10;
+  const cx = 11;
+  const svgH = 7 + topH + fullSideH + 1; // match CubePreview height (23)
+  const svgW = cx * 2;
+  // Shift down so the half-cube sits at the bottom of the same viewport
+  const cy = 7 + (fullSideH - sideH);
+  return (
+    <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} style={{ display: "block", margin: "2px auto 0" }}>
+      {/* Top face */}
+      <polygon
+        points={`${cx},${cy - topH} ${cx + dx},${cy} ${cx},${cy + topH} ${cx - dx},${cy}`}
+        fill={Y_HEX}
+        stroke="#0003"
+        strokeWidth={0.5}
+      />
+      {/* Left face */}
+      <polygon
+        points={`${cx - dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
+        fill={Y_HEX}
+        stroke="#0003"
+        strokeWidth={0.5}
+        opacity={0.85}
+      />
+      {/* Right face */}
+      <polygon
+        points={`${cx + dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
+        fill={Y_HEX}
+        stroke="#0003"
+        strokeWidth={0.5}
+        opacity={0.7}
+      />
+    </svg>
+  );
+}
+
+const groupLabelStyle = {
+  fontSize: "11px",
+  fontFamily: "sans-serif",
+  color: "#888",
+  fontWeight: "bold" as const,
+  letterSpacing: "0.5px",
+  textAlign: "center" as const,
+};
+
+const blockBtnStyle = (active: boolean) => ({
+  ...btnStyle(active),
+  display: "flex" as const,
+  flexDirection: "column" as const,
+  alignItems: "center" as const,
+  justifyContent: "flex-start" as const,
+  padding: "4px 8px",
+  minHeight: "46px",
+});
 
 const btnStyle = (active: boolean) => ({
   padding: "4px 12px",
@@ -126,37 +186,41 @@ function Toolbar({ onResetCamera }: { onResetCamera: () => void }) {
 
       {/* ZXCube group */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-        <span style={{
-          fontSize: "11px",
-          fontFamily: "sans-serif",
-          color: "#888",
-          fontWeight: "bold",
-          textTransform: "uppercase",
-          letterSpacing: "0.5px",
-          textAlign: "center",
-        }}>
-          ZXCube
-        </span>
+        <span style={groupLabelStyle}>ZXCube</span>
         <div style={{ display: "flex", gap: "4px" }}>
           {CUBE_TYPES.map((ct) => (
             <button
               key={ct}
               onClick={() => {
-                setCubeType(ct as CubeType);
+                setCubeType(ct as BlockType);
                 setMode("place");
               }}
-              style={{
-                ...btnStyle(cubeType === ct && mode === "place"),
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                padding: "4px 8px",
-              }}
+              style={blockBtnStyle(cubeType === ct && mode === "place")}
             >
               {ct}
               <CubePreview cubeType={ct} />
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* Separator */}
+      <div style={{ width: 1, background: "#ddd" }} />
+
+      {/* YHalfCube group */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+        <span style={groupLabelStyle}>YHalfCube</span>
+        <div style={{ display: "flex", gap: "4px" }}>
+          <button
+            onClick={() => {
+              setCubeType("Y");
+              setMode("place");
+            }}
+            style={blockBtnStyle(cubeType === "Y" && mode === "place")}
+          >
+            Y
+            <YHalfCubePreview />
+          </button>
         </div>
       </div>
     </div>

@@ -4,11 +4,11 @@ import type { ThreeEvent } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
 import {
   tqecToThree,
-  threeToTqecCell,
-  createCubeGeometry,
-  CUBE_TYPES,
+  createBlockGeometry,
+  getAdjacentPos,
+  ALL_BLOCK_TYPES,
 } from "../types";
-import type { CubeType, Block } from "../types";
+import type { BlockType, Block } from "../types";
 
 const MAX_INITIAL = 1024;
 
@@ -16,14 +16,14 @@ function TypedInstances({
   cubeType,
   blocks,
 }: {
-  cubeType: CubeType;
+  cubeType: BlockType;
   blocks: Block[];
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const blocksRef = useRef(blocks);
   blocksRef.current = blocks;
 
-  const geometry = useMemo(() => createCubeGeometry(cubeType), [cubeType]);
+  const geometry = useMemo(() => createBlockGeometry(cubeType), [cubeType]);
   const material = useMemo(
     () => new THREE.MeshStandardMaterial({ vertexColors: true }),
     [],
@@ -35,7 +35,7 @@ function TypedInstances({
     if (!mesh) return;
 
     for (let i = 0; i < blocks.length; i++) {
-      const [tx, ty, tz] = tqecToThree(blocks[i].pos);
+      const [tx, ty, tz] = tqecToThree(blocks[i].pos, cubeType);
       dummy.makeTranslation(tx, ty, tz);
       mesh.setMatrixAt(i, dummy);
     }
@@ -50,14 +50,12 @@ function TypedInstances({
     if (e.instanceId == null || e.instanceId >= b.length) return;
     const mode = useBlockStore.getState().mode;
     if (mode === "delete") {
-      useBlockStore.getState().setHoveredGridPos(b[e.instanceId].pos);
+      useBlockStore.getState().setHoveredGridPos(b[e.instanceId].pos, cubeType);
     } else {
       if (!e.face) return;
-      const n = e.face.normal;
-      const [tx, ty, tz] = tqecToThree(b[e.instanceId].pos);
-      useBlockStore
-        .getState()
-        .setHoveredGridPos(threeToTqecCell(tx + n.x, ty + n.y, tz + n.z));
+      const selectedType = useBlockStore.getState().cubeType;
+      const adj = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, selectedType);
+      useBlockStore.getState().setHoveredGridPos(adj);
     }
   };
 
@@ -66,14 +64,13 @@ function TypedInstances({
     if (e.delta > 2) return;
     const b = blocksRef.current;
     if (e.instanceId == null || e.instanceId >= b.length) return;
-    const { mode, addBlock, removeBlock } = useBlockStore.getState();
+    const { mode, cubeType: selectedType, addBlock, removeBlock } = useBlockStore.getState();
     if (mode === "delete") {
       removeBlock(b[e.instanceId].pos);
     } else {
       if (!e.face) return;
-      const n = e.face.normal;
-      const [tx, ty, tz] = tqecToThree(b[e.instanceId].pos);
-      addBlock(threeToTqecCell(tx + n.x, ty + n.y, tz + n.z));
+      const adj = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, selectedType);
+      addBlock(adj);
     }
   };
 
@@ -93,8 +90,8 @@ export function BlockInstances() {
   const blocks = useBlockStore((s) => s.blocks);
 
   const grouped = useMemo(() => {
-    const map = new Map<CubeType, Block[]>();
-    for (const ct of CUBE_TYPES) map.set(ct, []);
+    const map = new Map<BlockType, Block[]>();
+    for (const ct of ALL_BLOCK_TYPES) map.set(ct, []);
     for (const block of blocks.values()) {
       map.get(block.type)!.push(block);
     }
@@ -103,7 +100,7 @@ export function BlockInstances() {
 
   return (
     <>
-      {CUBE_TYPES.map((ct) => (
+      {ALL_BLOCK_TYPES.map((ct) => (
         <TypedInstances
           key={ct}
           cubeType={ct}

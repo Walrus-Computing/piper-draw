@@ -40,7 +40,7 @@ export function GridPlane() {
       onPointerLeave={handlePointerLeave}
     >
       <planeGeometry args={[GRID_SIZE, GRID_SIZE]} />
-      <meshBasicMaterial visible={false} side={THREE.DoubleSide} />
+      <meshBasicMaterial visible={false} side={THREE.FrontSide} />
     </mesh>
   );
 }
