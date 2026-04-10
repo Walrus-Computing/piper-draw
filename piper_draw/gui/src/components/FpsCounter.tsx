@@ -3,21 +3,16 @@ import { useFrame } from "@react-three/fiber";
 
 export function FpsDisplay({ fps }: { fps: number }) {
   return (
-    <div
+    <span
       style={{
-        position: "fixed",
-        top: 12,
-        right: 16,
         color: "#555",
         fontSize: "13px",
         fontFamily: "monospace",
         userSelect: "none",
-        pointerEvents: "none",
-        zIndex: 1,
       }}
     >
       {fps} FPS
-    </div>
+    </span>
   );
 }
 

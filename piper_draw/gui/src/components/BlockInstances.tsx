@@ -20,10 +20,8 @@ function TypedInstances({
   blocks: Block[];
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
-  const mode = useBlockStore((s) => s.mode);
-  const addBlock = useBlockStore((s) => s.addBlock);
-  const removeBlock = useBlockStore((s) => s.removeBlock);
-  const setHoveredGridPos = useBlockStore((s) => s.setHoveredGridPos);
+  const blocksRef = useRef(blocks);
+  blocksRef.current = blocks;
 
   const geometry = useMemo(() => createCubeGeometry(cubeType), [cubeType]);
   const material = useMemo(
@@ -48,26 +46,33 @@ function TypedInstances({
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
-    if (e.instanceId == null || e.instanceId >= blocks.length) return;
+    const b = blocksRef.current;
+    if (e.instanceId == null || e.instanceId >= b.length) return;
+    const mode = useBlockStore.getState().mode;
     if (mode === "delete") {
-      setHoveredGridPos(blocks[e.instanceId].pos);
+      useBlockStore.getState().setHoveredGridPos(b[e.instanceId].pos);
     } else {
       if (!e.face) return;
       const n = e.face.normal;
-      const [tx, ty, tz] = tqecToThree(blocks[e.instanceId].pos);
-      setHoveredGridPos(threeToTqecCell(tx + n.x, ty + n.y, tz + n.z));
+      const [tx, ty, tz] = tqecToThree(b[e.instanceId].pos);
+      useBlockStore
+        .getState()
+        .setHoveredGridPos(threeToTqecCell(tx + n.x, ty + n.y, tz + n.z));
     }
   };
 
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
-    if (e.instanceId == null || e.instanceId >= blocks.length) return;
+    if (e.delta > 2) return;
+    const b = blocksRef.current;
+    if (e.instanceId == null || e.instanceId >= b.length) return;
+    const { mode, addBlock, removeBlock } = useBlockStore.getState();
     if (mode === "delete") {
-      removeBlock(blocks[e.instanceId].pos);
+      removeBlock(b[e.instanceId].pos);
     } else {
       if (!e.face) return;
       const n = e.face.normal;
-      const [tx, ty, tz] = tqecToThree(blocks[e.instanceId].pos);
+      const [tx, ty, tz] = tqecToThree(b[e.instanceId].pos);
       addBlock(threeToTqecCell(tx + n.x, ty + n.y, tz + n.z));
     }
   };
@@ -76,12 +81,7 @@ function TypedInstances({
 
   return (
     <instancedMesh
-      ref={(mesh) => {
-        if (mesh) {
-          mesh.count = 0;
-          meshRef.current = mesh;
-        }
-      }}
+      ref={meshRef}
       args={[geometry, material, Math.max(MAX_INITIAL, blocks.length)]}
       onPointerMove={handlePointerMove}
       onClick={handleClick}

@@ -42,6 +42,6 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       if (!state.blocks.has(key)) return state;
       const next = new Map(state.blocks);
       next.delete(key);
-      return { blocks: next };
+      return { blocks: next, hoveredGridPos: null };
     }),
 }));

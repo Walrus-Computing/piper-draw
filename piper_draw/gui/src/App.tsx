@@ -34,6 +34,7 @@ function Toolbar() {
 
   return (
     <div
+      onPointerDown={(e) => e.stopPropagation()}
       style={{
         position: "fixed",
         top: 10,
@@ -43,6 +44,11 @@ function Toolbar() {
         display: "flex",
         gap: "6px",
         alignItems: "center",
+        background: "rgba(255,255,255,0.9)",
+        padding: "6px 12px",
+        borderRadius: "8px",
+        border: "1px solid #ddd",
+        boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
       }}
     >
       <button onClick={() => setMode("place")} style={btnStyle(mode === "place")}>
@@ -77,25 +83,31 @@ export default function App() {
   return (
     <>
       <Toolbar />
-      <FpsDisplay fps={fps} />
-      <button
-        onClick={() => controlsRef.current?.reset()}
+      <div
+        onPointerDown={(e) => e.stopPropagation()}
         style={{
           position: "fixed",
           top: 10,
-          right: 100,
+          right: 16,
           zIndex: 1,
-          padding: "4px 12px",
-          fontSize: "13px",
-          fontFamily: "sans-serif",
-          cursor: "pointer",
-          border: "1px solid #ccc",
-          borderRadius: "4px",
-          background: "#fff",
+          display: "flex",
+          gap: "8px",
+          alignItems: "center",
+          background: "rgba(255,255,255,0.9)",
+          padding: "6px 12px",
+          borderRadius: "8px",
+          border: "1px solid #ddd",
+          boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
         }}
       >
-        Return origin
-      </button>
+        <button
+          onClick={() => controlsRef.current?.reset()}
+          style={btnStyle(false)}
+        >
+          Return origin
+        </button>
+        <FpsDisplay fps={fps} />
+      </div>
       <Canvas
         camera={{ position: [10, 10, -10], fov: 50 }}
         onContextMenu={(e) => e.preventDefault()}

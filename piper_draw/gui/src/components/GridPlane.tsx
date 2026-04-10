@@ -21,6 +21,7 @@ export function GridPlane() {
 
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
+    if (e.delta > 2) return; // ignore drags
     if (mode === "place") {
       addBlock(threeToTqecCell(e.point.x, 0, e.point.z));
     }
