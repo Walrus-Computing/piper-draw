@@ -7,13 +7,30 @@ import {
   createBlockGeometry,
   createBlockEdges,
   blockThreeSize,
+  blockTqecSize,
   getAdjacentPos,
   ALL_BLOCK_TYPES,
   PIPE_TYPES,
 } from "../types";
-import type { BlockType, Block } from "../types";
+import type { Position3D, BlockType, Block } from "../types";
 
 const MAX_INITIAL = 1024;
+
+/** Check if placing a block at pos with the given type overlaps any existing block. */
+function overlapsAny(pos: Position3D, type: BlockType, blocks: Map<string, Block>): boolean {
+  const sz = blockTqecSize(type);
+  for (const block of blocks.values()) {
+    const bs = blockTqecSize(block.type);
+    if (
+      pos.x < block.pos.x + bs[0] && pos.x + sz[0] > block.pos.x &&
+      pos.y < block.pos.y + bs[1] && pos.y + sz[1] > block.pos.y &&
+      pos.z < block.pos.z + bs[2] && pos.z + sz[2] > block.pos.z
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function TypedInstances({
   cubeType,
@@ -100,14 +117,17 @@ function TypedInstances({
     e.stopPropagation();
     const b = blocksRef.current;
     if (e.instanceId == null || e.instanceId >= b.length) return;
-    const mode = useBlockStore.getState().mode;
-    if (mode === "delete") {
-      useBlockStore.getState().setHoveredGridPos(b[e.instanceId].pos, cubeType);
+    const store = useBlockStore.getState();
+    if (store.mode === "delete") {
+      store.setHoveredGridPos(b[e.instanceId].pos, cubeType);
     } else {
       if (!e.face) return;
-      const selectedType = useBlockStore.getState().cubeType;
-      const adj = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, selectedType);
-      useBlockStore.getState().setHoveredGridPos(adj);
+      const adj = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, store.cubeType);
+      if (overlapsAny(adj, store.cubeType, store.blocks)) {
+        store.setHoveredGridPos(null);
+      } else {
+        store.setHoveredGridPos(adj);
+      }
     }
   };
 
@@ -135,7 +155,7 @@ function TypedInstances({
       <instancedMesh
         ref={meshRef}
         args={[geometry, material, maxCount]}
-        {...(!isPipe ? { onPointerMove: handlePointerMove, onClick: handleClick } : {})}
+        {...(!isPipe ? { onPointerMove: handlePointerMove, onClick: handleClick } : { raycast: () => {} })}
       />
       {/* Invisible full-box mesh for pipe raycast — sole raycast target for pipes */}
       {isPipe && (

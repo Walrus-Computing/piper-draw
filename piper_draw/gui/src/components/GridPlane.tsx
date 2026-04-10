@@ -1,9 +1,25 @@
 import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
-import { threeToTqecCell } from "../types";
+import { threeToTqecCell, blockTqecSize } from "../types";
+import type { Position3D, BlockType, Block } from "../types";
 
 const GRID_SIZE = 200;
+
+function overlapsAny(pos: Position3D, type: BlockType, blocks: Map<string, Block>): boolean {
+  const sz = blockTqecSize(type);
+  for (const block of blocks.values()) {
+    const bs = blockTqecSize(block.type);
+    if (
+      pos.x < block.pos.x + bs[0] && pos.x + sz[0] > block.pos.x &&
+      pos.y < block.pos.y + bs[1] && pos.y + sz[1] > block.pos.y &&
+      pos.z < block.pos.z + bs[2] && pos.z + sz[2] > block.pos.z
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export function GridPlane() {
   const addBlock = useBlockStore((s) => s.addBlock);
@@ -13,7 +29,13 @@ export function GridPlane() {
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
     if (mode === "place") {
-      setHoveredGridPos(threeToTqecCell(e.point.x, 0, e.point.z));
+      const pos = threeToTqecCell(e.point.x, 0, e.point.z);
+      const store = useBlockStore.getState();
+      if (overlapsAny(pos, store.cubeType, store.blocks)) {
+        setHoveredGridPos(null);
+      } else {
+        setHoveredGridPos(pos);
+      }
     } else {
       setHoveredGridPos(null);
     }

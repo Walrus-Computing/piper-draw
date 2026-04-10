@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Position3D, Block, BlockType } from "../types";
-import { posKey } from "../types";
+import { posKey, blockTqecSize } from "../types";
 
 export type Mode = "place" | "delete";
 
@@ -31,10 +31,21 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
   addBlock: (pos) =>
     set((state) => {
-      const key = posKey(pos);
-      if (state.blocks.has(key)) return state;
+      const newType = get().cubeType;
+      const newSize = blockTqecSize(newType);
+      // Check overlap with all existing blocks (AABB intersection in TQEC space)
+      for (const block of state.blocks.values()) {
+        const s = blockTqecSize(block.type);
+        if (
+          pos.x < block.pos.x + s[0] && pos.x + newSize[0] > block.pos.x &&
+          pos.y < block.pos.y + s[1] && pos.y + newSize[1] > block.pos.y &&
+          pos.z < block.pos.z + s[2] && pos.z + newSize[2] > block.pos.z
+        ) {
+          return state; // overlap — reject
+        }
+      }
       const next = new Map(state.blocks);
-      next.set(key, { pos, type: get().cubeType });
+      next.set(posKey(pos), { pos, type: newType });
       return { blocks: next };
     }),
 
