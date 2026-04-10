@@ -15,18 +15,73 @@ import { useBlockStore } from "./stores/blockStore";
 import { CUBE_TYPES } from "./types";
 import type { CubeType } from "./types";
 
+const X_HEX = "#ff4444";
+const Z_HEX = "#4488ff";
+
+/** Face colors per cube type: [X-axis, Y-axis, Z-axis] matching CUBE_FACE_COLORS */
+const CUBE_COLORS: Record<string, [string, string, string]> = {
+  XZZ: [X_HEX, Z_HEX, Z_HEX],
+  ZXZ: [Z_HEX, X_HEX, Z_HEX],
+  ZXX: [Z_HEX, X_HEX, X_HEX],
+  XXZ: [X_HEX, X_HEX, Z_HEX],
+  ZZX: [Z_HEX, Z_HEX, X_HEX],
+  XZX: [X_HEX, Z_HEX, X_HEX],
+};
+
+/**
+ * Isometric cube SVG matching the default camera at [10, 10, -10].
+ * Camera screen-right is (-1,0,-1), so:
+ *   Top   = +Y Three.js = TQEC Z-axis
+ *   Left  = +X Three.js = TQEC X-axis
+ *   Right = -Z Three.js = TQEC Y-axis
+ */
+function CubePreview({ cubeType }: { cubeType: string }) {
+  const [xColor, yColor, zColor] = CUBE_COLORS[cubeType];
+  // True isometric proportions: edge=10, dx=8.66, top_h=5, side_h=10
+  const dx = 9, topH = 5, sideH = 10;
+  const cx = 11, cy = 7;
+  const svgW = cx * 2, svgH = cy + topH + sideH + 1;
+  return (
+    <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} style={{ display: "block", margin: "2px auto 0" }}>
+      {/* Top face (TQEC Z-axis) */}
+      <polygon
+        points={`${cx},${cy - topH} ${cx + dx},${cy} ${cx},${cy + topH} ${cx - dx},${cy}`}
+        fill={zColor}
+        stroke="#0003"
+        strokeWidth={0.5}
+      />
+      {/* Left face (TQEC X-axis) — slightly darkened */}
+      <polygon
+        points={`${cx - dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
+        fill={xColor}
+        stroke="#0003"
+        strokeWidth={0.5}
+        opacity={0.85}
+      />
+      {/* Right face (TQEC Y-axis) — slightly more darkened */}
+      <polygon
+        points={`${cx + dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
+        fill={yColor}
+        stroke="#0003"
+        strokeWidth={0.5}
+        opacity={0.7}
+      />
+    </svg>
+  );
+}
+
 const btnStyle = (active: boolean) => ({
   padding: "4px 12px",
   fontSize: "13px",
   fontFamily: "sans-serif" as const,
   cursor: "pointer" as const,
-  border: active ? "2px solid #4a9eff" : "1px solid #ccc",
+  border: active ? "2px solid #4a9eff" : "2px solid #ccc",
   borderRadius: "4px",
   background: active ? "#e8f0fe" : "#fff",
-  fontWeight: active ? ("bold" as const) : ("normal" as const),
+  fontWeight: "normal" as const,
 });
 
-function Toolbar() {
+function Toolbar({ onResetCamera }: { onResetCamera: () => void }) {
   const mode = useBlockStore((s) => s.mode);
   const setMode = useBlockStore((s) => s.setMode);
   const cubeType = useBlockStore((s) => s.cubeType);
@@ -42,34 +97,67 @@ function Toolbar() {
         transform: "translateX(-50%)",
         zIndex: 1,
         display: "flex",
-        gap: "6px",
-        alignItems: "center",
+        gap: "10px",
+        alignItems: "stretch",
         background: "rgba(255,255,255,0.9)",
-        padding: "6px 12px",
+        padding: "8px 12px",
         borderRadius: "8px",
         border: "1px solid #ddd",
         boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
       }}
     >
-      <button onClick={() => setMode("place")} style={btnStyle(mode === "place")}>
-        Place
-      </button>
-      <button onClick={() => setMode("delete")} style={btnStyle(mode === "delete")}>
-        Delete
-      </button>
-      <div style={{ marginLeft: "8px", display: "flex", gap: "4px" }}>
-        {CUBE_TYPES.map((ct) => (
-          <button
-            key={ct}
-            onClick={() => {
-              setCubeType(ct as CubeType);
-              setMode("place");
-            }}
-            style={btnStyle(cubeType === ct && mode === "place")}
-          >
-            {ct}
+      {/* Mode + reset buttons */}
+      <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+          <button onClick={() => setMode("place")} style={btnStyle(mode === "place")}>
+            Place
           </button>
-        ))}
+          <button onClick={() => setMode("delete")} style={btnStyle(mode === "delete")}>
+            Delete
+          </button>
+        </div>
+        <button onClick={onResetCamera} style={btnStyle(false)}>
+          Origin
+        </button>
+      </div>
+
+      {/* Separator */}
+      <div style={{ width: 1, background: "#ddd" }} />
+
+      {/* ZXCube group */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+        <span style={{
+          fontSize: "11px",
+          fontFamily: "sans-serif",
+          color: "#888",
+          fontWeight: "bold",
+          textTransform: "uppercase",
+          letterSpacing: "0.5px",
+          textAlign: "center",
+        }}>
+          ZXCube
+        </span>
+        <div style={{ display: "flex", gap: "4px" }}>
+          {CUBE_TYPES.map((ct) => (
+            <button
+              key={ct}
+              onClick={() => {
+                setCubeType(ct as CubeType);
+                setMode("place");
+              }}
+              style={{
+                ...btnStyle(cubeType === ct && mode === "place"),
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                padding: "4px 8px",
+              }}
+            >
+              {ct}
+              <CubePreview cubeType={ct} />
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -82,7 +170,7 @@ export default function App() {
 
   return (
     <>
-      <Toolbar />
+      <Toolbar onResetCamera={() => controlsRef.current?.reset()} />
       <div
         onPointerDown={(e) => e.stopPropagation()}
         style={{
@@ -90,9 +178,6 @@ export default function App() {
           top: 10,
           right: 16,
           zIndex: 1,
-          display: "flex",
-          gap: "8px",
-          alignItems: "center",
           background: "rgba(255,255,255,0.9)",
           padding: "6px 12px",
           borderRadius: "8px",
@@ -100,12 +185,6 @@ export default function App() {
           boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
         }}
       >
-        <button
-          onClick={() => controlsRef.current?.reset()}
-          style={btnStyle(false)}
-        >
-          Return origin
-        </button>
         <FpsDisplay fps={fps} />
       </div>
       <Canvas
