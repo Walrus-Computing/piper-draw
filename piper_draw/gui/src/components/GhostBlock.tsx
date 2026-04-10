@@ -1,14 +1,13 @@
 import { useMemo } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
-import { tqecToThree, createBlockGeometry } from "../types";
+import { tqecToThree, createBlockGeometry, blockThreeSize, PIPE_TYPES } from "../types";
 import type { BlockType } from "../types";
 
 /** Box edges + both diagonals on every face. */
 function createDeleteOutlineGeometry(blockType: BlockType): THREE.BufferGeometry {
-  const hx = 0.5, hz = 0.5;
-  // TQEC Z → Three.js Y: half-height in Y for YHalfCube
-  const hy = blockType === "Y" ? 0.25 : 0.5;
+  const [sx, sy, sz] = blockThreeSize(blockType);
+  const hx = sx / 2, hy = sy / 2, hz = sz / 2;
   // 8 corners of the box centered at origin
   const c = [
     [-hx, -hy, -hz], [hx, -hy, -hz], [hx, hy, -hz], [-hx, hy, -hz], // front face (z=-hz)
@@ -57,6 +56,11 @@ export function GhostBlock() {
 
   const deleteOutline = useMemo(() => createDeleteOutlineGeometry(activeType), [activeType]);
   const ghostGeometry = useMemo(() => createBlockGeometry(activeType), [activeType]);
+  const ghostEdges = useMemo(() => {
+    const fullBox = new THREE.BoxGeometry(...blockThreeSize(activeType));
+    return new THREE.EdgesGeometry(fullBox);
+  }, [activeType]);
+  const isPipe = (PIPE_TYPES as readonly string[]).includes(activeType);
   const ghostMaterial = useMemo(
     () =>
       new THREE.MeshStandardMaterial({
@@ -64,8 +68,9 @@ export function GhostBlock() {
         transparent: true,
         opacity: 0.4,
         depthWrite: false,
+        side: isPipe ? THREE.DoubleSide : THREE.FrontSide,
       }),
-    [],
+    [isPipe],
   );
 
   if (!hoveredGridPos) return null;
@@ -79,7 +84,7 @@ export function GhostBlock() {
         <>
           {/* Transparent red tint — block colors show through */}
           <mesh scale={1.01}>
-            <boxGeometry args={[1, activeType === "Y" ? 0.5 : 1, 1]} />
+            <boxGeometry args={blockThreeSize(activeType)} />
             <meshStandardMaterial
               color="#ff4444"
               transparent
@@ -94,10 +99,16 @@ export function GhostBlock() {
           </lineSegments>
         </>
       ) : (
-        <mesh>
-          <primitive object={ghostGeometry} attach="geometry" />
-          <primitive object={ghostMaterial} attach="material" />
-        </mesh>
+        <>
+          <mesh>
+            <primitive object={ghostGeometry} attach="geometry" />
+            <primitive object={ghostMaterial} attach="material" />
+          </mesh>
+          <lineSegments>
+            <primitive object={ghostEdges} attach="geometry" />
+            <lineBasicMaterial color="#000000" transparent opacity={0.4} depthWrite={false} />
+          </lineSegments>
+        </>
       )}
     </group>
   );

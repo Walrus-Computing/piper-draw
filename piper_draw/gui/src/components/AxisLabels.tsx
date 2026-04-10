@@ -1,6 +1,6 @@
 import { Html, Line } from "@react-three/drei";
 
-const AXIS_LENGTH = 5;
+const AXIS_LENGTH = 20;
 const ORIGIN: [number, number, number] = [0, 0, 0];
 
 const axes: { label: string; color: string; end: [number, number, number] }[] = [
@@ -14,7 +14,7 @@ export function AxisLabels() {
     <group>
       {axes.map(({ label, color, end }) => (
         <group key={label}>
-          <Line points={[ORIGIN, end]} color={color} lineWidth={1} />
+          <Line points={[ORIGIN, end]} color={color} lineWidth={2} />
           <Html
             position={end}
             center

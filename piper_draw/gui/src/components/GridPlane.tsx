@@ -31,6 +31,8 @@ export function GridPlane() {
     setHoveredGridPos(null);
   };
 
+  if (mode === "delete") return null;
+
   return (
     <mesh
       rotation-x={-Math.PI / 2}

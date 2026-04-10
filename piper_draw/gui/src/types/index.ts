@@ -13,8 +13,11 @@ export interface Position3D {
 export const CUBE_TYPES = ["XZZ", "ZXZ", "ZXX", "XXZ", "ZZX", "XZX"] as const;
 export type CubeType = (typeof CUBE_TYPES)[number];
 
-export type BlockType = CubeType | "Y";
-export const ALL_BLOCK_TYPES = [...CUBE_TYPES, "Y"] as const;
+export const PIPE_TYPES = ["ZXO"] as const;
+export type PipeType = (typeof PIPE_TYPES)[number];
+
+export type BlockType = CubeType | "Y" | PipeType;
+export const ALL_BLOCK_TYPES = [...CUBE_TYPES, "Y", ...PIPE_TYPES] as const;
 
 export interface Block {
   pos: Position3D;
@@ -48,7 +51,61 @@ const CUBE_FACE_COLORS: Record<CubeType, [THREE.Color, THREE.Color, THREE.Color]
  *   TQEC Y-axis faces -> Three.js Z-axis faces (+Z, -Z)  (Y -> -Z)
  *   TQEC Z-axis faces -> Three.js Y-axis faces (+Y, -Y)  (Z -> +Y)
  */
+/**
+ * Three.js dimensions for each block type: [x, y, z].
+ * TQEC (X, Y, Z) → Three.js (X, Y=Z_tqec, Z=Y_tqec).
+ */
+export function blockThreeSize(blockType: BlockType): [number, number, number] {
+  switch (blockType) {
+    case "Y": return [1, 0.5, 1];
+    case "ZXO": return [1, 2, 1];
+    default: return [1, 1, 1];
+  }
+}
+
 export function createBlockGeometry(blockType: BlockType): THREE.BoxGeometry {
+  if (blockType === "ZXO") {
+    // ZXO pipe: 1×1×2 TQEC → 1×2×1 Three.js
+    // Open in TQEC Z → Three.js Y (+Y, -Y faces removed)
+    // TQEC X = Z basis (blue), TQEC Y = X basis (red)
+    const geo = new THREE.BoxGeometry(1, 2, 1);
+    const colors = new Float32Array(24 * 3);
+
+    // Face order: +X(0), -X(1), +Y(2), -Y(3), +Z(4), -Z(5)
+    const faceColors = [
+      Z_COLOR, Z_COLOR, // +X, -X = TQEC X = Z basis (blue)
+      null, null,       // +Y, -Y = TQEC Z = open (removed)
+      X_COLOR, X_COLOR, // +Z, -Z = TQEC Y = X basis (red)
+    ];
+
+    for (let face = 0; face < 6; face++) {
+      const c = faceColors[face];
+      if (!c) continue;
+      for (let v = 0; v < 4; v++) {
+        const idx = (face * 4 + v) * 3;
+        colors[idx] = c.r;
+        colors[idx + 1] = c.g;
+        colors[idx + 2] = c.b;
+      }
+    }
+
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+    // Remove open faces (+Y, -Y) by rebuilding index without groups 2 and 3
+    const oldIndex = geo.index!;
+    const newIndices: number[] = [];
+    for (let face = 0; face < 6; face++) {
+      if (face === 2 || face === 3) continue; // skip open faces
+      for (let i = 0; i < 6; i++) {
+        newIndices.push(oldIndex.getX(face * 6 + i));
+      }
+    }
+    geo.setIndex(newIndices);
+    geo.clearGroups();
+
+    return geo;
+  }
+
   if (blockType === "Y") {
     // YHalfCube: 1×1×0.5 in TQEC → 1 (X) × 0.5 (Y) × 1 (Z) in Three.js, all green
     const geo = new THREE.BoxGeometry(1, 0.5, 1);
@@ -106,13 +163,17 @@ export function posKey(pos: Position3D): string {
  * YHalfCube is half-height in Z, so its Y center is at pos.z + 0.25.
  */
 export function tqecToThree(pos: Position3D, blockType?: BlockType): [number, number, number] {
-  const yOffset = blockType === "Y" ? 0.25 : 0.5;
-  return [pos.x + 0.5, pos.z + yOffset, -(pos.y + 0.5)];
+  const h = blockType ? blockHeight(blockType) : 1;
+  return [pos.x + 0.5, pos.z + h / 2, -(pos.y + 0.5)];
 }
 
 /** TQEC Z-height for each block type. */
 export function blockHeight(blockType: BlockType): number {
-  return blockType === "Y" ? 0.5 : 1;
+  switch (blockType) {
+    case "Y": return 0.5;
+    case "ZXO": return 2;
+    default: return 1;
+  }
 }
 
 export function snapToCell(value: number): number {

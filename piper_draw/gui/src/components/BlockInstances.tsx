@@ -5,8 +5,10 @@ import { useBlockStore } from "../stores/blockStore";
 import {
   tqecToThree,
   createBlockGeometry,
+  blockThreeSize,
   getAdjacentPos,
   ALL_BLOCK_TYPES,
+  PIPE_TYPES,
 } from "../types";
 import type { BlockType, Block } from "../types";
 
@@ -20,28 +22,77 @@ function TypedInstances({
   blocks: Block[];
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
+  const raycastRef = useRef<THREE.InstancedMesh>(null!);
   const blocksRef = useRef(blocks);
   blocksRef.current = blocks;
 
+  const isPipe = (PIPE_TYPES as readonly string[]).includes(cubeType);
   const geometry = useMemo(() => createBlockGeometry(cubeType), [cubeType]);
+  // Full box geometry for edges and pipe raycast (includes open faces)
+  const fullBoxGeometry = useMemo(
+    () => new THREE.BoxGeometry(...blockThreeSize(cubeType)),
+    [cubeType],
+  );
+  const edgeTemplate = useMemo(() => {
+    const edges = new THREE.EdgesGeometry(fullBoxGeometry);
+    return edges.getAttribute("position").array as Float32Array;
+  }, [fullBoxGeometry]);
   const material = useMemo(
-    () => new THREE.MeshStandardMaterial({ vertexColors: true }),
+    () => new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      side: isPipe ? THREE.DoubleSide : THREE.FrontSide,
+    }),
+    [isPipe],
+  );
+  // Invisible material for pipe raycast mesh (open faces)
+  const invisibleMaterial = useMemo(
+    () => new THREE.MeshBasicMaterial({ opacity: 0, transparent: true, depthWrite: false }),
+    [],
+  );
+  const edgesMaterial = useMemo(
+    () => new THREE.LineBasicMaterial({ color: 0x000000 }),
     [],
   );
   const dummy = useMemo(() => new THREE.Matrix4(), []);
 
+  // Merged edge geometry: one BufferGeometry with all edge lines for all blocks
+  const mergedEdges = useMemo(() => {
+    if (blocks.length === 0) return null;
+    const vertsPerBlock = edgeTemplate.length; // floats (x,y,z per vertex)
+    const merged = new Float32Array(blocks.length * vertsPerBlock);
+    for (let i = 0; i < blocks.length; i++) {
+      const [tx, ty, tz] = tqecToThree(blocks[i].pos, cubeType);
+      const offset = i * vertsPerBlock;
+      for (let j = 0; j < vertsPerBlock; j += 3) {
+        merged[offset + j] = edgeTemplate[j] + tx;
+        merged[offset + j + 1] = edgeTemplate[j + 1] + ty;
+        merged[offset + j + 2] = edgeTemplate[j + 2] + tz;
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(merged, 3));
+    return geo;
+  }, [blocks, edgeTemplate, cubeType]);
+
   useLayoutEffect(() => {
     const mesh = meshRef.current;
+    const raycast = raycastRef.current;
     if (!mesh) return;
 
     for (let i = 0; i < blocks.length; i++) {
       const [tx, ty, tz] = tqecToThree(blocks[i].pos, cubeType);
       dummy.makeTranslation(tx, ty, tz);
       mesh.setMatrixAt(i, dummy);
+      if (raycast) raycast.setMatrixAt(i, dummy);
     }
     mesh.count = blocks.length;
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
+    if (raycast) {
+      raycast.count = blocks.length;
+      raycast.instanceMatrix.needsUpdate = true;
+      raycast.computeBoundingSphere();
+    }
   }, [blocks, dummy]);
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
@@ -76,13 +127,32 @@ function TypedInstances({
 
   if (blocks.length === 0) return null;
 
+  const maxCount = Math.max(MAX_INITIAL, blocks.length);
+
   return (
-    <instancedMesh
-      ref={meshRef}
-      args={[geometry, material, Math.max(MAX_INITIAL, blocks.length)]}
-      onPointerMove={handlePointerMove}
-      onClick={handleClick}
-    />
+    <>
+      <instancedMesh
+        ref={meshRef}
+        args={[geometry, material, maxCount]}
+        onPointerMove={handlePointerMove}
+        onClick={handleClick}
+      />
+      {/* Invisible full-box mesh for pipe raycast on open faces */}
+      {isPipe && (
+        <instancedMesh
+          ref={raycastRef}
+          args={[fullBoxGeometry, invisibleMaterial, maxCount]}
+          onPointerMove={handlePointerMove}
+          onClick={handleClick}
+        />
+      )}
+      {mergedEdges && (
+        <lineSegments>
+          <primitive object={mergedEdges} attach="geometry" />
+          <primitive object={edgesMaterial} attach="material" />
+        </lineSegments>
+      )}
+    </>
   );
 }
 

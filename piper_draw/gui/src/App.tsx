@@ -12,7 +12,7 @@ import { AxisLabels } from "./components/AxisLabels";
 import { FpsDisplay, FpsSampler } from "./components/FpsCounter";
 import { OrientationGizmo } from "./components/OrientationGizmo";
 import { useBlockStore } from "./stores/blockStore";
-import { CUBE_TYPES } from "./types";
+import { CUBE_TYPES, PIPE_TYPES } from "./types";
 import type { BlockType } from "./types";
 
 const X_HEX = "#ff4444";
@@ -47,23 +47,23 @@ function CubePreview({ cubeType }: { cubeType: string }) {
       <polygon
         points={`${cx},${cy - topH} ${cx + dx},${cy} ${cx},${cy + topH} ${cx - dx},${cy}`}
         fill={zColor}
-        stroke="#0003"
-        strokeWidth={0.5}
+        stroke="#000"
+        strokeWidth={0.7}
       />
       {/* Left face (TQEC X-axis) — slightly darkened */}
       <polygon
         points={`${cx - dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
         fill={xColor}
-        stroke="#0003"
-        strokeWidth={0.5}
+        stroke="#000"
+        strokeWidth={0.7}
         opacity={0.85}
       />
       {/* Right face (TQEC Y-axis) — slightly more darkened */}
       <polygon
         points={`${cx + dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
         fill={yColor}
-        stroke="#0003"
-        strokeWidth={0.5}
+        stroke="#000"
+        strokeWidth={0.7}
         opacity={0.7}
       />
     </svg>
@@ -88,23 +88,88 @@ function YHalfCubePreview() {
       <polygon
         points={`${cx},${cy - topH} ${cx + dx},${cy} ${cx},${cy + topH} ${cx - dx},${cy}`}
         fill={Y_HEX}
-        stroke="#0003"
-        strokeWidth={0.5}
+        stroke="#000"
+        strokeWidth={0.7}
       />
       {/* Left face */}
       <polygon
         points={`${cx - dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
         fill={Y_HEX}
-        stroke="#0003"
-        strokeWidth={0.5}
+        stroke="#000"
+        strokeWidth={0.7}
         opacity={0.85}
       />
       {/* Right face */}
       <polygon
         points={`${cx + dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
         fill={Y_HEX}
-        stroke="#0003"
-        strokeWidth={0.5}
+        stroke="#000"
+        strokeWidth={0.7}
+        opacity={0.7}
+      />
+    </svg>
+  );
+}
+
+/**
+ * Pipe preview colors: [X-axis color, Y-axis color, Z-axis open].
+ * Open faces shown as dashed outline only.
+ */
+const PIPE_COLORS: Record<string, { left: string; right: string; topOpen: boolean }> = {
+  ZXO: { left: Z_HEX, right: X_HEX, topOpen: true },
+};
+
+/** Isometric pipe preview — taller cuboid with open top face. */
+function PipePreview({ pipeType }: { pipeType: string }) {
+  const { left, right, topOpen } = PIPE_COLORS[pipeType];
+  // Double height in Z → double sideH
+  const dx = 9, topH = 5, sideH = 20;
+  const cx = 11, cy = 7;
+  const svgW = cx * 2, svgH = cy + topH + sideH + 1;
+  return (
+    <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} style={{ display: "block", margin: "2px auto 0" }}>
+      {topOpen && (
+        <>
+          {/* Inner right wall (TQEC Y-axis) visible through open top */}
+          <polygon
+            points={`${cx - dx},${cy} ${cx},${cy - topH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
+            fill={right}
+            stroke="#000"
+            strokeWidth={0.7}
+            opacity={0.5}
+          />
+          {/* Inner left wall (TQEC X-axis) visible through open top */}
+          <polygon
+            points={`${cx + dx},${cy} ${cx},${cy - topH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
+            fill={left}
+            stroke="#000"
+            strokeWidth={0.7}
+            opacity={0.6}
+          />
+        </>
+      )}
+      {/* Top face — open: just outline, no fill */}
+      <polygon
+        points={`${cx},${cy - topH} ${cx + dx},${cy} ${cx},${cy + topH} ${cx - dx},${cy}`}
+        fill={topOpen ? "none" : "#888"}
+        stroke="#000"
+        strokeWidth={0.7}
+        strokeDasharray={topOpen ? "2 1.5" : undefined}
+      />
+      {/* Left face (TQEC X-axis) */}
+      <polygon
+        points={`${cx - dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
+        fill={left}
+        stroke="#000"
+        strokeWidth={0.7}
+        opacity={0.85}
+      />
+      {/* Right face (TQEC Y-axis) */}
+      <polygon
+        points={`${cx + dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
+        fill={right}
+        stroke="#000"
+        strokeWidth={0.7}
         opacity={0.7}
       />
     </svg>
@@ -221,6 +286,29 @@ function Toolbar({ onResetCamera }: { onResetCamera: () => void }) {
             Y
             <YHalfCubePreview />
           </button>
+        </div>
+      </div>
+
+      {/* Separator */}
+      <div style={{ width: 1, background: "#ddd" }} />
+
+      {/* Pipes group */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+        <span style={groupLabelStyle}>Pipes</span>
+        <div style={{ display: "flex", gap: "4px" }}>
+          {PIPE_TYPES.map((pt) => (
+            <button
+              key={pt}
+              onClick={() => {
+                setCubeType(pt as BlockType);
+                setMode("place");
+              }}
+              style={blockBtnStyle(cubeType === pt && mode === "place")}
+            >
+              {pt}
+              <PipePreview pipeType={pt} />
+            </button>
+          ))}
         </div>
       </div>
     </div>
