@@ -40,16 +40,15 @@ function TypedInstances({
   blocks: Block[];
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
-  const raycastRef = useRef<THREE.InstancedMesh>(null!);
   const blocksRef = useRef(blocks);
   blocksRef.current = blocks;
 
   const isPipe = (PIPE_TYPES as readonly string[]).includes(cubeType);
   const geometry = useMemo(() => createBlockGeometry(cubeType), [cubeType]);
-  // Full box geometry for edges and pipe raycast (includes open faces)
+  // Full box geometry for pipe raycast (includes open faces)
   const fullBoxGeometry = useMemo(
-    () => new THREE.BoxGeometry(...blockThreeSize(cubeType)),
-    [cubeType],
+    () => isPipe ? new THREE.BoxGeometry(...blockThreeSize(cubeType)) : null,
+    [cubeType, isPipe],
   );
   const edgeTemplate = useMemo(() => {
     const edges = createBlockEdges(cubeType);
@@ -61,11 +60,6 @@ function TypedInstances({
       side: isPipe ? THREE.DoubleSide : THREE.FrontSide,
     }),
     [isPipe],
-  );
-  // Invisible material for pipe raycast mesh (open faces)
-  const invisibleMaterial = useMemo(
-    () => new THREE.MeshBasicMaterial({ opacity: 0, transparent: true, depthWrite: false }),
-    [],
   );
   const edgesMaterial = useMemo(
     () => new THREE.LineBasicMaterial({ color: 0x000000 }),
@@ -94,24 +88,28 @@ function TypedInstances({
 
   useLayoutEffect(() => {
     const mesh = meshRef.current;
-    const raycast = raycastRef.current;
     if (!mesh) return;
+
+    // For pipes, override raycast to use the full box geometry (including open faces)
+    if (isPipe && fullBoxGeometry) {
+      const originalRaycast = THREE.InstancedMesh.prototype.raycast;
+      const realGeo = mesh.geometry;
+      mesh.raycast = function (raycaster, intersects) {
+        this.geometry = fullBoxGeometry;
+        originalRaycast.call(this, raycaster, intersects);
+        this.geometry = realGeo;
+      };
+    }
 
     for (let i = 0; i < blocks.length; i++) {
       const [tx, ty, tz] = tqecToThree(blocks[i].pos, cubeType);
       dummy.makeTranslation(tx, ty, tz);
       mesh.setMatrixAt(i, dummy);
-      if (raycast) raycast.setMatrixAt(i, dummy);
     }
     mesh.count = blocks.length;
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
-    if (raycast) {
-      raycast.count = blocks.length;
-      raycast.instanceMatrix.needsUpdate = true;
-      raycast.computeBoundingSphere();
-    }
-  }, [blocks, dummy]);
+  }, [blocks, dummy, isPipe, fullBoxGeometry]);
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
@@ -155,17 +153,9 @@ function TypedInstances({
       <instancedMesh
         ref={meshRef}
         args={[geometry, material, maxCount]}
-        {...(!isPipe ? { onPointerMove: handlePointerMove, onClick: handleClick } : { raycast: () => {} })}
+        onPointerMove={handlePointerMove}
+        onClick={handleClick}
       />
-      {/* Invisible full-box mesh for pipe raycast — sole raycast target for pipes */}
-      {isPipe && (
-        <instancedMesh
-          ref={raycastRef}
-          args={[fullBoxGeometry, invisibleMaterial, maxCount]}
-          onPointerMove={handlePointerMove}
-          onClick={handleClick}
-        />
-      )}
       {mergedEdges && (
         <lineSegments>
           <primitive object={mergedEdges} attach="geometry" />
