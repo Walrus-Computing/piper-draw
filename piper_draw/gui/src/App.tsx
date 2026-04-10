@@ -12,26 +12,25 @@ import { AxisLabels } from "./components/AxisLabels";
 import { FpsDisplay, FpsSampler } from "./components/FpsCounter";
 import { OrientationGizmo } from "./components/OrientationGizmo";
 import { useBlockStore } from "./stores/blockStore";
-import type { Mode } from "./stores/blockStore";
+import { CUBE_TYPES } from "./types";
+import type { CubeType } from "./types";
+
+const btnStyle = (active: boolean) => ({
+  padding: "4px 12px",
+  fontSize: "13px",
+  fontFamily: "sans-serif" as const,
+  cursor: "pointer" as const,
+  border: active ? "2px solid #4a9eff" : "1px solid #ccc",
+  borderRadius: "4px",
+  background: active ? "#e8f0fe" : "#fff",
+  fontWeight: active ? ("bold" as const) : ("normal" as const),
+});
 
 function Toolbar() {
   const mode = useBlockStore((s) => s.mode);
   const setMode = useBlockStore((s) => s.setMode);
-
-  const btn = (m: Mode, label: string) => ({
-    onClick: () => setMode(m),
-    style: {
-      padding: "4px 12px",
-      fontSize: "13px",
-      fontFamily: "sans-serif",
-      cursor: "pointer" as const,
-      border: mode === m ? "2px solid #4a9eff" : "1px solid #ccc",
-      borderRadius: "4px",
-      background: mode === m ? "#e8f0fe" : "#fff",
-      fontWeight: mode === m ? ("bold" as const) : ("normal" as const),
-    },
-    children: label,
-  });
+  const cubeType = useBlockStore((s) => s.cubeType);
+  const setCubeType = useBlockStore((s) => s.setCubeType);
 
   return (
     <div
@@ -43,10 +42,29 @@ function Toolbar() {
         zIndex: 1,
         display: "flex",
         gap: "6px",
+        alignItems: "center",
       }}
     >
-      <button {...btn("place", "Place")} />
-      <button {...btn("delete", "Delete")} />
+      <button onClick={() => setMode("place")} style={btnStyle(mode === "place")}>
+        Place
+      </button>
+      <button onClick={() => setMode("delete")} style={btnStyle(mode === "delete")}>
+        Delete
+      </button>
+      <div style={{ marginLeft: "8px", display: "flex", gap: "4px" }}>
+        {CUBE_TYPES.map((ct) => (
+          <button
+            key={ct}
+            onClick={() => {
+              setCubeType(ct as CubeType);
+              setMode("place");
+            }}
+            style={btnStyle(cubeType === ct && mode === "place")}
+          >
+            {ct}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
