@@ -135,10 +135,9 @@ function TypedInstances({
       <instancedMesh
         ref={meshRef}
         args={[geometry, material, maxCount]}
-        onPointerMove={handlePointerMove}
-        onClick={handleClick}
+        {...(!isPipe ? { onPointerMove: handlePointerMove, onClick: handleClick } : {})}
       />
-      {/* Invisible full-box mesh for pipe raycast on open faces */}
+      {/* Invisible full-box mesh for pipe raycast — sole raycast target for pipes */}
       {isPipe && (
         <instancedMesh
           ref={raycastRef}

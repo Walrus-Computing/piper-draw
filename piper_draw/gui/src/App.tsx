@@ -114,132 +114,233 @@ function YHalfCubePreview() {
 const H_HEX = "#ffcc00";
 
 /**
- * Pipe preview colors: [X-axis color, Y-axis color, Z-axis open].
- * Open faces shown as dashed outline only.
+ * Pipe preview colors mapped to isometric faces.
+ * left = TQEC X-axis, right = TQEC Y-axis, top = TQEC Z-axis.
+ * openDir indicates which TQEC axis is open (z = top open, y = right open).
  */
-const PIPE_COLORS: Record<string, { left: string; right: string; topOpen: boolean; hadamard?: boolean }> = {
-  ZXO: { left: Z_HEX, right: X_HEX, topOpen: true },
-  XZO: { left: X_HEX, right: Z_HEX, topOpen: true },
-  ZXOH: { left: Z_HEX, right: X_HEX, topOpen: true, hadamard: true },
-  XZOH: { left: X_HEX, right: Z_HEX, topOpen: true, hadamard: true },
+const PIPE_COLORS: Record<string, { left: string; right: string; top: string; openDir: "z" | "y" | "x"; hadamard?: boolean }> = {
+  ZXO:  { left: Z_HEX, right: X_HEX, top: "",     openDir: "z" },
+  XZO:  { left: X_HEX, right: Z_HEX, top: "",     openDir: "z" },
+  ZXOH: { left: Z_HEX, right: X_HEX, top: "",     openDir: "z", hadamard: true },
+  XZOH: { left: X_HEX, right: Z_HEX, top: "",     openDir: "z", hadamard: true },
+  ZOX:  { left: Z_HEX, right: "",    top: X_HEX,  openDir: "y" },
+  XOZ:  { left: X_HEX, right: "",    top: Z_HEX,  openDir: "y" },
+  ZOXH: { left: Z_HEX, right: "",    top: X_HEX,  openDir: "y", hadamard: true },
+  XOZH: { left: X_HEX, right: "",    top: Z_HEX,  openDir: "y", hadamard: true },
+  OZX:  { left: "",     right: Z_HEX, top: X_HEX, openDir: "x" },
+  OXZ:  { left: "",     right: X_HEX, top: Z_HEX, openDir: "x" },
+  OZXH: { left: "",     right: Z_HEX, top: X_HEX, openDir: "x", hadamard: true },
+  OXZH: { left: "",     right: X_HEX, top: Z_HEX, openDir: "x", hadamard: true },
 };
 
-/** Isometric pipe preview — taller cuboid with open top face. */
+/** Isometric pipe preview — cuboid with one open face. */
 function PipePreview({ pipeType }: { pipeType: string }) {
-  const { left, right, topOpen, hadamard } = PIPE_COLORS[pipeType];
-  // Double height in Z → double sideH
+  const { left, right, top, openDir, hadamard } = PIPE_COLORS[pipeType];
+
+  if (openDir === "z") return <ZPipePreviewSvg left={left} right={right} hadamard={hadamard} />;
+  if (openDir === "y") return <YPipePreviewSvg left={left} top={top} hadamard={hadamard} />;
+  return <XPipePreviewSvg right={right} top={top} hadamard={hadamard} />;
+}
+
+/** Z-open pipe preview: tall cuboid, top face open. */
+function ZPipePreviewSvg({ left, right, hadamard }: { left: string; right: string; hadamard?: boolean }) {
   const dx = 9, topH = 5, sideH = 20;
   const cx = 11, cy = 7;
   const svgW = cx * 2, svgH = cy + topH + sideH + 1;
-  // For H pipes, colors swap above the band
   const leftAbove = hadamard ? right : left;
   const rightAbove = hadamard ? left : right;
-  // Band position at center of side faces
   const bandH = 2;
-  const midL = cy + sideH / 2;           // center on left edge
-  const midR = cy + topH + sideH / 2;    // center on right edge (isometric offset)
+  const midL = cy + sideH / 2;
+  const midR = cy + topH + sideH / 2;
 
   return (
     <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} style={{ display: "block", margin: "2px auto 0" }}>
-      {topOpen && (
-        <>
-          {/* Inner right wall (TQEC Y-axis) visible through open top — shows "above" color */}
-          <polygon
-            points={`${cx - dx},${cy} ${cx},${cy - topH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
-            fill={rightAbove}
-            stroke="#000"
-            strokeWidth={0.7}
-            opacity={0.5}
-          />
-          {/* Inner left wall (TQEC X-axis) visible through open top — shows "above" color */}
-          <polygon
-            points={`${cx + dx},${cy} ${cx},${cy - topH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
-            fill={leftAbove}
-            stroke="#000"
-            strokeWidth={0.7}
-            opacity={0.6}
-          />
-        </>
-      )}
-      {/* Top face — open: just outline, no fill */}
-      <polygon
-        points={`${cx},${cy - topH} ${cx + dx},${cy} ${cx},${cy + topH} ${cx - dx},${cy}`}
-        fill={topOpen ? "none" : "#888"}
-        stroke="#000"
-        strokeWidth={0.7}
-        strokeDasharray={topOpen ? "2 1.5" : undefined}
-      />
+      {/* Inner walls visible through open top */}
+      <polygon points={`${cx - dx},${cy} ${cx},${cy - topH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
+        fill={rightAbove} stroke="#000" strokeWidth={0.7} opacity={0.5} />
+      <polygon points={`${cx + dx},${cy} ${cx},${cy - topH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
+        fill={leftAbove} stroke="#000" strokeWidth={0.7} opacity={0.6} />
+      {/* Top face — dashed outline */}
+      <polygon points={`${cx},${cy - topH} ${cx + dx},${cy} ${cx},${cy + topH} ${cx - dx},${cy}`}
+        fill="none" stroke="#000" strokeWidth={0.7} strokeDasharray="2 1.5" />
       {hadamard ? (
         <>
-          {/* Left face: top half (above band, swapped) */}
-          <polygon
-            points={`${cx - dx},${cy} ${cx},${cy + topH} ${cx},${midR - bandH} ${cx - dx},${midL - bandH}`}
-            fill={leftAbove}
-            stroke="#000"
-            strokeWidth={0.7}
-            opacity={0.85}
-          />
+          <polygon points={`${cx - dx},${cy} ${cx},${cy + topH} ${cx},${midR - bandH} ${cx - dx},${midL - bandH}`}
+            fill={leftAbove} stroke="#000" strokeWidth={0.7} opacity={0.85} />
+          <polygon points={`${cx - dx},${midL - bandH} ${cx},${midR - bandH} ${cx},${midR + bandH} ${cx - dx},${midL + bandH}`}
+            fill={H_HEX} stroke="#000" strokeWidth={0.5} opacity={0.9} />
+          <polygon points={`${cx - dx},${midL + bandH} ${cx},${midR + bandH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
+            fill={left} stroke="#000" strokeWidth={0.7} opacity={0.85} />
+          <polygon points={`${cx + dx},${cy} ${cx},${cy + topH} ${cx},${midR - bandH} ${cx + dx},${midL - bandH}`}
+            fill={rightAbove} stroke="#000" strokeWidth={0.7} opacity={0.7} />
+          <polygon points={`${cx + dx},${midL - bandH} ${cx},${midR - bandH} ${cx},${midR + bandH} ${cx + dx},${midL + bandH}`}
+            fill={H_HEX} stroke="#000" strokeWidth={0.5} opacity={0.8} />
+          <polygon points={`${cx + dx},${midL + bandH} ${cx},${midR + bandH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
+            fill={right} stroke="#000" strokeWidth={0.7} opacity={0.7} />
+        </>
+      ) : (
+        <>
+          <polygon points={`${cx - dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
+            fill={left} stroke="#000" strokeWidth={0.7} opacity={0.85} />
+          <polygon points={`${cx + dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
+            fill={right} stroke="#000" strokeWidth={0.7} opacity={0.7} />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/** Y-open pipe preview: wide cuboid, right face open. */
+function YPipePreviewSvg({ left, top, hadamard }: { left: string; top: string; hadamard?: boolean }) {
+  // Isometric axes: TQEC X → left (dxL, topHL), TQEC Y → right (dxR, topHR, doubled), TQEC Z → height (sideH)
+  const dxL = 6, topHL = 3;   // per unit TQEC X
+  const dxR = 12, topHR = 6;  // 2 units TQEC Y
+  const sideH = 7;
+  const cx = 7, cy = 2;
+
+  // Top face corners: back, right (+2Y), front (+X+2Y), left (+X)
+  const bk = [cx, cy];
+  const rt = [cx + dxR, cy + topHR];
+  const fr = [cx - dxL + dxR, cy + topHL + topHR];
+  const lt = [cx - dxL, cy + topHL];
+
+  const leftAbove = hadamard ? top : left;
+  const topAbove = hadamard ? left : top;
+
+  // Band at midpoint of TQEC Y direction on each face
+  const bandW = 1; // half-width in SVG units along Y direction
+
+  // Left face band midpoints (halfway along the TQEC Y edge of the left face)
+  const lf_midT = [(lt[0] + fr[0]) / 2, (lt[1] + fr[1]) / 2]; // top edge mid
+  const lf_midB = [lf_midT[0], lf_midT[1] + sideH];            // bottom edge mid
+
+  // Top face band midpoints: midpoint of bk→rt edge and lt→fr edge
+  const tf_bkrt_mid = [(bk[0] + rt[0]) / 2, (bk[1] + rt[1]) / 2];
+  const tf_ltfr_mid = [(lt[0] + fr[0]) / 2, (lt[1] + fr[1]) / 2];
+
+  const svgW = rt[0] + 1;
+  const svgH = fr[1] + sideH + 1;
+
+  return (
+    <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} style={{ display: "block", margin: "2px auto 0" }}>
+      {/* Inner back wall visible through right opening */}
+      <polygon points={`${bk[0]},${bk[1]} ${rt[0]},${rt[1]} ${rt[0]},${rt[1] + sideH} ${bk[0]},${bk[1] + sideH}`}
+        fill={leftAbove} stroke="#000" strokeWidth={0.7} opacity={0.5} />
+      {/* Bottom face (TQEC Z-axis) — visible through right opening */}
+      <polygon points={`${bk[0]},${bk[1] + sideH} ${rt[0]},${rt[1] + sideH} ${fr[0]},${fr[1] + sideH} ${lt[0]},${lt[1] + sideH}`}
+        fill={top} stroke="#000" strokeWidth={0.7} opacity={0.6} />
+      {/* Top face (TQEC Z-axis) */}
+      <polygon points={`${bk[0]},${bk[1]} ${rt[0]},${rt[1]} ${fr[0]},${fr[1]} ${lt[0]},${lt[1]}`}
+        fill={hadamard ? undefined : top} stroke="#000" strokeWidth={0.7} />
+      {hadamard ? (
+        <>
+          {/* Top face: back half (original) */}
+          <polygon points={`${bk[0]},${bk[1]} ${tf_bkrt_mid[0] - bandW},${tf_bkrt_mid[1] - bandW * 0.5} ${tf_ltfr_mid[0] - bandW},${tf_ltfr_mid[1] - bandW * 0.5} ${lt[0]},${lt[1]}`}
+            fill={top} stroke="#000" strokeWidth={0.5} />
+          {/* Top face: yellow band */}
+          <polygon points={`${tf_bkrt_mid[0] - bandW},${tf_bkrt_mid[1] - bandW * 0.5} ${tf_bkrt_mid[0] + bandW},${tf_bkrt_mid[1] + bandW * 0.5} ${tf_ltfr_mid[0] + bandW},${tf_ltfr_mid[1] + bandW * 0.5} ${tf_ltfr_mid[0] - bandW},${tf_ltfr_mid[1] - bandW * 0.5}`}
+            fill={H_HEX} stroke="#000" strokeWidth={0.5} />
+          {/* Top face: front half (swapped) */}
+          <polygon points={`${tf_bkrt_mid[0] + bandW},${tf_bkrt_mid[1] + bandW * 0.5} ${rt[0]},${rt[1]} ${fr[0]},${fr[1]} ${tf_ltfr_mid[0] + bandW},${tf_ltfr_mid[1] + bandW * 0.5}`}
+            fill={topAbove} stroke="#000" strokeWidth={0.5} />
+          {/* Left face: back half (original) */}
+          <polygon points={`${lt[0]},${lt[1]} ${lf_midT[0] - bandW},${lf_midT[1] - bandW * 0.5} ${lf_midB[0] - bandW},${lf_midB[1] - bandW * 0.5} ${lt[0]},${lt[1] + sideH}`}
+            fill={left} stroke="#000" strokeWidth={0.7} />
           {/* Left face: yellow band */}
-          <polygon
-            points={`${cx - dx},${midL - bandH} ${cx},${midR - bandH} ${cx},${midR + bandH} ${cx - dx},${midL + bandH}`}
-            fill={H_HEX}
-            stroke="#000"
-            strokeWidth={0.5}
-            opacity={0.9}
-          />
-          {/* Left face: bottom half (below band, original) */}
-          <polygon
-            points={`${cx - dx},${midL + bandH} ${cx},${midR + bandH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
-            fill={left}
-            stroke="#000"
-            strokeWidth={0.7}
-            opacity={0.85}
-          />
-          {/* Right face: top half (above band, swapped) */}
-          <polygon
-            points={`${cx + dx},${cy} ${cx},${cy + topH} ${cx},${midR - bandH} ${cx + dx},${midL - bandH}`}
-            fill={rightAbove}
-            stroke="#000"
-            strokeWidth={0.7}
-            opacity={0.7}
-          />
-          {/* Right face: yellow band */}
-          <polygon
-            points={`${cx + dx},${midL - bandH} ${cx},${midR - bandH} ${cx},${midR + bandH} ${cx + dx},${midL + bandH}`}
-            fill={H_HEX}
-            stroke="#000"
-            strokeWidth={0.5}
-            opacity={0.8}
-          />
-          {/* Right face: bottom half (below band, original) */}
-          <polygon
-            points={`${cx + dx},${midL + bandH} ${cx},${midR + bandH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
-            fill={right}
-            stroke="#000"
-            strokeWidth={0.7}
-            opacity={0.7}
-          />
+          <polygon points={`${lf_midT[0] - bandW},${lf_midT[1] - bandW * 0.5} ${lf_midT[0] + bandW},${lf_midT[1] + bandW * 0.5} ${lf_midB[0] + bandW},${lf_midB[1] + bandW * 0.5} ${lf_midB[0] - bandW},${lf_midB[1] - bandW * 0.5}`}
+            fill={H_HEX} stroke="#000" strokeWidth={0.5} />
+          {/* Left face: front half (swapped) */}
+          <polygon points={`${lf_midT[0] + bandW},${lf_midT[1] + bandW * 0.5} ${fr[0]},${fr[1]} ${fr[0]},${fr[1] + sideH} ${lf_midB[0] + bandW},${lf_midB[1] + bandW * 0.5}`}
+            fill={leftAbove} stroke="#000" strokeWidth={0.7} />
         </>
       ) : (
         <>
           {/* Left face (TQEC X-axis) */}
-          <polygon
-            points={`${cx - dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
-            fill={left}
-            stroke="#000"
-            strokeWidth={0.7}
-            opacity={0.85}
-          />
-          {/* Right face (TQEC Y-axis) */}
-          <polygon
-            points={`${cx + dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
-            fill={right}
-            stroke="#000"
-            strokeWidth={0.7}
-            opacity={0.7}
-          />
+          <polygon points={`${lt[0]},${lt[1]} ${fr[0]},${fr[1]} ${fr[0]},${fr[1] + sideH} ${lt[0]},${lt[1] + sideH}`}
+            fill={left} stroke="#000" strokeWidth={0.7} />
         </>
       )}
+      {/* Right face — dashed outline (open) */}
+      <polygon points={`${rt[0]},${rt[1]} ${fr[0]},${fr[1]} ${fr[0]},${fr[1] + sideH} ${rt[0]},${rt[1] + sideH}`}
+        fill="none" stroke="#000" strokeWidth={0.7} strokeDasharray="2 1.5" />
+    </svg>
+  );
+}
+
+/** X-open pipe preview: wide cuboid extended left, left face open. */
+function XPipePreviewSvg({ right, top, hadamard }: { right: string; top: string; hadamard?: boolean }) {
+  // Isometric: TQEC X → left (dxL, topHL, doubled for 2 units), TQEC Y → right (dxR, topHR)
+  const dxL = 12, topHL = 6;  // 2 units TQEC X
+  const dxR = 6, topHR = 3;   // 1 unit TQEC Y
+  const sideH = 7;
+  const cx = 14, cy = 2;
+
+  // Top face corners: back, right (+Y), front (+X+Y), left (+X)
+  const bk = [cx, cy];
+  const rt = [cx + dxR, cy + topHR];
+  const fr = [cx - dxL + dxR, cy + topHL + topHR];
+  const lt = [cx - dxL, cy + topHL];
+
+  const rightAbove = hadamard ? top : right;
+  const topAbove = hadamard ? right : top;
+
+  const bandW = 1;
+
+  // Right face band midpoints (halfway along TQEC X edge on right face)
+  // Right face band midpoints (halfway along TQEC X on right face = midpoint of rt→fr edge)
+  const rf_rtfr_mid = [(rt[0] + fr[0]) / 2, (rt[1] + fr[1]) / 2];
+  const rf_midTR = [rf_rtfr_mid[0], rf_rtfr_mid[1]];
+  const rf_midBR = [rf_rtfr_mid[0], rf_rtfr_mid[1] + sideH];
+
+  // Top face band midpoints: midpoint of bk→lt edge and rt→fr edge
+  const tf_bklt_mid = [(bk[0] + lt[0]) / 2, (bk[1] + lt[1]) / 2];
+  const tf_rtfr_mid = [(rt[0] + fr[0]) / 2, (rt[1] + fr[1]) / 2];
+
+  const svgW = rt[0] + 1;
+  const svgH = Math.max(lt[1], fr[1]) + sideH + 1;
+
+  return (
+    <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} style={{ display: "block", margin: "2px auto 0" }}>
+      {/* Inner back wall visible through left opening */}
+      <polygon points={`${bk[0]},${bk[1]} ${lt[0]},${lt[1]} ${lt[0]},${lt[1] + sideH} ${bk[0]},${bk[1] + sideH}`}
+        fill={rightAbove} stroke="#000" strokeWidth={0.7} opacity={0.5} />
+      {/* Bottom face visible through left opening */}
+      <polygon points={`${bk[0]},${bk[1] + sideH} ${rt[0]},${rt[1] + sideH} ${fr[0]},${fr[1] + sideH} ${lt[0]},${lt[1] + sideH}`}
+        fill={top} stroke="#000" strokeWidth={0.7} opacity={0.6} />
+      {/* Top face (TQEC Z-axis) */}
+      <polygon points={`${bk[0]},${bk[1]} ${rt[0]},${rt[1]} ${fr[0]},${fr[1]} ${lt[0]},${lt[1]}`}
+        fill={hadamard ? undefined : top} stroke="#000" strokeWidth={0.7} />
+      {hadamard ? (
+        <>
+          {/* Top face: back half (original) */}
+          <polygon points={`${bk[0]},${bk[1]} ${rt[0]},${rt[1]} ${tf_rtfr_mid[0] + bandW},${tf_rtfr_mid[1] + bandW * 0.5} ${tf_bklt_mid[0] + bandW},${tf_bklt_mid[1] + bandW * 0.5}`}
+            fill={top} stroke="#000" strokeWidth={0.5} />
+          {/* Top face: yellow band */}
+          <polygon points={`${tf_bklt_mid[0] + bandW},${tf_bklt_mid[1] + bandW * 0.5} ${tf_rtfr_mid[0] + bandW},${tf_rtfr_mid[1] + bandW * 0.5} ${tf_rtfr_mid[0] - bandW},${tf_rtfr_mid[1] - bandW * 0.5} ${tf_bklt_mid[0] - bandW},${tf_bklt_mid[1] - bandW * 0.5}`}
+            fill={H_HEX} stroke="#000" strokeWidth={0.5} />
+          {/* Top face: front half (swapped) */}
+          <polygon points={`${tf_bklt_mid[0] - bandW},${tf_bklt_mid[1] - bandW * 0.5} ${tf_rtfr_mid[0] - bandW},${tf_rtfr_mid[1] - bandW * 0.5} ${fr[0]},${fr[1]} ${lt[0]},${lt[1]}`}
+            fill={topAbove} stroke="#000" strokeWidth={0.5} />
+          {/* Right face: back half (original) */}
+          <polygon points={`${rt[0]},${rt[1]} ${rf_midTR[0] + bandW * 0.87},${rf_midTR[1] + bandW * 0.5} ${rf_midBR[0] + bandW * 0.87},${rf_midBR[1] + bandW * 0.5} ${rt[0]},${rt[1] + sideH}`}
+            fill={right} stroke="#000" strokeWidth={0.7} opacity={0.7} />
+          {/* Right face: yellow band */}
+          <polygon points={`${rf_midTR[0] + bandW * 0.87},${rf_midTR[1] + bandW * 0.5} ${rf_midTR[0] - bandW * 0.87},${rf_midTR[1] - bandW * 0.5} ${rf_midBR[0] - bandW * 0.87},${rf_midBR[1] - bandW * 0.5} ${rf_midBR[0] + bandW * 0.87},${rf_midBR[1] + bandW * 0.5}`}
+            fill={H_HEX} stroke="#000" strokeWidth={0.5} opacity={0.8} />
+          {/* Right face: front half (swapped) */}
+          <polygon points={`${rf_midTR[0] - bandW * 0.87},${rf_midTR[1] - bandW * 0.5} ${fr[0]},${fr[1]} ${fr[0]},${fr[1] + sideH} ${rf_midBR[0] - bandW * 0.87},${rf_midBR[1] - bandW * 0.5}`}
+            fill={rightAbove} stroke="#000" strokeWidth={0.7} opacity={0.7} />
+        </>
+      ) : (
+        <>
+          {/* Right face (TQEC Y-axis) */}
+          <polygon points={`${rt[0]},${rt[1]} ${fr[0]},${fr[1]} ${fr[0]},${fr[1] + sideH} ${rt[0]},${rt[1] + sideH}`}
+            fill={right} stroke="#000" strokeWidth={0.7} opacity={0.7} />
+        </>
+      )}
+      {/* Left face — dashed outline (open) */}
+      <polygon points={`${lt[0]},${lt[1]} ${fr[0]},${fr[1]} ${fr[0]},${fr[1] + sideH} ${lt[0]},${lt[1] + sideH}`}
+        fill="none" stroke="#000" strokeWidth={0.7} strokeDasharray="2 1.5" />
     </svg>
   );
 }

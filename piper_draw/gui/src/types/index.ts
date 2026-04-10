@@ -13,7 +13,7 @@ export interface Position3D {
 export const CUBE_TYPES = ["XZZ", "ZXZ", "ZXX", "XXZ", "ZZX", "XZX"] as const;
 export type CubeType = (typeof CUBE_TYPES)[number];
 
-export const PIPE_TYPES = ["ZXO", "XZO", "ZXOH", "XZOH"] as const;
+export const PIPE_TYPES = ["ZXO", "XZO", "ZXOH", "XZOH", "ZOX", "XOZ", "ZOXH", "XOZH", "OZX", "OXZ", "OZXH", "OXZH"] as const;
 export type PipeType = (typeof PIPE_TYPES)[number];
 
 export type BlockType = CubeType | "Y" | PipeType;
@@ -61,6 +61,8 @@ export function blockThreeSize(blockType: BlockType): [number, number, number] {
   switch (blockType) {
     case "Y": return [1, 0.5, 1];
     case "ZXO": case "XZO": case "ZXOH": case "XZOH": return [1, 2, 1];
+    case "ZOX": case "XOZ": case "ZOXH": case "XOZH": return [1, 1, 2];
+    case "OZX": case "OXZ": case "OZXH": case "OXZH": return [2, 1, 1];
     default: return [1, 1, 1];
   }
 }
@@ -164,11 +166,226 @@ function createZPipeGeometry(
   return geo;
 }
 
+/** Create geometry for a Y-direction pipe (open in TQEC Y / Three.js Z). */
+function createYPipeGeometry(
+  xAxisColor: THREE.Color,
+  zAxisColor: THREE.Color,
+  hadamard: boolean,
+): THREE.BufferGeometry {
+  if (!hadamard) {
+    const geo = new THREE.BoxGeometry(1, 1, 2);
+    const colors = new Float32Array(24 * 3);
+    const faceColors: (THREE.Color | null)[] = [
+      xAxisColor, xAxisColor, // +X, -X = TQEC X-axis
+      zAxisColor, zAxisColor, // +Y, -Y = TQEC Z-axis
+      null, null,              // +Z, -Z = TQEC Y-axis = open
+    ];
+    for (let face = 0; face < 6; face++) {
+      const c = faceColors[face];
+      if (!c) continue;
+      for (let v = 0; v < 4; v++) {
+        const idx = (face * 4 + v) * 3;
+        colors[idx] = c.r;
+        colors[idx + 1] = c.g;
+        colors[idx + 2] = c.b;
+      }
+    }
+    const oldIndex = geo.index!;
+    const newIndices: number[] = [];
+    for (let face = 0; face < 6; face++) {
+      if (face === 4 || face === 5) continue; // skip ±Z (open)
+      for (let i = 0; i < 6; i++) {
+        newIndices.push(oldIndex.getX(face * 6 + i));
+      }
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    geo.setIndex(newIndices);
+    geo.clearGroups();
+    return geo;
+  }
+
+  // Hadamard: each wall subdivided into 3 strips along Z (the open direction).
+  // Colors swap past the band per TQEC convention.
+  const hx = 0.5, hy = 0.5;
+  const bh = H_BAND_HALF_HEIGHT;
+  const xAbove = zAxisColor; // swapped past Hadamard
+  const zAbove = xAxisColor;
+
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
+
+  function addQuad(
+    v0: number[], v1: number[], v2: number[], v3: number[],
+    n: number[],
+    color: THREE.Color,
+  ) {
+    const vi = positions.length / 3;
+    for (const v of [v0, v1, v2, v3]) {
+      positions.push(...v);
+      normals.push(...n);
+      colors.push(color.r, color.g, color.b);
+    }
+    indices.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
+  }
+
+  // 4 walls, each with 3 strips along Z.
+  // Winding: (v1-v0)×(v2-v0) must point outward.
+  const wallDefs = [
+    { n: [1, 0, 0], below: xAxisColor, above: xAbove,
+      quad: (z0: number, z1: number): number[][] =>
+        [[hx, hy, z0], [hx, hy, z1], [hx, -hy, z1], [hx, -hy, z0]] },
+    { n: [-1, 0, 0], below: xAxisColor, above: xAbove,
+      quad: (z0: number, z1: number): number[][] =>
+        [[-hx, -hy, z0], [-hx, -hy, z1], [-hx, hy, z1], [-hx, hy, z0]] },
+    { n: [0, 1, 0], below: zAxisColor, above: zAbove,
+      quad: (z0: number, z1: number): number[][] =>
+        [[-hx, hy, z0], [-hx, hy, z1], [hx, hy, z1], [hx, hy, z0]] },
+    { n: [0, -1, 0], below: zAxisColor, above: zAbove,
+      quad: (z0: number, z1: number): number[][] =>
+        [[hx, -hy, z0], [hx, -hy, z1], [-hx, -hy, z1], [-hx, -hy, z0]] },
+  ];
+
+  for (const wall of wallDefs) {
+    const [v0, v1, v2, v3] = wall.quad(-1, -bh);
+    addQuad(v0, v1, v2, v3, wall.n, wall.below);
+    const [m0, m1, m2, m3] = wall.quad(-bh, bh);
+    addQuad(m0, m1, m2, m3, wall.n, H_COLOR);
+    const [t0, t1, t2, t3] = wall.quad(bh, 1);
+    addQuad(t0, t1, t2, t3, wall.n, wall.above);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(colors), 3));
+  geo.setIndex(indices);
+  return geo;
+}
+
+/** Create geometry for an X-direction pipe (open in TQEC X / Three.js X). */
+function createXPipeGeometry(
+  yAxisColor: THREE.Color,
+  zAxisColor: THREE.Color,
+  hadamard: boolean,
+): THREE.BufferGeometry {
+  if (!hadamard) {
+    const geo = new THREE.BoxGeometry(2, 1, 1);
+    const colors = new Float32Array(24 * 3);
+    const faceColors: (THREE.Color | null)[] = [
+      null, null,              // +X, -X = TQEC X-axis = open
+      zAxisColor, zAxisColor,  // +Y, -Y = TQEC Z-axis
+      yAxisColor, yAxisColor,  // +Z, -Z = TQEC Y-axis
+    ];
+    for (let face = 0; face < 6; face++) {
+      const c = faceColors[face];
+      if (!c) continue;
+      for (let v = 0; v < 4; v++) {
+        const idx = (face * 4 + v) * 3;
+        colors[idx] = c.r;
+        colors[idx + 1] = c.g;
+        colors[idx + 2] = c.b;
+      }
+    }
+    const oldIndex = geo.index!;
+    const newIndices: number[] = [];
+    for (let face = 0; face < 6; face++) {
+      if (face === 0 || face === 1) continue; // skip ±X (open)
+      for (let i = 0; i < 6; i++) {
+        newIndices.push(oldIndex.getX(face * 6 + i));
+      }
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    geo.setIndex(newIndices);
+    geo.clearGroups();
+    return geo;
+  }
+
+  // Hadamard: each wall subdivided into 3 strips along X (the open direction).
+  const hy = 0.5, hz = 0.5;
+  const bh = H_BAND_HALF_HEIGHT;
+  const yAbove = zAxisColor; // swapped past Hadamard
+  const zAbove = yAxisColor;
+
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
+
+  function addQuad(
+    v0: number[], v1: number[], v2: number[], v3: number[],
+    n: number[],
+    color: THREE.Color,
+  ) {
+    const vi = positions.length / 3;
+    for (const v of [v0, v1, v2, v3]) {
+      positions.push(...v);
+      normals.push(...n);
+      colors.push(color.r, color.g, color.b);
+    }
+    indices.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
+  }
+
+  // 4 walls, each with 3 strips along X.
+  // Winding: (v1-v0)×(v2-v0) must point outward.
+  const wallDefs = [
+    { n: [0, 1, 0], below: zAxisColor, above: zAbove,
+      quad: (x0: number, x1: number): number[][] =>
+        [[x0, hy, hz], [x1, hy, hz], [x1, hy, -hz], [x0, hy, -hz]] },
+    { n: [0, -1, 0], below: zAxisColor, above: zAbove,
+      quad: (x0: number, x1: number): number[][] =>
+        [[x0, -hy, -hz], [x1, -hy, -hz], [x1, -hy, hz], [x0, -hy, hz]] },
+    { n: [0, 0, 1], below: yAxisColor, above: yAbove,
+      quad: (x0: number, x1: number): number[][] =>
+        [[x0, -hy, hz], [x1, -hy, hz], [x1, hy, hz], [x0, hy, hz]] },
+    { n: [0, 0, -1], below: yAxisColor, above: yAbove,
+      quad: (x0: number, x1: number): number[][] =>
+        [[x0, hy, -hz], [x1, hy, -hz], [x1, -hy, -hz], [x0, -hy, -hz]] },
+  ];
+
+  for (const wall of wallDefs) {
+    const [v0, v1, v2, v3] = wall.quad(-1, -bh);
+    addQuad(v0, v1, v2, v3, wall.n, wall.below);
+    const [m0, m1, m2, m3] = wall.quad(-bh, bh);
+    addQuad(m0, m1, m2, m3, wall.n, H_COLOR);
+    const [t0, t1, t2, t3] = wall.quad(bh, 1);
+    addQuad(t0, t1, t2, t3, wall.n, wall.above);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(colors), 3));
+  geo.setIndex(indices);
+  return geo;
+}
+
 export function createBlockGeometry(blockType: BlockType): THREE.BufferGeometry {
   if (blockType === "ZXO" || blockType === "XZO" || blockType === "ZXOH" || blockType === "XZOH") {
     const isXFirst = blockType === "XZO" || blockType === "XZOH";
     const hasH = blockType === "ZXOH" || blockType === "XZOH";
     return createZPipeGeometry(
+      isXFirst ? X_COLOR : Z_COLOR,
+      isXFirst ? Z_COLOR : X_COLOR,
+      hasH,
+    );
+  }
+
+  if (blockType === "ZOX" || blockType === "XOZ" || blockType === "ZOXH" || blockType === "XOZH") {
+    const isXFirst = blockType === "XOZ" || blockType === "XOZH";
+    const hasH = blockType === "ZOXH" || blockType === "XOZH";
+    return createYPipeGeometry(
+      isXFirst ? X_COLOR : Z_COLOR,
+      isXFirst ? Z_COLOR : X_COLOR,
+      hasH,
+    );
+  }
+
+  if (blockType === "OZX" || blockType === "OXZ" || blockType === "OZXH" || blockType === "OXZH") {
+    const isXFirst = blockType === "OXZ" || blockType === "OXZH";
+    const hasH = blockType === "OZXH" || blockType === "OXZH";
+    return createXPipeGeometry(
       isXFirst ? X_COLOR : Z_COLOR,
       isXFirst ? Z_COLOR : X_COLOR,
       hasH,
@@ -222,19 +439,42 @@ export function createBlockEdges(blockType: BlockType): THREE.BufferGeometry {
   const fullBox = new THREE.BoxGeometry(...blockThreeSize(blockType));
   const edges = new THREE.EdgesGeometry(fullBox);
 
-  const isH = blockType === "ZXOH" || blockType === "XZOH";
-  if (!isH) return edges;
+  const isZPipeH = blockType === "ZXOH" || blockType === "XZOH";
+  const isYPipeH = blockType === "ZOXH" || blockType === "XOZH";
+  const isXPipeH = blockType === "OZXH" || blockType === "OXZH";
+  if (!isZPipeH && !isYPipeH && !isXPipeH) return edges;
 
-  // Add horizontal edge rings at y = ±H_BAND_HALF_HEIGHT
   const basePos = edges.getAttribute("position").array as Float32Array;
-  const hx = 0.5, hz = 0.5;
   const o = 0.002; // tiny offset so lines render in front of coplanar faces
   const bandEdges: number[] = [];
-  for (const by of [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT]) {
-    bandEdges.push(-hx - o, by, -hz - o,  hx + o, by, -hz - o); // -Z wall
-    bandEdges.push( hx + o, by, -hz - o,  hx + o, by,  hz + o); // +X wall
-    bandEdges.push( hx + o, by,  hz + o, -hx - o, by,  hz + o); // +Z wall
-    bandEdges.push(-hx - o, by,  hz + o, -hx - o, by, -hz - o); // -X wall
+
+  if (isZPipeH) {
+    // Z-pipe: band rings at y = ±bh (perpendicular to open direction Three.js Y)
+    const hx = 0.5, hz = 0.5;
+    for (const by of [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT]) {
+      bandEdges.push(-hx - o, by, -hz - o,  hx + o, by, -hz - o);
+      bandEdges.push( hx + o, by, -hz - o,  hx + o, by,  hz + o);
+      bandEdges.push( hx + o, by,  hz + o, -hx - o, by,  hz + o);
+      bandEdges.push(-hx - o, by,  hz + o, -hx - o, by, -hz - o);
+    }
+  } else if (isYPipeH) {
+    // Y-pipe: band rings at z = ±bh (perpendicular to open direction Three.js Z)
+    const hx = 0.5, hy = 0.5;
+    for (const bz of [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT]) {
+      bandEdges.push(-hx - o, -hy - o, bz,  hx + o, -hy - o, bz);
+      bandEdges.push( hx + o, -hy - o, bz,  hx + o,  hy + o, bz);
+      bandEdges.push( hx + o,  hy + o, bz, -hx - o,  hy + o, bz);
+      bandEdges.push(-hx - o,  hy + o, bz, -hx - o, -hy - o, bz);
+    }
+  } else {
+    // X-pipe: band rings at x = ±bh (perpendicular to open direction Three.js X)
+    const hy = 0.5, hz = 0.5;
+    for (const bx of [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT]) {
+      bandEdges.push(bx, -hy - o, -hz - o,  bx,  hy + o, -hz - o);
+      bandEdges.push(bx,  hy + o, -hz - o,  bx,  hy + o,  hz + o);
+      bandEdges.push(bx,  hy + o,  hz + o,  bx, -hy - o,  hz + o);
+      bandEdges.push(bx, -hy - o,  hz + o,  bx, -hy - o, -hz - o);
+    }
   }
 
   const merged = new Float32Array(basePos.length + bandEdges.length);
@@ -261,17 +501,24 @@ export function posKey(pos: Position3D): string {
  * YHalfCube is half-height in Z, so its Y center is at pos.z + 0.25.
  */
 export function tqecToThree(pos: Position3D, blockType?: BlockType): [number, number, number] {
-  const h = blockType ? blockHeight(blockType) : 1;
-  return [pos.x + 0.5, pos.z + h / 2, -(pos.y + 0.5)];
+  const [sx, sy, sz] = blockType ? blockTqecSize(blockType) : [1, 1, 1];
+  return [pos.x + sx / 2, pos.z + sz / 2, -(pos.y + sy / 2)];
+}
+
+/** TQEC dimensions [X, Y, Z] for each block type. */
+export function blockTqecSize(blockType: BlockType): [number, number, number] {
+  switch (blockType) {
+    case "Y": return [1, 1, 0.5];
+    case "ZXO": case "XZO": case "ZXOH": case "XZOH": return [1, 1, 2];
+    case "ZOX": case "XOZ": case "ZOXH": case "XOZH": return [1, 2, 1];
+    case "OZX": case "OXZ": case "OZXH": case "OXZH": return [2, 1, 1];
+    default: return [1, 1, 1];
+  }
 }
 
 /** TQEC Z-height for each block type. */
 export function blockHeight(blockType: BlockType): number {
-  switch (blockType) {
-    case "Y": return 0.5;
-    case "ZXO": case "XZO": case "ZXOH": case "XZOH": return 2;
-    default: return 1;
-  }
+  return blockTqecSize(blockType)[2];
 }
 
 export function snapToCell(value: number): number {
@@ -286,9 +533,9 @@ export function threeToTqecCell(x: number, y: number, z: number): Position3D {
  * Compute the TQEC position for a new block placed adjacent to an existing block's face.
  *
  * Three.js face normal → TQEC axis:
- *   (±1, 0, 0) → TQEC X ±1
- *   (0, ±1, 0) → TQEC Z ± (srcHeight/2 + dstHeight/2) from src center
- *   (0, 0, ±1) → TQEC Y ∓1
+ *   (±1, 0, 0) → TQEC X ± srcSizeX / dstSizeX
+ *   (0, ±1, 0) → TQEC Z ± srcSizeZ / dstSizeZ
+ *   (0, 0, ±1) → TQEC Y ∓ srcSizeY / dstSizeY
  */
 export function getAdjacentPos(
   srcPos: Position3D,
@@ -301,17 +548,15 @@ export function getAdjacentPos(
   const ny = Math.round(normal.y);
   const nz = Math.round(normal.z);
 
-  // X and Y offsets are always ±1 (all blocks are size 1 in X and Y)
-  const x = srcPos.x + nx;
-  const y = srcPos.y - nz; // Three.js +Z = TQEC -Y
+  const srcSize = blockTqecSize(srcType);
+  const dstSize = blockTqecSize(dstType);
 
-  // Z offset accounts for block heights
-  const srcH = blockHeight(srcType);
-  const dstH = blockHeight(dstType);
-  // src center in TQEC Z = srcPos.z + srcH/2
-  // For top face (ny=+1): new block bottom at srcPos.z + srcH → newPos.z = srcPos.z + srcH
-  // For bottom face (ny=-1): new block top at srcPos.z → newPos.z = srcPos.z - dstH
-  const z = srcPos.z + (ny > 0 ? srcH : ny < 0 ? -dstH : 0);
+  // TQEC X: Three.js +X = TQEC +X
+  const x = srcPos.x + (nx > 0 ? srcSize[0] : nx < 0 ? -dstSize[0] : 0);
+  // TQEC Y: Three.js +Z = TQEC -Y
+  const y = srcPos.y + (nz < 0 ? srcSize[1] : nz > 0 ? -dstSize[1] : 0);
+  // TQEC Z: Three.js +Y = TQEC +Z
+  const z = srcPos.z + (ny > 0 ? srcSize[2] : ny < 0 ? -dstSize[2] : 0);
 
   return { x, y, z };
 }
