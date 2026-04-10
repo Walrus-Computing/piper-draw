@@ -13,7 +13,7 @@ export interface Position3D {
 export const CUBE_TYPES = ["XZZ", "ZXZ", "ZXX", "XXZ", "ZZX", "XZX"] as const;
 export type CubeType = (typeof CUBE_TYPES)[number];
 
-export const PIPE_TYPES = ["ZXO"] as const;
+export const PIPE_TYPES = ["ZXO", "XZO", "ZXOH", "XZOH"] as const;
 export type PipeType = (typeof PIPE_TYPES)[number];
 
 export type BlockType = CubeType | "Y" | PipeType;
@@ -27,6 +27,8 @@ export interface Block {
 const X_COLOR = new THREE.Color("#ff4444"); // X basis = red
 const Z_COLOR = new THREE.Color("#4488ff"); // Z basis = blue
 const Y_COLOR = new THREE.Color("#44cc44"); // Y basis = green
+const H_COLOR = new THREE.Color("#ffcc00"); // Hadamard = yellow
+const H_BAND_HALF_HEIGHT = 0.08;
 
 /**
  * Face colors per cube type, indexed by TQEC axis: [X, Y, Z].
@@ -58,26 +60,26 @@ const CUBE_FACE_COLORS: Record<CubeType, [THREE.Color, THREE.Color, THREE.Color]
 export function blockThreeSize(blockType: BlockType): [number, number, number] {
   switch (blockType) {
     case "Y": return [1, 0.5, 1];
-    case "ZXO": return [1, 2, 1];
+    case "ZXO": case "XZO": case "ZXOH": case "XZOH": return [1, 2, 1];
     default: return [1, 1, 1];
   }
 }
 
-export function createBlockGeometry(blockType: BlockType): THREE.BoxGeometry {
-  if (blockType === "ZXO") {
-    // ZXO pipe: 1×1×2 TQEC → 1×2×1 Three.js
-    // Open in TQEC Z → Three.js Y (+Y, -Y faces removed)
-    // TQEC X = Z basis (blue), TQEC Y = X basis (red)
+/** Create geometry for a Z-direction pipe (open in TQEC Z / Three.js Y). */
+function createZPipeGeometry(
+  xAxisColor: THREE.Color,
+  yAxisColor: THREE.Color,
+  hadamard: boolean,
+): THREE.BufferGeometry {
+  if (!hadamard) {
+    // Non-H pipe: simple box with open faces removed
     const geo = new THREE.BoxGeometry(1, 2, 1);
     const colors = new Float32Array(24 * 3);
-
-    // Face order: +X(0), -X(1), +Y(2), -Y(3), +Z(4), -Z(5)
-    const faceColors = [
-      Z_COLOR, Z_COLOR, // +X, -X = TQEC X = Z basis (blue)
-      null, null,       // +Y, -Y = TQEC Z = open (removed)
-      X_COLOR, X_COLOR, // +Z, -Z = TQEC Y = X basis (red)
+    const faceColors: (THREE.Color | null)[] = [
+      xAxisColor, xAxisColor, // +X, -X = TQEC X-axis
+      null, null,              // +Y, -Y = TQEC Z-axis = open
+      yAxisColor, yAxisColor,  // +Z, -Z = TQEC Y-axis
     ];
-
     for (let face = 0; face < 6; face++) {
       const c = faceColors[face];
       if (!c) continue;
@@ -88,22 +90,89 @@ export function createBlockGeometry(blockType: BlockType): THREE.BoxGeometry {
         colors[idx + 2] = c.b;
       }
     }
-
-    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-
-    // Remove open faces (+Y, -Y) by rebuilding index without groups 2 and 3
     const oldIndex = geo.index!;
     const newIndices: number[] = [];
     for (let face = 0; face < 6; face++) {
-      if (face === 2 || face === 3) continue; // skip open faces
+      if (face === 2 || face === 3) continue;
       for (let i = 0; i < 6; i++) {
         newIndices.push(oldIndex.getX(face * 6 + i));
       }
     }
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     geo.setIndex(newIndices);
     geo.clearGroups();
-
     return geo;
+  }
+
+  // Hadamard pipe: each wall subdivided into 3 strips (below, yellow band, above).
+  // Above the band, X/Z basis colors are swapped per TQEC convention.
+  const hx = 0.5, hz = 0.5;
+  const bh = H_BAND_HALF_HEIGHT;
+  const xAbove = yAxisColor; // swapped above Hadamard
+  const yAbove = xAxisColor;
+
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
+
+  function addQuad(
+    v0: number[], v1: number[], v2: number[], v3: number[],
+    n: number[],
+    color: THREE.Color,
+  ) {
+    const vi = positions.length / 3;
+    for (const v of [v0, v1, v2, v3]) {
+      positions.push(...v);
+      normals.push(...n);
+      colors.push(color.r, color.g, color.b);
+    }
+    indices.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
+  }
+
+  // 4 walls, each with 3 strips: below band, yellow band, above band.
+  // Winding order: (v1-v0)×(v2-v0) must point outward for correct raycast normals.
+  const wallDefs = [
+    { n: [1, 0, 0], below: xAxisColor, above: xAbove,
+      quad: (y0: number, y1: number): number[][] =>
+        [[hx, y0, -hz], [hx, y1, -hz], [hx, y1, hz], [hx, y0, hz]] },
+    { n: [-1, 0, 0], below: xAxisColor, above: xAbove,
+      quad: (y0: number, y1: number): number[][] =>
+        [[-hx, y0, hz], [-hx, y1, hz], [-hx, y1, -hz], [-hx, y0, -hz]] },
+    { n: [0, 0, 1], below: yAxisColor, above: yAbove,
+      quad: (y0: number, y1: number): number[][] =>
+        [[hx, y0, hz], [hx, y1, hz], [-hx, y1, hz], [-hx, y0, hz]] },
+    { n: [0, 0, -1], below: yAxisColor, above: yAbove,
+      quad: (y0: number, y1: number): number[][] =>
+        [[-hx, y0, -hz], [-hx, y1, -hz], [hx, y1, -hz], [hx, y0, -hz]] },
+  ];
+
+  for (const wall of wallDefs) {
+    const [v0, v1, v2, v3] = wall.quad(-1, -bh);
+    addQuad(v0, v1, v2, v3, wall.n, wall.below);          // bottom strip
+    const [m0, m1, m2, m3] = wall.quad(-bh, bh);
+    addQuad(m0, m1, m2, m3, wall.n, H_COLOR);              // yellow band
+    const [t0, t1, t2, t3] = wall.quad(bh, 1);
+    addQuad(t0, t1, t2, t3, wall.n, wall.above);           // top strip (swapped)
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(colors), 3));
+  geo.setIndex(indices);
+  return geo;
+}
+
+export function createBlockGeometry(blockType: BlockType): THREE.BufferGeometry {
+  if (blockType === "ZXO" || blockType === "XZO" || blockType === "ZXOH" || blockType === "XZOH") {
+    const isXFirst = blockType === "XZO" || blockType === "XZOH";
+    const hasH = blockType === "ZXOH" || blockType === "XZOH";
+    return createZPipeGeometry(
+      isXFirst ? X_COLOR : Z_COLOR,
+      isXFirst ? Z_COLOR : X_COLOR,
+      hasH,
+    );
   }
 
   if (blockType === "Y") {
@@ -148,6 +217,35 @@ export function createBlockGeometry(blockType: BlockType): THREE.BoxGeometry {
 /** @deprecated Use createBlockGeometry instead */
 export const createCubeGeometry = createBlockGeometry;
 
+/** Edge line segments for a block type, including Hadamard band edges for H pipes. */
+export function createBlockEdges(blockType: BlockType): THREE.BufferGeometry {
+  const fullBox = new THREE.BoxGeometry(...blockThreeSize(blockType));
+  const edges = new THREE.EdgesGeometry(fullBox);
+
+  const isH = blockType === "ZXOH" || blockType === "XZOH";
+  if (!isH) return edges;
+
+  // Add horizontal edge rings at y = ±H_BAND_HALF_HEIGHT
+  const basePos = edges.getAttribute("position").array as Float32Array;
+  const hx = 0.5, hz = 0.5;
+  const o = 0.002; // tiny offset so lines render in front of coplanar faces
+  const bandEdges: number[] = [];
+  for (const by of [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT]) {
+    bandEdges.push(-hx - o, by, -hz - o,  hx + o, by, -hz - o); // -Z wall
+    bandEdges.push( hx + o, by, -hz - o,  hx + o, by,  hz + o); // +X wall
+    bandEdges.push( hx + o, by,  hz + o, -hx - o, by,  hz + o); // +Z wall
+    bandEdges.push(-hx - o, by,  hz + o, -hx - o, by, -hz - o); // -X wall
+  }
+
+  const merged = new Float32Array(basePos.length + bandEdges.length);
+  merged.set(basePos);
+  merged.set(new Float32Array(bandEdges), basePos.length);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(merged, 3));
+  return geo;
+}
+
 export function posKey(pos: Position3D): string {
   return `${pos.x},${pos.y},${pos.z}`;
 }
@@ -171,7 +269,7 @@ export function tqecToThree(pos: Position3D, blockType?: BlockType): [number, nu
 export function blockHeight(blockType: BlockType): number {
   switch (blockType) {
     case "Y": return 0.5;
-    case "ZXO": return 2;
+    case "ZXO": case "XZO": case "ZXOH": case "XZOH": return 2;
     default: return 1;
   }
 }

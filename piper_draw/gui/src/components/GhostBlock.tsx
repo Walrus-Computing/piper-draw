@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
-import { tqecToThree, createBlockGeometry, blockThreeSize, PIPE_TYPES } from "../types";
+import { tqecToThree, createBlockGeometry, createBlockEdges, blockThreeSize, PIPE_TYPES } from "../types";
 import type { BlockType } from "../types";
 
 /** Box edges + both diagonals on every face. */
@@ -56,10 +56,7 @@ export function GhostBlock() {
 
   const deleteOutline = useMemo(() => createDeleteOutlineGeometry(activeType), [activeType]);
   const ghostGeometry = useMemo(() => createBlockGeometry(activeType), [activeType]);
-  const ghostEdges = useMemo(() => {
-    const fullBox = new THREE.BoxGeometry(...blockThreeSize(activeType));
-    return new THREE.EdgesGeometry(fullBox);
-  }, [activeType]);
+  const ghostEdges = useMemo(() => createBlockEdges(activeType), [activeType]);
   const isPipe = (PIPE_TYPES as readonly string[]).includes(activeType);
   const ghostMaterial = useMemo(
     () =>
@@ -69,6 +66,9 @@ export function GhostBlock() {
         opacity: 0.4,
         depthWrite: false,
         side: isPipe ? THREE.DoubleSide : THREE.FrontSide,
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1,
       }),
     [isPipe],
   );
@@ -83,13 +83,16 @@ export function GhostBlock() {
       {isDelete ? (
         <>
           {/* Transparent red tint — block colors show through */}
-          <mesh scale={1.01}>
+          <mesh>
             <boxGeometry args={blockThreeSize(activeType)} />
             <meshStandardMaterial
               color="#ff4444"
               transparent
               opacity={0.25}
               depthWrite={false}
+              polygonOffset
+              polygonOffsetFactor={-1}
+              polygonOffsetUnits={-1}
             />
           </mesh>
           {/* Red outline with both diagonals */}

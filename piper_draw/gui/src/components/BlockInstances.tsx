@@ -5,6 +5,7 @@ import { useBlockStore } from "../stores/blockStore";
 import {
   tqecToThree,
   createBlockGeometry,
+  createBlockEdges,
   blockThreeSize,
   getAdjacentPos,
   ALL_BLOCK_TYPES,
@@ -34,9 +35,9 @@ function TypedInstances({
     [cubeType],
   );
   const edgeTemplate = useMemo(() => {
-    const edges = new THREE.EdgesGeometry(fullBoxGeometry);
+    const edges = createBlockEdges(cubeType);
     return edges.getAttribute("position").array as Float32Array;
-  }, [fullBoxGeometry]);
+  }, [cubeType]);
   const material = useMemo(
     () => new THREE.MeshStandardMaterial({
       vertexColors: true,

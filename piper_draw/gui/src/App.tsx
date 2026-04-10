@@ -111,37 +111,50 @@ function YHalfCubePreview() {
   );
 }
 
+const H_HEX = "#ffcc00";
+
 /**
  * Pipe preview colors: [X-axis color, Y-axis color, Z-axis open].
  * Open faces shown as dashed outline only.
  */
-const PIPE_COLORS: Record<string, { left: string; right: string; topOpen: boolean }> = {
+const PIPE_COLORS: Record<string, { left: string; right: string; topOpen: boolean; hadamard?: boolean }> = {
   ZXO: { left: Z_HEX, right: X_HEX, topOpen: true },
+  XZO: { left: X_HEX, right: Z_HEX, topOpen: true },
+  ZXOH: { left: Z_HEX, right: X_HEX, topOpen: true, hadamard: true },
+  XZOH: { left: X_HEX, right: Z_HEX, topOpen: true, hadamard: true },
 };
 
 /** Isometric pipe preview — taller cuboid with open top face. */
 function PipePreview({ pipeType }: { pipeType: string }) {
-  const { left, right, topOpen } = PIPE_COLORS[pipeType];
+  const { left, right, topOpen, hadamard } = PIPE_COLORS[pipeType];
   // Double height in Z → double sideH
   const dx = 9, topH = 5, sideH = 20;
   const cx = 11, cy = 7;
   const svgW = cx * 2, svgH = cy + topH + sideH + 1;
+  // For H pipes, colors swap above the band
+  const leftAbove = hadamard ? right : left;
+  const rightAbove = hadamard ? left : right;
+  // Band position at center of side faces
+  const bandH = 2;
+  const midL = cy + sideH / 2;           // center on left edge
+  const midR = cy + topH + sideH / 2;    // center on right edge (isometric offset)
+
   return (
     <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} style={{ display: "block", margin: "2px auto 0" }}>
       {topOpen && (
         <>
-          {/* Inner right wall (TQEC Y-axis) visible through open top */}
+          {/* Inner right wall (TQEC Y-axis) visible through open top — shows "above" color */}
           <polygon
             points={`${cx - dx},${cy} ${cx},${cy - topH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
-            fill={right}
+            fill={rightAbove}
             stroke="#000"
             strokeWidth={0.7}
             opacity={0.5}
           />
-          {/* Inner left wall (TQEC X-axis) visible through open top */}
+          {/* Inner left wall (TQEC X-axis) visible through open top — shows "above" color */}
           <polygon
             points={`${cx + dx},${cy} ${cx},${cy - topH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
-            fill={left}
+            fill={leftAbove}
             stroke="#000"
             strokeWidth={0.7}
             opacity={0.6}
@@ -156,22 +169,77 @@ function PipePreview({ pipeType }: { pipeType: string }) {
         strokeWidth={0.7}
         strokeDasharray={topOpen ? "2 1.5" : undefined}
       />
-      {/* Left face (TQEC X-axis) */}
-      <polygon
-        points={`${cx - dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
-        fill={left}
-        stroke="#000"
-        strokeWidth={0.7}
-        opacity={0.85}
-      />
-      {/* Right face (TQEC Y-axis) */}
-      <polygon
-        points={`${cx + dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
-        fill={right}
-        stroke="#000"
-        strokeWidth={0.7}
-        opacity={0.7}
-      />
+      {hadamard ? (
+        <>
+          {/* Left face: top half (above band, swapped) */}
+          <polygon
+            points={`${cx - dx},${cy} ${cx},${cy + topH} ${cx},${midR - bandH} ${cx - dx},${midL - bandH}`}
+            fill={leftAbove}
+            stroke="#000"
+            strokeWidth={0.7}
+            opacity={0.85}
+          />
+          {/* Left face: yellow band */}
+          <polygon
+            points={`${cx - dx},${midL - bandH} ${cx},${midR - bandH} ${cx},${midR + bandH} ${cx - dx},${midL + bandH}`}
+            fill={H_HEX}
+            stroke="#000"
+            strokeWidth={0.5}
+            opacity={0.9}
+          />
+          {/* Left face: bottom half (below band, original) */}
+          <polygon
+            points={`${cx - dx},${midL + bandH} ${cx},${midR + bandH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
+            fill={left}
+            stroke="#000"
+            strokeWidth={0.7}
+            opacity={0.85}
+          />
+          {/* Right face: top half (above band, swapped) */}
+          <polygon
+            points={`${cx + dx},${cy} ${cx},${cy + topH} ${cx},${midR - bandH} ${cx + dx},${midL - bandH}`}
+            fill={rightAbove}
+            stroke="#000"
+            strokeWidth={0.7}
+            opacity={0.7}
+          />
+          {/* Right face: yellow band */}
+          <polygon
+            points={`${cx + dx},${midL - bandH} ${cx},${midR - bandH} ${cx},${midR + bandH} ${cx + dx},${midL + bandH}`}
+            fill={H_HEX}
+            stroke="#000"
+            strokeWidth={0.5}
+            opacity={0.8}
+          />
+          {/* Right face: bottom half (below band, original) */}
+          <polygon
+            points={`${cx + dx},${midL + bandH} ${cx},${midR + bandH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
+            fill={right}
+            stroke="#000"
+            strokeWidth={0.7}
+            opacity={0.7}
+          />
+        </>
+      ) : (
+        <>
+          {/* Left face (TQEC X-axis) */}
+          <polygon
+            points={`${cx - dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx - dx},${cy + sideH}`}
+            fill={left}
+            stroke="#000"
+            strokeWidth={0.7}
+            opacity={0.85}
+          />
+          {/* Right face (TQEC Y-axis) */}
+          <polygon
+            points={`${cx + dx},${cy} ${cx},${cy + topH} ${cx},${cy + topH + sideH} ${cx + dx},${cy + sideH}`}
+            fill={right}
+            stroke="#000"
+            strokeWidth={0.7}
+            opacity={0.7}
+          />
+        </>
+      )}
     </svg>
   );
 }
