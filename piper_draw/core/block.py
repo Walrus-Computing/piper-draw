@@ -1,31 +1,46 @@
 from dataclasses import dataclass
 from enum import Enum
+from typing import NamedTuple
 
 
 class FaceState(Enum):
+    """All possible states a Block face can be in.
+
+    For the colored boundaries (RED, GREEN, BLUE), the meaning of the face depends on its
+    orientation: space-like faces carry the corresponding weight-2 stabilizers, while time-like
+    faces represent initialization/measurement in that basis.
+
+    OPEN: This face is to be merged with another open face. A valid pipe diagram has every
+        open face connected to another open face.
+    RED: X boundary. Space-like: weight-2 X-stabilizers. Time-like: |+> prep/measurement.
+    GREEN: Y boundary. Space-like: weight-2 Y-stabilizers. Time-like: |+i> prep/measurement.
+    BLUE: Z boundary. Space-like: weight-2 Z-stabilizers. Time-like: |0> prep/measurement.
+    HADAMARD: A Hadamard pipe connector that applies a basis change between two open faces of
+        neighboring blocks. (TODO: determine whether this is actually needed as a face state.)
+    NULL: Placeholder for undetermined faces during diagram construction. A finalized pipe
+        diagram must contain no NULL faces.
+    """
     OPEN = "open"
-    '''Indicates that this face is to be merged with another open face.'''
-    BLUE = "blue"
-    '''Z boundary (where Z-stabilizers with support 2 live)'''
     RED = "red"
-    '''X boundary (where X-stabilizers with support 2 live)'''
+    GREEN = "green"
+    BLUE = "blue"
+    HADAMARD = "hadamard"
     NULL = "null"
-    '''Temporary placeholder. Needs to set eventually for a valid pipediagram.'''
+
+
+class Coordinate(NamedTuple):
+    x: int
+    y: int
+    z: int
 
 
 @dataclass(frozen=True, slots=True)
 class Block:
-    coordinates: tuple[int, int, int]
+    coordinates: tuple[Coordinate]
 
     def __post_init__(self) -> None:
-        coords = self.coordinates
-        violations = (
-            not isinstance(coords, tuple),
-            len(coords) != 3,
-            not all(isinstance(c, int) for c in coords)
-        )
-        if any(violations):
-            raise TypeError("coordinates must be a 3-tuple of ints.")
+        if any(not isinstance(c, Coordinate) for c in self.coordinates):
+            raise TypeError('coordinates must be a tuple of Coordinates')
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +51,11 @@ class SingleVoxelBlock(Block):
     west: FaceState = FaceState.BLUE
     top: FaceState = FaceState.OPEN
     bottom: FaceState = FaceState.OPEN
+
+    def __post_init__(self):
+        if len(self.coordinates) != 1:
+            raise ValueError('SingleVoxelBlock can only have one Coordinate')
+        return super().__post_init__()
 
 
 @dataclass(frozen=True, slots=True)
