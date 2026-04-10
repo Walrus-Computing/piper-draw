@@ -4,6 +4,10 @@ from piper_draw import PipeDiagram, SingleVoxelBlock
 
 
 class TestPipeDiagram:
+    def graph_spatial_map_are_consistent(self):
+        '''Helper function. Should be called often during tests.'''
+        pass
+
     def test_empty_diagram(self):
         d = PipeDiagram()
         assert d.num_blocks == 0
