@@ -14,10 +14,7 @@ export function GhostBlock() {
   const hoveredInvalid = useBlockStore((s) => s.hoveredInvalid);
   const blocks = useBlockStore((s) => s.blocks);
 
-  // In delete mode, use the hovered block's type; in place mode, use resolved type from hover
-  const activeType = mode === "delete"
-    ? (hoveredBlockType ?? cubeType)
-    : (hoveredBlockType ?? cubeType);
+  const activeType = hoveredBlockType ?? cubeType;
 
   const previewHiddenFaces = hoveredGridPos ? getHiddenFaceMaskForPos(hoveredGridPos, activeType, blocks) : 0;
   const ghostGeometry = getCachedGeometry(activeType, previewHiddenFaces);

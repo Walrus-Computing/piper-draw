@@ -1,1 +1,1 @@
-from .core import PipeDiagram
+from .core import PipeDiagram as PipeDiagram

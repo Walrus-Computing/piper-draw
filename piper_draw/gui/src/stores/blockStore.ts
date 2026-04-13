@@ -90,7 +90,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       return {
         blocks: previous,
         history: newHistory,
-        future: [new Map(state.blocks), ...state.future],
+        future: [new Map(state.blocks), ...state.future].slice(0, MAX_HISTORY),
         hoveredGridPos: null,
       };
     }),

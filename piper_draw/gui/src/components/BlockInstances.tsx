@@ -12,6 +12,7 @@ import {
   resolvePipeType,
   getAdjacentPos,
   getHiddenFaceMaskForPos,
+  buildSpatialIndex,
   VARIANT_AXIS_MAP,
   PIPE_TYPES,
 } from "../types";
@@ -245,9 +246,10 @@ export function BlockInstances() {
       hiddenFaces: FaceMask;
       blocks: Block[];
     };
+    const index = buildSpatialIndex(blocks);
     const map = new Map<string, Group>();
     for (const block of blocks.values()) {
-      const hiddenFaces = getHiddenFaceMaskForPos(block.pos, block.type, blocks);
+      const hiddenFaces = getHiddenFaceMaskForPos(block.pos, block.type, blocks, index);
       const key = `${block.type}:${hiddenFaces}`;
       const existing = map.get(key);
       if (existing) {

@@ -17,7 +17,6 @@ export const PIPE_TYPES = ["OZX", "OXZ", "OZXH", "OXZH", "ZOX", "XOZ", "ZOXH", "
 export type PipeType = (typeof PIPE_TYPES)[number];
 
 export type BlockType = CubeType | "Y" | PipeType;
-export const ALL_BLOCK_TYPES = [...CUBE_TYPES, "Y", ...PIPE_TYPES] as const;
 export type FaceMask = number;
 
 export const FACE_POS_X = 1 << 0; // +X face in Three.js box geometry order
@@ -92,7 +91,7 @@ export function pipeAxisFromPos(pos: Position3D): 0 | 1 | 2 | null {
   if (isPipeSlotCoord(pos.x)) return 0;
   if (isPipeSlotCoord(pos.y)) return 1;
   if (isPipeSlotCoord(pos.z)) return 2;
-  return 2;
+  return null; // unreachable: at least one axis must be a pipe slot after the initial check
 }
 
 /** Map a pipe variant + position → concrete PipeType. Returns null if position is not a valid pipe pos. */
@@ -109,17 +108,6 @@ export function resolvePipeType(variant: PipeVariant, pos: Position3D): PipeType
   return VARIANT_AXIS_MAP[variant][axis];
 }
 
-/** Reverse lookup: concrete PipeType → PipeVariant. */
-const PIPE_TO_VARIANT: Record<PipeType, PipeVariant> = {
-  OZX: "ZX", ZOX: "ZX", ZXO: "ZX",
-  OXZ: "XZ", XOZ: "XZ", XZO: "XZ",
-  OZXH: "ZXH", ZOXH: "ZXH", ZXOH: "ZXH",
-  OXZH: "XZH", XOZH: "XZH", XZOH: "XZH",
-};
-export function getPipeVariant(pt: PipeType): PipeVariant {
-  return PIPE_TO_VARIANT[pt];
-}
-
 // ---------------------------------------------------------------------------
 // Snapping to valid grid positions
 // ---------------------------------------------------------------------------
@@ -129,11 +117,6 @@ function nearestMult3(v: number): number {
   return Math.round(v / 3) * 3;
 }
 
-/** Snap to nearest pipe slot coordinate (distance 1 from nearest block coordinate). */
-function nearest3kPlus1(v: number): number {
-  return nearest3kPipeCoord(v);
-}
-
 /** Snap raw TQEC X/Y coordinates (on ground plane z=0) to nearest valid position. */
 export function snapGroundPos(rawX: number, rawY: number, forPipe: boolean): Position3D {
   if (!forPipe) {
@@ -141,7 +124,7 @@ export function snapGroundPos(rawX: number, rawY: number, forPipe: boolean): Pos
   }
   // For pipe on ground: z=0 ≡ 0 (mod 3), need exactly one of x,y in a non-zero pipe remainder class
   const bx = nearestMult3(rawX), by = nearestMult3(rawY);
-  const px = nearest3kPlus1(rawX), py = nearest3kPlus1(rawY);
+  const px = nearest3kPipeCoord(rawX), py = nearest3kPipeCoord(rawY);
   // Candidate: X-pipe at (px, by) or Y-pipe at (bx, py)
   const d1 = Math.abs(rawX - px) + Math.abs(rawY - by);
   const d2 = Math.abs(rawX - bx) + Math.abs(rawY - py);
@@ -713,6 +696,69 @@ export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0
   return geo;
 }
 
+// ---------------------------------------------------------------------------
+// Spatial index — O(1) neighbor lookups instead of O(n) scans
+// ---------------------------------------------------------------------------
+
+export type SpatialIndex = Map<string, Block[]>;
+
+function cellKey(cx: number, cy: number, cz: number): string {
+  return `${cx},${cy},${cz}`;
+}
+
+/** Build a spatial index: each integer cell maps to blocks that overlap it. */
+export function buildSpatialIndex(blocks: Map<string, Block>): SpatialIndex {
+  const index: SpatialIndex = new Map();
+  for (const block of blocks.values()) {
+    const [sx, sy, sz] = blockTqecSize(block.type);
+    const x0 = Math.floor(block.pos.x);
+    const x1 = Math.floor(block.pos.x + sx - 1e-9);
+    const y0 = Math.floor(block.pos.y);
+    const y1 = Math.floor(block.pos.y + sy - 1e-9);
+    const z0 = Math.floor(block.pos.z);
+    const z1 = Math.floor(block.pos.z + sz - 1e-9);
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        for (let z = z0; z <= z1; z++) {
+          const key = cellKey(x, y, z);
+          const list = index.get(key);
+          if (list) list.push(block);
+          else index.set(key, [block]);
+        }
+      }
+    }
+  }
+  return index;
+}
+
+/** Collect unique nearby blocks from the spatial index for an AABB expanded by `pad` cells. */
+function getNearbyBlocks(index: SpatialIndex, pos: Position3D, size: [number, number, number], pad: number): Block[] {
+  const x0 = Math.floor(pos.x) - pad;
+  const x1 = Math.floor(pos.x + size[0] - 1e-9) + pad;
+  const y0 = Math.floor(pos.y) - pad;
+  const y1 = Math.floor(pos.y + size[1] - 1e-9) + pad;
+  const z0 = Math.floor(pos.z) - pad;
+  const z1 = Math.floor(pos.z + size[2] - 1e-9) + pad;
+  const seen = new Set<string>();
+  const result: Block[] = [];
+  for (let x = x0; x <= x1; x++) {
+    for (let y = y0; y <= y1; y++) {
+      for (let z = z0; z <= z1; z++) {
+        const list = index.get(cellKey(x, y, z));
+        if (!list) continue;
+        for (const block of list) {
+          const pk = posKey(block.pos);
+          if (!seen.has(pk)) {
+            seen.add(pk);
+            result.push(block);
+          }
+        }
+      }
+    }
+  }
+  return result;
+}
+
 /**
  * Compute which outward faces should be hidden because another block touches it directly.
  *
@@ -723,8 +769,10 @@ export function getHiddenFaceMaskForPos(
   pos: Position3D,
   type: BlockType,
   blocks: Map<string, Block>,
+  index?: SpatialIndex,
 ): FaceMask {
-  const [sx, sy, sz] = blockTqecSize(type);
+  const size = blockTqecSize(type);
+  const [sx, sy, sz] = size;
   const x0 = pos.x;
   const y0 = pos.y;
   const z0 = pos.z;
@@ -733,7 +781,11 @@ export function getHiddenFaceMaskForPos(
   const z1 = z0 + sz;
   let mask = 0;
 
-  for (const block of blocks.values()) {
+  const candidates = index
+    ? getNearbyBlocks(index, pos, size, 1)
+    : Array.from(blocks.values());
+
+  for (const block of candidates) {
     if (block.pos.x === pos.x && block.pos.y === pos.y && block.pos.z === pos.z) {
       continue;
     }
@@ -770,9 +822,12 @@ export function getHiddenFaceMaskForPos(
 }
 
 /** Check if placing a block at pos with the given type overlaps any existing block. */
-export function hasBlockOverlap(pos: Position3D, type: BlockType, blocks: Map<string, Block>): boolean {
+export function hasBlockOverlap(pos: Position3D, type: BlockType, blocks: Map<string, Block>, index?: SpatialIndex): boolean {
   const sz = blockTqecSize(type);
-  for (const block of blocks.values()) {
+  const candidates = index
+    ? getNearbyBlocks(index, pos, sz, 0)
+    : Array.from(blocks.values());
+  for (const block of candidates) {
     const bs = blockTqecSize(block.type);
     if (
       pos.x < block.pos.x + bs[0] && pos.x + sz[0] > block.pos.x &&
@@ -785,8 +840,13 @@ export function hasBlockOverlap(pos: Position3D, type: BlockType, blocks: Map<st
   return false;
 }
 
+/** Round to 4 decimals to avoid float-precision key collisions (e.g. 0.5+0.5+0.5 ≠ 1.5). */
+function r4(v: number): number {
+  return Math.round(v * 10000) / 10000;
+}
+
 export function posKey(pos: Position3D): string {
-  return `${pos.x},${pos.y},${pos.z}`;
+  return `${r4(pos.x)},${r4(pos.y)},${r4(pos.z)}`;
 }
 
 /**
@@ -813,19 +873,6 @@ export function blockTqecSize(blockType: BlockType): [number, number, number] {
     case "OZX": case "OXZ": case "OZXH": case "OXZH": return [2, 1, 1];
     default: return [1, 1, 1];
   }
-}
-
-/** TQEC Z-height for each block type. */
-export function blockHeight(blockType: BlockType): number {
-  return blockTqecSize(blockType)[2];
-}
-
-export function snapToCell(value: number): number {
-  return Math.floor(value);
-}
-
-export function threeToTqecCell(x: number, y: number, z: number): Position3D {
-  return { x: snapToCell(x), y: snapToCell(-z), z: snapToCell(y) };
 }
 
 /**
