@@ -491,7 +491,7 @@ function Toolbar({ onResetCamera, controlsRef }: { onResetCamera: () => void; co
         <button onClick={() => setCameraPreset([35, 35, 0.01])} style={{ ...btnStyle(false), whiteSpace: "nowrap" }}>
           X View
         </button>
-        <button onClick={() => setCameraPreset([0.01, 35, 35])} style={{ ...btnStyle(false), whiteSpace: "nowrap" }}>
+        <button onClick={() => setCameraPreset([0.01, 35, -35])} style={{ ...btnStyle(false), whiteSpace: "nowrap" }}>
           Y View
         </button>
         <button onClick={() => setCameraPreset([0, 50, 0.01])} style={{ ...btnStyle(false), whiteSpace: "nowrap" }}>
