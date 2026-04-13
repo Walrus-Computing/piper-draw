@@ -11,7 +11,7 @@ This package contains a test that verifies the exported `.dae` file is correctly
 ## Usage
 - Start the app locally and build your diagram in the browser using `piperdraw` in the command line.
 - Assemble stack elements with drag-and-drop.
-- Export the design via the Collada export button.
+- Export the design via the Collada export button to generate a `.dae` file.
 - Run the provided validation test to check `.dae` compatibility.
 
 ## Development guidelines
