@@ -65,7 +65,7 @@ export function getCachedEdges(blockType: BlockType): THREE.BufferGeometry {
   return geo;
 }
 
-function getCachedFullBox(blockType: BlockType): THREE.BoxGeometry {
+export function getCachedFullBox(blockType: BlockType): THREE.BoxGeometry {
   let geo = fullBoxCache.get(blockType);
   if (!geo) {
     geo = new THREE.BoxGeometry(...blockThreeSize(blockType));

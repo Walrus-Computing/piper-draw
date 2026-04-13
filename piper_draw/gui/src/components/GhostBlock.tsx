@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
 import { tqecToThree } from "../types";
-import { getCachedGeometry, getCachedEdges } from "./BlockInstances";
+import { getCachedGeometry, getCachedEdges, getCachedFullBox } from "./BlockInstances";
 
 const noRaycast = () => {};
 
@@ -62,7 +62,7 @@ export function GhostBlock() {
     <group position={[x, y, z]}>
       {isDelete ? (
         <mesh scale={1.01} raycast={noRaycast}>
-          <primitive object={ghostGeometry} attach="geometry" />
+          <primitive object={getCachedFullBox(activeType)} attach="geometry" />
           <primitive object={deleteMaterial} attach="material" />
         </mesh>
       ) : (
