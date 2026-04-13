@@ -1,47 +1,42 @@
 import { useMemo } from "react";
 import * as THREE from "three";
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { useBlockStore } from "../stores/blockStore";
-import { tqecToThree, createBlockGeometry, createBlockEdges, blockThreeSize, PIPE_TYPES } from "../types";
+import { tqecToThree, createBlockGeometry, createBlockEdges, blockThreeSize } from "../types";
 import type { BlockType } from "../types";
 
-/** Box edges + both diagonals on every face. */
-function createDeleteOutlineGeometry(blockType: BlockType): THREE.BufferGeometry {
+/** Box edges + both diagonals on every face, as a LineSegmentsGeometry for fat lines. */
+function createDeleteOutlineGeometry(blockType: BlockType): LineSegmentsGeometry {
   const [sx, sy, sz] = blockThreeSize(blockType);
   const hx = sx / 2, hy = sy / 2, hz = sz / 2;
-  // 8 corners of the box centered at origin
   const c = [
-    [-hx, -hy, -hz], [hx, -hy, -hz], [hx, hy, -hz], [-hx, hy, -hz], // front face (z=-hz)
-    [-hx, -hy, hz],  [hx, -hy, hz],  [hx, hy, hz],  [-hx, hy, hz],   // back face  (z=+hz)
+    [-hx, -hy, -hz], [hx, -hy, -hz], [hx, hy, -hz], [-hx, hy, -hz],
+    [-hx, -hy, hz],  [hx, -hy, hz],  [hx, hy, hz],  [-hx, hy, hz],
   ];
-  // 12 box edges
   const edges: [number, number][] = [
-    [0,1],[1,2],[2,3],[3,0], // front
-    [4,5],[5,6],[6,7],[7,4], // back
-    [0,4],[1,5],[2,6],[3,7], // connecting
+    [0,1],[1,2],[2,3],[3,0],
+    [4,5],[5,6],[6,7],[7,4],
+    [0,4],[1,5],[2,6],[3,7],
   ];
-  // 6 faces, each with 4 corner indices — draw both diagonals
   const faces: [number, number, number, number][] = [
-    [0,1,2,3], // front  (z=-h)
-    [4,5,6,7], // back   (z=+h)
-    [0,1,5,4], // bottom (y=-h)
-    [2,3,7,6], // top    (y=+h)
-    [0,3,7,4], // left   (x=-h)
-    [1,2,6,5], // right  (x=+h)
+    [0,1,2,3], [4,5,6,7],
+    [0,1,5,4], [2,3,7,6],
+    [0,3,7,4], [1,2,6,5],
   ];
 
   const positions: number[] = [];
-  // Box edges
   for (const [a, b] of edges) {
     positions.push(...c[a], ...c[b]);
   }
-  // Both diagonals per face
   for (const [a, b, cc, d] of faces) {
-    positions.push(...c[a], ...c[cc]); // diagonal 1
-    positions.push(...c[b], ...c[d]);  // diagonal 2
+    positions.push(...c[a], ...c[cc]);
+    positions.push(...c[b], ...c[d]);
   }
 
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  const geo = new LineSegmentsGeometry();
+  geo.setPositions(positions);
   return geo;
 }
 
@@ -55,22 +50,34 @@ export function GhostBlock() {
   const activeType = mode === "delete" && hoveredBlockType ? hoveredBlockType : cubeType;
 
   const deleteOutline = useMemo(() => createDeleteOutlineGeometry(activeType), [activeType]);
+  const deleteMaterial = useMemo(
+    () => new LineMaterial({
+      color: 0xff0000,
+      linewidth: 3, // pixels
+      depthWrite: false,
+      resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
+    }),
+    [],
+  );
+  const deleteLineSegments = useMemo(
+    () => new LineSegments2(deleteOutline, deleteMaterial),
+    [deleteOutline, deleteMaterial],
+  );
   const ghostGeometry = useMemo(() => createBlockGeometry(activeType), [activeType]);
   const ghostEdges = useMemo(() => createBlockEdges(activeType), [activeType]);
-  const isPipe = (PIPE_TYPES as readonly string[]).includes(activeType);
   const ghostMaterial = useMemo(
     () =>
-      new THREE.MeshStandardMaterial({
+      new THREE.MeshLambertMaterial({
         vertexColors: true,
         transparent: true,
         opacity: 0.4,
         depthWrite: false,
-        side: isPipe ? THREE.DoubleSide : THREE.FrontSide,
+        side: THREE.DoubleSide,
         polygonOffset: true,
         polygonOffsetFactor: 1,
         polygonOffsetUnits: 1,
       }),
-    [isPipe],
+    [],
   );
 
   if (!hoveredGridPos) return null;
@@ -81,26 +88,7 @@ export function GhostBlock() {
   return (
     <group position={[x, y, z]}>
       {isDelete ? (
-        <>
-          {/* Transparent red tint — block colors show through */}
-          <mesh>
-            <boxGeometry args={blockThreeSize(activeType)} />
-            <meshStandardMaterial
-              color="#ff4444"
-              transparent
-              opacity={0.25}
-              depthWrite={false}
-              polygonOffset
-              polygonOffsetFactor={-1}
-              polygonOffsetUnits={-1}
-            />
-          </mesh>
-          {/* Red outline with both diagonals */}
-          <lineSegments scale={1.02}>
-            <primitive object={deleteOutline} attach="geometry" />
-            <lineBasicMaterial color="#ff0000" depthWrite={false} />
-          </lineSegments>
-        </>
+        <primitive object={deleteLineSegments} scale={1.005} />
       ) : (
         <>
           <mesh>

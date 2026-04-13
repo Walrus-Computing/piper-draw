@@ -5,7 +5,6 @@ import { useBlockStore } from "../stores/blockStore";
 import {
   tqecToThree,
   createBlockGeometry,
-  createBlockEdges,
   blockThreeSize,
   hasBlockOverlap,
   getAdjacentPos,
@@ -15,6 +14,32 @@ import {
 import type { BlockType, Block } from "../types";
 
 const MAX_INITIAL = 1024;
+
+/** Shared 256x256 DataTexture: white interior with a 2px black border on every face. */
+const BORDER_TEX = (() => {
+  const size = 256;
+  const data = new Uint8Array(size * size * 4);
+  const border = 2;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const idx = (y * size + x) * 4;
+      const onBorder =
+        x < border || x >= size - border || y < border || y >= size - border;
+      const val = onBorder ? 0 : 255;
+      data[idx] = val;
+      data[idx + 1] = val;
+      data[idx + 2] = val;
+      data[idx + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = 16;
+  tex.needsUpdate = true;
+  return tex;
+})();
 
 function TypedInstances({
   cubeType,
@@ -34,53 +59,31 @@ function TypedInstances({
     () => isPipe ? new THREE.BoxGeometry(...blockThreeSize(cubeType)) : null,
     [cubeType, isPipe],
   );
-  const edgeTemplate = useMemo(() => {
-    const edges = createBlockEdges(cubeType);
-    return edges.getAttribute("position").array as Float32Array;
-  }, [cubeType]);
   const material = useMemo(
-    () => new THREE.MeshStandardMaterial({
+    () => new THREE.MeshLambertMaterial({
+      map: BORDER_TEX,
       vertexColors: true,
-      side: isPipe ? THREE.DoubleSide : THREE.FrontSide,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
     }),
-    [isPipe],
-  );
-  const edgesMaterial = useMemo(
-    () => new THREE.LineBasicMaterial({ color: 0x000000 }),
     [],
   );
   const dummy = useMemo(() => new THREE.Matrix4(), []);
-
-  // Merged edge geometry: one BufferGeometry with all edge lines for all blocks
-  const mergedEdges = useMemo(() => {
-    if (blocks.length === 0) return null;
-    const vertsPerBlock = edgeTemplate.length; // floats (x,y,z per vertex)
-    const merged = new Float32Array(blocks.length * vertsPerBlock);
-    for (let i = 0; i < blocks.length; i++) {
-      const [tx, ty, tz] = tqecToThree(blocks[i].pos, cubeType);
-      const offset = i * vertsPerBlock;
-      for (let j = 0; j < vertsPerBlock; j += 3) {
-        merged[offset + j] = edgeTemplate[j] + tx;
-        merged[offset + j + 1] = edgeTemplate[j + 1] + ty;
-        merged[offset + j + 2] = edgeTemplate[j + 2] + tz;
-      }
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(merged, 3));
-    return geo;
-  }, [blocks, edgeTemplate, cubeType]);
 
   useLayoutEffect(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
 
     // For pipes, override raycast to use the full box geometry (including open faces)
+    let originalRaycast: typeof mesh.raycast | undefined;
     if (isPipe && fullBoxGeometry) {
-      const originalRaycast = THREE.InstancedMesh.prototype.raycast;
+      originalRaycast = mesh.raycast;
       const realGeo = mesh.geometry;
       mesh.raycast = function (raycaster, intersects) {
         this.geometry = fullBoxGeometry;
-        originalRaycast.call(this, raycaster, intersects);
+        THREE.InstancedMesh.prototype.raycast.call(this, raycaster, intersects);
         this.geometry = realGeo;
       };
     }
@@ -93,6 +96,13 @@ function TypedInstances({
     mesh.count = blocks.length;
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
+
+    return () => {
+      // Restore original raycast on cleanup
+      if (originalRaycast) {
+        mesh.raycast = originalRaycast;
+      }
+    };
   }, [blocks, dummy, isPipe, fullBoxGeometry]);
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
@@ -133,20 +143,12 @@ function TypedInstances({
   const maxCount = Math.max(MAX_INITIAL, blocks.length);
 
   return (
-    <>
-      <instancedMesh
-        ref={meshRef}
-        args={[geometry, material, maxCount]}
-        onPointerMove={handlePointerMove}
-        onClick={handleClick}
-      />
-      {mergedEdges && (
-        <lineSegments>
-          <primitive object={mergedEdges} attach="geometry" />
-          <primitive object={edgesMaterial} attach="material" />
-        </lineSegments>
-      )}
-    </>
+    <instancedMesh
+      ref={meshRef}
+      args={[geometry, material, maxCount]}
+      onPointerMove={handlePointerMove}
+      onClick={handleClick}
+    />
   );
 }
 

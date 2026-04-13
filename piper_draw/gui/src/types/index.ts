@@ -24,12 +24,12 @@ export interface Block {
   type: BlockType;
 }
 
-const X_COLOR = new THREE.Color("#ff4444"); // X basis = red
-const Z_COLOR = new THREE.Color("#4488ff"); // Z basis = blue
-const Y_COLOR = new THREE.Color("#44cc44"); // Y basis = green
-const H_COLOR = new THREE.Color("#ffcc00"); // Hadamard = yellow
+const X_COLOR = new THREE.Color("#ff7f7f"); // red   RGBA(255,127,127)
+const Z_COLOR = new THREE.Color("#7396ff"); // blue  RGBA(115,150,255)
+const Y_COLOR = new THREE.Color("#63c676"); // green RGBA(99,198,118)
+const H_COLOR = new THREE.Color("#ffff65"); // yellow RGBA(255,255,101)
 const H_BAND_HALF_HEIGHT = 0.08;
-/** Tiny inset so pipe walls are never coplanar with adjacent blocks/pipes. */
+/** Inset so pipe walls are never coplanar with adjacent blocks/pipes. */
 const WALL_EPS = 0.001;
 
 /**
@@ -120,6 +120,7 @@ function createZPipeGeometry(
   const positions: number[] = [];
   const normals: number[] = [];
   const colors: number[] = [];
+  const uvs: number[] = [];
   const indices: number[] = [];
 
   function addQuad(
@@ -133,6 +134,7 @@ function createZPipeGeometry(
       normals.push(...n);
       colors.push(color.r, color.g, color.b);
     }
+    uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
     indices.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
   }
 
@@ -166,6 +168,7 @@ function createZPipeGeometry(
   geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
   geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
   geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(colors), 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uvs), 2));
   geo.setIndex(indices);
   return geo;
 }
@@ -219,6 +222,7 @@ function createYPipeGeometry(
   const positions: number[] = [];
   const normals: number[] = [];
   const colors: number[] = [];
+  const uvs: number[] = [];
   const indices: number[] = [];
 
   function addQuad(
@@ -232,6 +236,7 @@ function createYPipeGeometry(
       normals.push(...n);
       colors.push(color.r, color.g, color.b);
     }
+    uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
     indices.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
   }
 
@@ -265,6 +270,7 @@ function createYPipeGeometry(
   geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
   geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
   geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(colors), 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uvs), 2));
   geo.setIndex(indices);
   return geo;
 }
@@ -317,6 +323,7 @@ function createXPipeGeometry(
   const positions: number[] = [];
   const normals: number[] = [];
   const colors: number[] = [];
+  const uvs: number[] = [];
   const indices: number[] = [];
 
   function addQuad(
@@ -330,6 +337,7 @@ function createXPipeGeometry(
       normals.push(...n);
       colors.push(color.r, color.g, color.b);
     }
+    uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
     indices.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
   }
 
@@ -363,6 +371,7 @@ function createXPipeGeometry(
   geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
   geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
   geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(colors), 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uvs), 2));
   geo.setIndex(indices);
   return geo;
 }
@@ -437,14 +446,14 @@ export function createBlockGeometry(blockType: BlockType): THREE.BufferGeometry 
   return geo;
 }
 
-/** @deprecated Use createBlockGeometry instead */
-export const createCubeGeometry = createBlockGeometry;
-
 /** Edge line segments for a block type, including Hadamard band edges for H pipes. */
 export function createBlockEdges(blockType: BlockType): THREE.BufferGeometry {
   const [bx, by, bz] = blockThreeSize(blockType);
-  const e2 = 2 * WALL_EPS;
-  // Inset all edges so they don't poke through adjacent pipe walls
+  // Pipes: edges inset to match pipe walls (visible from inside via renderOrder).
+  // Cubes: edges at full size, coplanar with faces (visible via renderOrder).
+  // Log depth buffer ensures the WALL_EPS gap reliably hides edges from adjacent pipes.
+  const isPipe = (PIPE_TYPES as readonly string[]).includes(blockType);
+  const e2 = isPipe ? 2 * WALL_EPS : 0;
   const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(bx - e2, by - e2, bz - e2));
 
   const isZPipeH = blockType === "ZXOH" || blockType === "XZOH";
@@ -454,7 +463,7 @@ export function createBlockEdges(blockType: BlockType): THREE.BufferGeometry {
 
   const basePos = edges.getAttribute("position").array as Float32Array;
   const bandEdges: number[] = [];
-  // Band edge rings sit on the inset pipe walls (matching WALL_EPS)
+  // Band edge rings on the pipe wall surface (inset by WALL_EPS)
   const w = 0.5 - WALL_EPS;
 
   if (isZPipeH) {

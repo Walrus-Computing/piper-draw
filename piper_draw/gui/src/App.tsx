@@ -1,5 +1,10 @@
 import { useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
+import * as THREE from "three";
+
+// Disable color management to match tqec's Three.js v0.138.0 pipeline:
+// colors are stored as-is (no sRGB↔linear conversion), only output encoding applies.
+THREE.ColorManagement.enabled = false;
 import {
   OrbitControls,
   GizmoHelper,
@@ -15,8 +20,8 @@ import { useBlockStore } from "./stores/blockStore";
 import { CUBE_TYPES, PIPE_TYPES } from "./types";
 import type { BlockType } from "./types";
 
-const X_HEX = "#ff4444";
-const Z_HEX = "#4488ff";
+const X_HEX = "#ff7f7f";
+const Z_HEX = "#7396ff";
 
 /** Face colors per cube type: [X-axis, Y-axis, Z-axis] matching CUBE_FACE_COLORS */
 const CUBE_COLORS: Record<string, [string, string, string]> = {
@@ -70,7 +75,7 @@ function CubePreview({ cubeType }: { cubeType: string }) {
   );
 }
 
-const Y_HEX = "#44cc44";
+const Y_HEX = "#63c676";
 
 /** Isometric half-cube (half-height in Z/temporal) preview, all green. */
 function YHalfCubePreview() {
@@ -111,7 +116,7 @@ function YHalfCubePreview() {
   );
 }
 
-const H_HEX = "#ffcc00";
+const H_HEX = "#ffff65";
 
 /**
  * Pipe preview colors mapped to isometric faces.
@@ -509,11 +514,13 @@ export default function App() {
         <FpsDisplay fps={fps} />
       </div>
       <Canvas
-        camera={{ position: [10, 10, -10], fov: 50 }}
+        camera={{ position: [10, 10, -10], fov: 35 }}
+        gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }}
         onContextMenu={(e) => e.preventDefault()}
       >
-        <ambientLight intensity={0.5} />
-        <directionalLight position={[10, 20, 10]} intensity={0.8} />
+        <color attach="background" args={["#CBDFC6"]} />
+        <ambientLight intensity={1.4} />
+        <directionalLight position={[10, 10, 10]} intensity={1.0} />
         <BlockInstances />
         <GridPlane />
         <GhostBlock />
