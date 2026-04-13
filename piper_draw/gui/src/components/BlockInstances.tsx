@@ -1,4 +1,4 @@
-import { useRef, useLayoutEffect, useMemo } from "react";
+import { useRef, useLayoutEffect, useMemo, useEffect } from "react";
 import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
@@ -8,6 +8,8 @@ import {
   createBlockEdges,
   blockThreeSize,
   hasBlockOverlap,
+  isValidPos,
+  resolvePipeType,
   getAdjacentPos,
   ALL_BLOCK_TYPES,
   PIPE_TYPES,
@@ -15,32 +17,6 @@ import {
 import type { BlockType, Block } from "../types";
 
 const MIN_CAPACITY = 64;
-
-/** Shared 256x256 DataTexture: white interior with a 2px black border on every face. */
-const BORDER_TEX = (() => {
-  const size = 256;
-  const data = new Uint8Array(size * size * 4);
-  const border = 2;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const idx = (y * size + x) * 4;
-      const onBorder =
-        x < border || x >= size - border || y < border || y >= size - border;
-      const val = onBorder ? 0 : 255;
-      data[idx] = val;
-      data[idx + 1] = val;
-      data[idx + 2] = val;
-      data[idx + 3] = 255;
-    }
-  }
-  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
-  tex.magFilter = THREE.LinearFilter;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  tex.generateMipmaps = true;
-  tex.anisotropy = 16;
-  tex.needsUpdate = true;
-  return tex;
-})();
 
 /** Module-level geometry caches — each block type's geometry never changes. */
 const geometryCache = new Map<BlockType, THREE.BufferGeometry>();
@@ -99,16 +75,41 @@ function TypedInstances({
   const fullBoxGeometry = isPipe ? getCachedFullBox(cubeType) : null;
   const material = useMemo(
     () => new THREE.MeshLambertMaterial({
-      map: BORDER_TEX,
       vertexColors: true,
       side: THREE.DoubleSide,
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1,
     }),
     [],
   );
   const dummy = useMemo(() => new THREE.Matrix4(), []);
+
+  // Build batched edge wireframe geometry
+  const edgeTemplate = getCachedEdges(cubeType);
+  const templatePositions = edgeTemplate.getAttribute("position").array as Float32Array;
+  const vertCount = templatePositions.length / 3;
+
+  const batchedEdgesGeo = useMemo(() => {
+    if (blocks.length === 0) return null;
+    const totalVerts = blocks.length * vertCount;
+    const positions = new Float32Array(totalVerts * 3);
+    for (let i = 0; i < blocks.length; i++) {
+      const [tx, ty, tz] = tqecToThree(blocks[i].pos, cubeType);
+      const offset = i * vertCount * 3;
+      for (let v = 0; v < vertCount; v++) {
+        const vi = v * 3;
+        positions[offset + vi]     = templatePositions[vi]     + tx;
+        positions[offset + vi + 1] = templatePositions[vi + 1] + ty;
+        positions[offset + vi + 2] = templatePositions[vi + 2] + tz;
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    return geo;
+  }, [blocks, cubeType, templatePositions, vertCount]);
+
+  // Dispose old batched edge geometry
+  useEffect(() => {
+    return () => { batchedEdgesGeo?.dispose(); };
+  }, [batchedEdgesGeo]);
 
   useLayoutEffect(() => {
     const mesh = meshRef.current;
@@ -150,11 +151,26 @@ function TypedInstances({
       store.setHoveredGridPos(b[e.instanceId].pos, cubeType);
     } else {
       if (!e.face) return;
-      const adj = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, store.cubeType);
-      if (hasBlockOverlap(adj, store.cubeType, store.blocks)) {
-        store.setHoveredGridPos(adj, undefined, true);
+
+      // Determine the destination block type
+      let dstType: BlockType = store.cubeType;
+      if (store.pipeVariant) {
+        // Probe: compute adjacent with dst size 1 to find approximate position
+        const probe = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, store.cubeType);
+        const resolved = resolvePipeType(store.pipeVariant, probe);
+        if (!resolved) {
+          store.setHoveredGridPos(probe, undefined, true);
+          return;
+        }
+        dstType = resolved;
+      }
+
+      const adj = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, dstType);
+
+      if (!isValidPos(adj, dstType) || hasBlockOverlap(adj, dstType, store.blocks)) {
+        store.setHoveredGridPos(adj, dstType, true);
       } else {
-        store.setHoveredGridPos(adj);
+        store.setHoveredGridPos(adj, dstType);
       }
     }
   };
@@ -164,27 +180,42 @@ function TypedInstances({
     if (e.delta > 2) return;
     const b = blocksRef.current;
     if (e.instanceId == null || e.instanceId >= b.length) return;
-    const { mode, cubeType: selectedType, addBlock, removeBlock } = useBlockStore.getState();
-    if (mode === "delete") {
-      removeBlock(b[e.instanceId].pos);
+    const store = useBlockStore.getState();
+    if (store.mode === "delete") {
+      store.removeBlock(b[e.instanceId].pos);
     } else {
       if (!e.face) return;
-      const adj = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, selectedType);
-      addBlock(adj);
+
+      let dstType: BlockType = store.cubeType;
+      if (store.pipeVariant) {
+        const probe = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, store.cubeType);
+        const resolved = resolvePipeType(store.pipeVariant, probe);
+        if (resolved) dstType = resolved;
+      }
+
+      const adj = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, dstType);
+      store.addBlock(adj);
     }
   };
 
   if (blocks.length === 0) return null;
 
   return (
-    <instancedMesh
-      key={maxCount}
-      ref={meshRef}
-      args={[geometry, material, maxCount]}
-      onPointerMove={handlePointerMove}
-      onPointerLeave={() => useBlockStore.getState().setHoveredGridPos(null)}
-      onClick={handleClick}
-    />
+    <>
+      <instancedMesh
+        key={maxCount}
+        ref={meshRef}
+        args={[geometry, material, maxCount]}
+        onPointerMove={handlePointerMove}
+        onPointerLeave={() => useBlockStore.getState().setHoveredGridPos(null)}
+        onClick={handleClick}
+      />
+      {batchedEdgesGeo && (
+        <lineSegments geometry={batchedEdgesGeo}>
+          <lineBasicMaterial color="#000000" />
+        </lineSegments>
+      )}
+    </>
   );
 }
 

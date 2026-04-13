@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { Position3D, Block, BlockType } from "../types";
-import { posKey, hasBlockOverlap } from "../types";
+import type { Position3D, Block, BlockType, PipeVariant } from "../types";
+import { posKey, hasBlockOverlap, isValidPos, resolvePipeType } from "../types";
 
 export type Mode = "place" | "delete";
 
@@ -12,12 +12,14 @@ interface BlockStore {
   future: Map<string, Block>[];
   mode: Mode;
   cubeType: BlockType;
+  pipeVariant: PipeVariant | null;
   hoveredGridPos: Position3D | null;
   hoveredBlockType: BlockType | null;
   hoveredInvalid: boolean;
 
   setMode: (mode: Mode) => void;
   setCubeType: (cubeType: BlockType) => void;
+  setPipeVariant: (variant: PipeVariant) => void;
   setHoveredGridPos: (pos: Position3D | null, blockType?: BlockType, invalid?: boolean) => void;
   addBlock: (pos: Position3D) => void;
   removeBlock: (pos: Position3D) => void;
@@ -34,21 +36,39 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   future: [],
   mode: "place",
   cubeType: "XZZ",
+  pipeVariant: null,
   hoveredGridPos: null,
   hoveredBlockType: null,
   hoveredInvalid: false,
 
   setMode: (mode) => set({ mode, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false }),
-  setCubeType: (cubeType) => set({ cubeType }),
+  setCubeType: (cubeType) => set({ cubeType, pipeVariant: null }),
+  setPipeVariant: (variant) => {
+    // Store canonical X-open form as cubeType for fallback usage
+    const canonical: Record<PipeVariant, BlockType> = { ZX: "OZX", XZ: "OXZ", ZXH: "OZXH", XZH: "OXZH" };
+    set({ pipeVariant: variant, cubeType: canonical[variant] });
+  },
   setHoveredGridPos: (pos, blockType, invalid) => set({ hoveredGridPos: pos, hoveredBlockType: blockType ?? null, hoveredInvalid: invalid ?? false }),
 
   addBlock: (pos) =>
     set((state) => {
-      const newType = get().cubeType;
-      if (hasBlockOverlap(pos, newType, state.blocks)) return state;
+      const store = get();
+      let blockType: BlockType = store.cubeType;
+
+      // If pipe variant selected, resolve to correct PipeType based on position
+      if (store.pipeVariant) {
+        const resolved = resolvePipeType(store.pipeVariant, pos);
+        if (!resolved) return state;
+        blockType = resolved;
+      }
+
+      // Validate position parity
+      if (!isValidPos(pos, blockType)) return state;
+
+      if (hasBlockOverlap(pos, blockType, state.blocks)) return state;
       const newHistory = [...state.history, new Map(state.blocks)].slice(-MAX_HISTORY);
       const next = new Map(state.blocks);
-      next.set(posKey(pos), { pos, type: newType });
+      next.set(posKey(pos), { pos, type: blockType });
       return { blocks: next, history: newHistory, future: [] };
     }),
 

@@ -8,7 +8,6 @@ THREE.ColorManagement.enabled = false;
 import {
   OrbitControls,
   GizmoHelper,
-  Grid,
 } from "@react-three/drei";
 import { BlockInstances } from "./components/BlockInstances";
 import { GridPlane } from "./components/GridPlane";
@@ -17,8 +16,8 @@ import { AxisLabels } from "./components/AxisLabels";
 import { FpsDisplay, FpsSampler } from "./components/FpsCounter";
 import { OrientationGizmo } from "./components/OrientationGizmo";
 import { useBlockStore } from "./stores/blockStore";
-import { CUBE_TYPES, PIPE_TYPES } from "./types";
-import type { BlockType } from "./types";
+import { CUBE_TYPES, PIPE_VARIANTS } from "./types";
+import type { BlockType, PipeVariant } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 
 const X_HEX = "#ff7f7f";
@@ -361,38 +360,88 @@ function XPipePreviewSvg({ right, top, hadamard }: { right: string; top: string;
   );
 }
 
-const GRID_SECTION = 5;
+const GRID_SNAP = 3;
 
 /**
- * Grid that repositions to follow the camera, snapped to sectionSize
- * so grid lines never shift. The underlying plane is large (1000×1000)
- * and always centered near the camera's ground look-point.
+ * Shader-based ground grid: dark grey cells at block positions (mod 3 ≡ 0),
+ * light grey cells at pipe positions (mod 3 ≡ 1), with light edges on each cell.
+ * No separate grid lines — the edge border provides the visual structure.
  */
-function FollowGrid() {
-  const ref = useRef<THREE.Group>(null!);
+const gridMaterial = new THREE.ShaderMaterial({
+  transparent: true,
+  depthWrite: false,
+  vertexShader: `
+    varying vec3 vWorldPos;
+    void main() {
+      vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+      gl_Position = projectionMatrix * viewMatrix * vec4(vWorldPos, 1.0);
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vWorldPos;
+    float pmod(float a, float b) { return a - b * floor(a / b); }
+    void main() {
+      // TQEC coords: x = Three.js x, y = -Three.js z
+      float tx = vWorldPos.x;
+      float ty = -vWorldPos.z;
+      float mx = pmod(floor(tx), 3.0);
+      float my = pmod(floor(ty), 3.0);
+
+      bool xBlock = mx < 0.5;
+      bool yBlock = my < 0.5;
+      bool xPipe = mx > 0.5 && mx < 1.5;
+      bool yPipe = my > 0.5 && my < 1.5;
+
+      bool isBlock = xBlock && yBlock;
+      bool isPipe = (xPipe && yBlock) || (xBlock && yPipe);
+
+      if (!isBlock && !isPipe) discard;
+
+      // Edge detection: distance from cell boundary (0..0.5, 0 = edge)
+      float fx = fract(tx);
+      float fy = fract(ty);
+      float edgeDist = min(min(fx, 1.0 - fx), min(fy, 1.0 - fy));
+      float edgeWidth = 0.03;
+      bool onEdge = edgeDist < edgeWidth;
+
+      // For pipe cells that are 2 units wide in the open axis, don't draw the
+      // internal edge between the two halves (mod 3 ≡ 1 and ≡ 2 cells)
+      // The ≡ 2 cell is already discarded, so no internal edge to worry about.
+
+      if (onEdge) {
+        // Light edge
+        gl_FragColor = vec4(0.85, 0.85, 0.85, 0.35);
+      } else if (isBlock) {
+        // Dark grey fill
+        gl_FragColor = vec4(0.45, 0.45, 0.45, 0.18);
+      } else {
+        // Light grey fill
+        gl_FragColor = vec4(0.65, 0.65, 0.65, 0.12);
+      }
+
+      // Fade with distance from origin for a clean look
+      float dist = length(vWorldPos.xz);
+      float fade = 1.0 - smoothstep(100.0, 300.0, dist);
+      gl_FragColor.a *= fade;
+    }
+  `,
+});
+
+function CheckerboardGrid() {
+  const ref = useRef<THREE.Mesh>(null!);
   const target = useRef(new THREE.Vector3());
   useFrame(({ camera }) => {
     if (!ref.current) return;
     if (cameraGroundPoint(camera, target.current)) {
-      ref.current.position.x = Math.round(target.current.x / GRID_SECTION) * GRID_SECTION;
-      ref.current.position.z = Math.round(target.current.z / GRID_SECTION) * GRID_SECTION;
+      ref.current.position.x = Math.round(target.current.x / GRID_SNAP) * GRID_SNAP;
+      ref.current.position.z = Math.round(target.current.z / GRID_SNAP) * GRID_SNAP;
     }
   });
   return (
-    <group ref={ref}>
-      <Grid
-        args={[1000, 1000]}
-        infiniteGrid
-        cellSize={1}
-        sectionSize={GRID_SECTION}
-        cellColor="#aaaaaa"
-        sectionColor="#888888"
-        fadeDistance={500}
-        fadeStrength={3}
-        cellThickness={0.5}
-        sectionThickness={1}
-      />
-    </group>
+    <mesh ref={ref} rotation-x={-Math.PI / 2} position={[0, 0.001, 0]}>
+      <planeGeometry args={[500, 500]} />
+      <primitive object={gridMaterial} attach="material" />
+    </mesh>
   );
 }
 
@@ -437,7 +486,9 @@ function Toolbar({ onResetCamera, controlsRef }: { onResetCamera: () => void; co
   const mode = useBlockStore((s) => s.mode);
   const setMode = useBlockStore((s) => s.setMode);
   const cubeType = useBlockStore((s) => s.cubeType);
+  const pipeVariant = useBlockStore((s) => s.pipeVariant);
   const setCubeType = useBlockStore((s) => s.setCubeType);
+  const setPipeVariant = useBlockStore((s) => s.setPipeVariant);
   const historyLen = useBlockStore((s) => s.history.length);
   const futureLen = useBlockStore((s) => s.future.length);
   const undo = useBlockStore((s) => s.undo);
@@ -560,23 +611,27 @@ function Toolbar({ onResetCamera, controlsRef }: { onResetCamera: () => void; co
       {/* Separator */}
       <div style={{ width: 1, background: "#ddd" }} />
 
-      {/* Pipes group */}
+      {/* Pipes group (4 variants — open axis determined by position) */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <span style={groupLabelStyle}>Pipes</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
-          {PIPE_TYPES.map((pt) => (
-            <button
-              key={pt}
-              onClick={() => {
-                setCubeType(pt as BlockType);
-                setMode("place");
-              }}
-              style={blockBtnStyle(cubeType === pt && mode === "place")}
-            >
-              {pt}
-              <div style={previewWrapStyle}><PipePreview pipeType={pt} /></div>
-            </button>
-          ))}
+          {PIPE_VARIANTS.map((v) => {
+            // Use Z-open canonical form for preview
+            const previewType: Record<PipeVariant, string> = { ZX: "ZXO", XZ: "XZO", ZXH: "ZXOH", XZH: "XZOH" };
+            return (
+              <button
+                key={v}
+                onClick={() => {
+                  setPipeVariant(v);
+                  setMode("place");
+                }}
+                style={blockBtnStyle(pipeVariant === v && mode === "place")}
+              >
+                {v}
+                <div style={previewWrapStyle}><PipePreview pipeType={previewType[v]} /></div>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -640,7 +695,7 @@ export default function App() {
         <GhostBlock />
         <AxisLabels />
         <FpsSampler onFps={setFps} />
-        <FollowGrid />
+        <CheckerboardGrid />
         <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
           <OrientationGizmo />
         </GizmoHelper>

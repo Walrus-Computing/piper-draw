@@ -3,7 +3,7 @@ import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useFrame } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
-import { threeToTqecCell, hasBlockOverlap } from "../types";
+import { snapGroundPos, hasBlockOverlap, isValidPos, resolvePipeType } from "../types";
 import { cameraGroundPoint } from "../utils/groundPlane";
 
 const PLANE_SIZE = 1000;
@@ -26,25 +26,37 @@ export function GridPlane() {
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
-    if (mode === "place") {
-      const pos = threeToTqecCell(e.point.x, 0, e.point.z);
-      const store = useBlockStore.getState();
-      if (hasBlockOverlap(pos, store.cubeType, store.blocks)) {
-        setHoveredGridPos(pos, undefined, true);
-      } else {
-        setHoveredGridPos(pos);
-      }
+    if (mode !== "place") { setHoveredGridPos(null); return; }
+
+    const store = useBlockStore.getState();
+    const forPipe = store.pipeVariant !== null;
+    // e.point is in Three.js coords; convert to TQEC X/Y (ground plane z=0)
+    const pos = snapGroundPos(e.point.x, -e.point.z, forPipe);
+
+    // Determine actual block type for this position
+    let blockType = store.cubeType;
+    if (store.pipeVariant) {
+      const resolved = resolvePipeType(store.pipeVariant, pos);
+      if (!resolved) { setHoveredGridPos(pos, undefined, true); return; }
+      blockType = resolved;
+    }
+
+    if (!isValidPos(pos, blockType) || hasBlockOverlap(pos, blockType, store.blocks)) {
+      setHoveredGridPos(pos, blockType, true);
     } else {
-      setHoveredGridPos(null);
+      setHoveredGridPos(pos, blockType);
     }
   };
 
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     if (e.delta > 2) return; // ignore drags
-    if (mode === "place") {
-      addBlock(threeToTqecCell(e.point.x, 0, e.point.z));
-    }
+    if (mode !== "place") return;
+
+    const store = useBlockStore.getState();
+    const forPipe = store.pipeVariant !== null;
+    const pos = snapGroundPos(e.point.x, -e.point.z, forPipe);
+    addBlock(pos);
   };
 
   const handlePointerLeave = () => {

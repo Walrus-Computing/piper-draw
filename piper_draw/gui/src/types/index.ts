@@ -19,9 +19,109 @@ export type PipeType = (typeof PIPE_TYPES)[number];
 export type BlockType = CubeType | "Y" | PipeType;
 export const ALL_BLOCK_TYPES = [...CUBE_TYPES, "Y", ...PIPE_TYPES] as const;
 
+/** Pipe variant: the two non-O face characters (+ optional H). Open axis determined by position. */
+export type PipeVariant = "ZX" | "XZ" | "ZXH" | "XZH";
+export const PIPE_VARIANTS: PipeVariant[] = ["ZX", "XZ", "ZXH", "XZH"];
+
 export interface Block {
   pos: Position3D;
   type: BlockType;
+}
+
+// ---------------------------------------------------------------------------
+// Position validation (tqec alternating grid)
+// ---------------------------------------------------------------------------
+
+export function isPipeType(bt: BlockType): bt is PipeType {
+  return (PIPE_TYPES as readonly string[]).includes(bt);
+}
+
+/** Positive modulo that works for negative numbers. */
+function mod(n: number, m: number): number {
+  return ((n % m) + m) % m;
+}
+
+/**
+ * Grid spacing: repeating unit is 3 (block=1 + pipe=2).
+ *   Block positions: all coordinates ≡ 0 (mod 3)
+ *   Pipe positions: exactly one coordinate ≡ 1 (mod 3), rest ≡ 0 (mod 3)
+ */
+export function isValidBlockPos(pos: Position3D): boolean {
+  return mod(pos.x, 3) === 0 && mod(pos.y, 3) === 0 && mod(pos.z, 3) === 0;
+}
+
+export function isValidPipePos(pos: Position3D): boolean {
+  const mx = mod(pos.x, 3), my = mod(pos.y, 3), mz = mod(pos.z, 3);
+  const count = (mx === 1 ? 1 : 0) + (my === 1 ? 1 : 0) + (mz === 1 ? 1 : 0);
+  const rest = (mx === 0 || mx === 1) && (my === 0 || my === 1) && (mz === 0 || mz === 1);
+  return count === 1 && rest;
+}
+
+export function isValidPos(pos: Position3D, blockType: BlockType): boolean {
+  if (isPipeType(blockType)) return isValidPipePos(pos);
+  return isValidBlockPos(pos);
+}
+
+/** Which TQEC axis (0=x, 1=y, 2=z) has the pipe slot at this position. */
+export function pipeAxisFromPos(pos: Position3D): 0 | 1 | 2 | null {
+  if (!isValidPipePos(pos)) return null;
+  if (mod(pos.x, 3) === 1) return 0;
+  if (mod(pos.y, 3) === 1) return 1;
+  return 2;
+}
+
+/** Map a pipe variant + position → concrete PipeType. Returns null if position is not a valid pipe pos. */
+const VARIANT_AXIS_MAP: Record<PipeVariant, [PipeType, PipeType, PipeType]> = {
+  ZX:  ["OZX",  "ZOX",  "ZXO"],
+  XZ:  ["OXZ",  "XOZ",  "XZO"],
+  ZXH: ["OZXH", "ZOXH", "ZXOH"],
+  XZH: ["OXZH", "XOZH", "XZOH"],
+};
+
+export function resolvePipeType(variant: PipeVariant, pos: Position3D): PipeType | null {
+  const axis = pipeAxisFromPos(pos);
+  if (axis === null) return null;
+  return VARIANT_AXIS_MAP[variant][axis];
+}
+
+/** Reverse lookup: concrete PipeType → PipeVariant. */
+const PIPE_TO_VARIANT: Record<PipeType, PipeVariant> = {
+  OZX: "ZX", ZOX: "ZX", ZXO: "ZX",
+  OXZ: "XZ", XOZ: "XZ", XZO: "XZ",
+  OZXH: "ZXH", ZOXH: "ZXH", ZXOH: "ZXH",
+  OXZH: "XZH", XOZH: "XZH", XZOH: "XZH",
+};
+export function getPipeVariant(pt: PipeType): PipeVariant {
+  return PIPE_TO_VARIANT[pt];
+}
+
+// ---------------------------------------------------------------------------
+// Snapping to valid grid positions
+// ---------------------------------------------------------------------------
+
+/** Snap to nearest multiple of 3. */
+function nearestMult3(v: number): number {
+  return Math.round(v / 3) * 3;
+}
+
+/** Snap to nearest 3k+1 position (pipe slot). */
+function nearest3kPlus1(v: number): number {
+  return Math.round((v - 1) / 3) * 3 + 1;
+}
+
+/** Snap raw TQEC X/Y coordinates (on ground plane z=0) to nearest valid position. */
+export function snapGroundPos(rawX: number, rawY: number, forPipe: boolean): Position3D {
+  if (!forPipe) {
+    return { x: nearestMult3(rawX), y: nearestMult3(rawY), z: 0 };
+  }
+  // For pipe on ground: z=0 ≡ 0 (mod 3), need exactly one of x,y ≡ 1 (mod 3)
+  const bx = nearestMult3(rawX), by = nearestMult3(rawY);
+  const px = nearest3kPlus1(rawX), py = nearest3kPlus1(rawY);
+  // Candidate: X-pipe at (px, by) or Y-pipe at (bx, py)
+  const d1 = Math.abs(rawX - px) + Math.abs(rawY - by);
+  const d2 = Math.abs(rawX - bx) + Math.abs(rawY - py);
+  if (d1 <= d2) return { x: px, y: by, z: 0 };
+  return { x: bx, y: py, z: 0 };
 }
 
 const X_COLOR = new THREE.Color("#ff7f7f"); // red   RGBA(255,127,127)
@@ -574,7 +674,6 @@ export function getAdjacentPos(
   normal: THREE.Vector3,
   dstType: BlockType,
 ): Position3D {
-  // Round normal components to nearest axis
   const nx = Math.round(normal.x);
   const ny = Math.round(normal.y);
   const nz = Math.round(normal.z);
@@ -582,11 +681,8 @@ export function getAdjacentPos(
   const srcSize = blockTqecSize(srcType);
   const dstSize = blockTqecSize(dstType);
 
-  // TQEC X: Three.js +X = TQEC +X
   const x = srcPos.x + (nx > 0 ? srcSize[0] : nx < 0 ? -dstSize[0] : 0);
-  // TQEC Y: Three.js +Z = TQEC -Y
   const y = srcPos.y + (nz < 0 ? srcSize[1] : nz > 0 ? -dstSize[1] : 0);
-  // TQEC Z: Three.js +Y = TQEC +Z
   const z = srcPos.z + (ny > 0 ? srcSize[2] : ny < 0 ? -dstSize[2] : 0);
 
   return { x, y, z };
