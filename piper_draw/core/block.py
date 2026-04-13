@@ -15,8 +15,8 @@ class FaceState(Enum):
     faces represent initialization/measurement in that basis.
 
     Remark: Redundancy...
-class FaceState(Enum):
-    """All possible states a Block face can be in.
+    class FaceState(Enum):
+    All possible states a Block face can be in.
 
     For the colored boundaries (RED, GREEN, BLUE), the meaning of the face depends on its
     orientation: space-like faces carry the corresponding weight-2 stabilizers, while time-like
@@ -40,6 +40,11 @@ class FaceState(Enum):
     HADAMARD = "hadamard"
     NULL = "null"
 
+    @classmethod
+    def from_tqec(cls, kind: str) -> "FaceState":
+        mapping = {"X": cls.RED, "Z": cls.BLUE, "Y": cls.GREEN}
+        return mapping[kind]
+
 
 class Coordinate(NamedTuple):
     x: int
@@ -50,7 +55,12 @@ class Coordinate(NamedTuple):
 
 @dataclass(frozen=True, slots=True)
 class Block:
-    pass
+    def __post_init__(self):
+        if not self.is_valid_block():
+            raise BlockError('Invalid block configuration.')
+
+    def is_valid_block(self) -> bool:
+        return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,18 +73,24 @@ class SingleVoxelBlock(Block):
     bottom: FaceState = FaceState.OPEN
 
     def __post_init__(self):
-        if not self.is_valid_surface_code_bock():
+        if not self.is_valid_surface_code_block():
             raise BlockError('')
         return super().__post_init__()
-    
-    def is_valid_suface_code_block(self):
+
+    def is_valid_surface_code_block(self):
         # TODO: Johannes 1
-        pass
+        return True
+
+    @staticmethod
+    def from_tqec_cube_dict(cube_dict: dict) -> "SingleVoxelBlock":
+        faces = [FaceState.from_tqec(k) for k in cube_dict["kind"]]
+        return SingleVoxelBlock(*faces)
 
 
 @dataclass(frozen=True, slots=True)
 class YBlock(Block):
     """Placeholder"""
+
     def __post_init__(self):
         super().__post_init__()
         raise NotImplementedError

@@ -1,5 +1,5 @@
 import networkx as nx
-from .block import Block, Coordinate
+from .block import Block, Coordinate, SingleVoxelBlock
 from .rulesets import surface_code_lattice_surgery
 
 
@@ -14,10 +14,11 @@ class PipeDiagram:
     def add_block(self, coordinate: Coordinate, block: Block) -> None:
         if coordinate in self._graph:
             raise PipeDiagramError("coordinate already occupied.")
-        # Since coordinates enter the hash value of Blocks, verifying that all 
+        # Since coordinates enter the hash value of Blocks, verifying that all
         if self.compatible_with_neighbors(coordinate, block):
             self._graph.add_node(coordinate, block=block)
-        raise PipeDiagramError
+        else:
+            raise PipeDiagramError
 
     def remove_block(self, block: Block) -> None:
         # if block not in self._graph:
@@ -28,11 +29,11 @@ class PipeDiagram:
         #     del self._spatial_map[c]
         # self._graph.remove_node(block)
         pass
-    
+
     def remove_block_from(self, coordinate: Coordinate) -> None:
         # if coordinate not in self._spatial_map:
         #     raise KeyError('Coordinate is not occupied by a block.')
-        
+
         # block = self._spatial_map[coordinate]
         # coords = block.coordinates
         # for c in coords:
@@ -90,19 +91,27 @@ class PipeDiagram:
 
     def compatible_with_neighbors(self, coordinate, block) -> bool:
         # TODO: Johannes
-        pass
+        return True
+
+    @staticmethod
+    def from_blockgraph_dict(blockgraph_dict: dict) -> None:
+        diagram = PipeDiagram()
+        for cube in blockgraph_dict["cubes"]:
+            diagram.add_block(
+                coordinate=cube["position"], block=SingleVoxelBlock.from_tqec_cube_dict(cube))
+        return diagram
 
 
 def are_compatible(
-        block1: Block,
-        block2: Block,
-        coordinate1: Coordinate,
-        coordinate2: Coordinate
-    ) -> bool:
+    block1: Block,
+    block2: Block,
+    coordinate1: Coordinate,
+    coordinate2: Coordinate
+) -> bool:
     '''Executes a sequence of checks.'''
     # TODO: Johannes 3
     for check in surface_code_lattice_surgery:
         if not check:
             raise PipeDiagramError
-    
+
     return True
