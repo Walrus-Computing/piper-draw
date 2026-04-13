@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createBlockGeometry, getHiddenFaceMaskForPos, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos } from "./index";
 import type { BlockType } from "./index";
+import { Vector3 } from "three";
 
 function makeBlocks(entries: Array<{ x: number; y: number; z: number; type: BlockType }>) {
   const blocks = new Map<string, { pos: { x: number; y: number; z: number }; type: BlockType }>();
@@ -72,8 +73,8 @@ describe("pipe placement on negative coordinates", () => {
   });
 
   it("resolves pipe variant from a negative-toward face-adjacent position", () => {
-    const negativeYNeighbor = getAdjacentPos({ x: 0, y: 0, z: 0 }, "XZZ", { x: 0, y: 0, z: 1 }, "ZOX");
-    const positiveYNeighbor = getAdjacentPos({ x: 0, y: 0, z: 0 }, "XZZ", { x: 0, y: 0, z: -1 }, "ZOX");
+    const negativeYNeighbor = getAdjacentPos({ x: 0, y: 0, z: 0 }, "XZZ", new Vector3(0, 0, 1), "ZOX");
+    const positiveYNeighbor = getAdjacentPos({ x: 0, y: 0, z: 0 }, "XZZ", new Vector3(0, 0, -1), "ZOX");
 
     expect(negativeYNeighbor).toEqual({ x: 0, y: -2, z: 0 });
     expect(positiveYNeighbor).toEqual({ x: 0, y: 1, z: 0 });
@@ -116,8 +117,8 @@ describe("pipe snapping and adjacency consistency", () => {
   });
 
   it("keeps adjacency results in valid slot positions for all canonical Y-neighbor faces", () => {
-    const south = getAdjacentPos({ x: 0, y: 0, z: 0 }, "XZZ", { x: 0, y: 0, z: 1 }, "ZOX");
-    const north = getAdjacentPos({ x: 0, y: 0, z: 0 }, "XZZ", { x: 0, y: 0, z: -1 }, "ZOX");
+    const south = getAdjacentPos({ x: 0, y: 0, z: 0 }, "XZZ", new Vector3(0, 0, 1), "ZOX");
+    const north = getAdjacentPos({ x: 0, y: 0, z: 0 }, "XZZ", new Vector3(0, 0, -1), "ZOX");
 
     const southSnap = snapGroundPos(south.x + 0.08, south.y + 0.08, true);
     const northSnap = snapGroundPos(north.x + 0.08, north.y + 0.08, true);
