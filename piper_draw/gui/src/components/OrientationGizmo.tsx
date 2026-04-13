@@ -49,7 +49,7 @@ export function OrientationGizmo() {
   );
 
   return (
-    <group scale={40}>
+    <group scale={60}>
       {arrows.map((arrow, i) => {
         const { dir, color, label } = AXES[i];
         const hex = "#" + color.toString(16).padStart(6, "0");

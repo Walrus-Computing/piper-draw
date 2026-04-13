@@ -1,14 +1,31 @@
+import { useRef } from "react";
 import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
+import { useFrame } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
 import { threeToTqecCell, hasBlockOverlap } from "../types";
 
-const GRID_SIZE = 200;
+const PLANE_SIZE = 200;
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const raycaster = new THREE.Raycaster();
+const screenCenter = new THREE.Vector2(0, 0);
+const target = new THREE.Vector3();
 
 export function GridPlane() {
   const addBlock = useBlockStore((s) => s.addBlock);
   const mode = useBlockStore((s) => s.mode);
   const setHoveredGridPos = useBlockStore((s) => s.setHoveredGridPos);
+  const meshRef = useRef<THREE.Mesh>(null!);
+
+  // Keep the invisible raycast plane centered under the camera's look point
+  useFrame(({ camera }) => {
+    if (!meshRef.current) return;
+    raycaster.setFromCamera(screenCenter, camera);
+    if (raycaster.ray.intersectPlane(groundPlane, target)) {
+      meshRef.current.position.x = Math.round(target.x);
+      meshRef.current.position.z = Math.round(target.z);
+    }
+  });
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
@@ -41,13 +58,14 @@ export function GridPlane() {
 
   return (
     <mesh
+      ref={meshRef}
       rotation-x={-Math.PI / 2}
       position={[0, 0, 0]}
       onPointerMove={handlePointerMove}
       onClick={handleClick}
       onPointerLeave={handlePointerLeave}
     >
-      <planeGeometry args={[GRID_SIZE, GRID_SIZE]} />
+      <planeGeometry args={[PLANE_SIZE, PLANE_SIZE]} />
       <meshBasicMaterial visible={false} side={THREE.FrontSide} />
     </mesh>
   );

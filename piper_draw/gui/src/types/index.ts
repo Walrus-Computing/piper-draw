@@ -13,7 +13,7 @@ export interface Position3D {
 export const CUBE_TYPES = ["XZZ", "ZXZ", "ZXX", "XXZ", "ZZX", "XZX"] as const;
 export type CubeType = (typeof CUBE_TYPES)[number];
 
-export const PIPE_TYPES = ["ZXO", "XZO", "ZXOH", "XZOH", "ZOX", "XOZ", "ZOXH", "XOZH", "OZX", "OXZ", "OZXH", "OXZH"] as const;
+export const PIPE_TYPES = ["OZX", "OXZ", "OZXH", "OXZH", "ZOX", "XOZ", "ZOXH", "XOZH", "ZXO", "XZO", "ZXOH", "XZOH"] as const;
 export type PipeType = (typeof PIPE_TYPES)[number];
 
 export type BlockType = CubeType | "Y" | PipeType;

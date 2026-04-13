@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
 // Disable color management to match tqec's Three.js v0.138.0 pipeline:
@@ -198,10 +198,11 @@ function ZPipePreviewSvg({ left, right, hadamard }: { left: string; right: strin
 /** Y-open pipe preview: wide cuboid, right face open. */
 function YPipePreviewSvg({ left, top, hadamard }: { left: string; top: string; hadamard?: boolean }) {
   // Isometric axes: TQEC X → left (dxL, topHL), TQEC Y → right (dxR, topHR, doubled), TQEC Z → height (sideH)
-  const dxL = 6, topHL = 3;   // per unit TQEC X
-  const dxR = 12, topHR = 6;  // 2 units TQEC Y
-  const sideH = 7;
-  const cx = 7, cy = 2;
+  // Scaled to match Z-pipe: 9px per isometric unit
+  const dxL = 9, topHL = 5;    // 1 unit TQEC X
+  const dxR = 18, topHR = 10;  // 2 units TQEC Y
+  const sideH = 10;            // 1 unit height
+  const cx = 10, cy = 7;
 
   // Top face corners: back, right (+2Y), front (+X+2Y), left (+X)
   const bk = [cx, cy];
@@ -213,7 +214,12 @@ function YPipePreviewSvg({ left, top, hadamard }: { left: string; top: string; h
   const topAbove = hadamard ? left : top;
 
   // Band at midpoint of TQEC Y direction on each face
-  const bandW = 1; // half-width in SVG units along Y direction
+  const bandW = 2;
+
+  // Normalized Y direction (bk→rt) for proper isometric band offsets
+  const yLen = Math.sqrt(dxR * dxR + topHR * topHR);
+  const ybx = bandW * dxR / yLen;   // SVG x offset toward rt
+  const yby = bandW * topHR / yLen;  // SVG y offset toward rt
 
   // Left face band midpoints (halfway along the TQEC Y edge of the left face)
   const lf_midT = [(lt[0] + fr[0]) / 2, (lt[1] + fr[1]) / 2]; // top edge mid
@@ -240,22 +246,22 @@ function YPipePreviewSvg({ left, top, hadamard }: { left: string; top: string; h
       {hadamard ? (
         <>
           {/* Top face: back half (original) */}
-          <polygon points={`${bk[0]},${bk[1]} ${tf_bkrt_mid[0] - bandW},${tf_bkrt_mid[1] - bandW * 0.5} ${tf_ltfr_mid[0] - bandW},${tf_ltfr_mid[1] - bandW * 0.5} ${lt[0]},${lt[1]}`}
+          <polygon points={`${bk[0]},${bk[1]} ${tf_bkrt_mid[0] - ybx},${tf_bkrt_mid[1] - yby} ${tf_ltfr_mid[0] - ybx},${tf_ltfr_mid[1] - yby} ${lt[0]},${lt[1]}`}
             fill={top} stroke="#000" strokeWidth={0.5} />
           {/* Top face: yellow band */}
-          <polygon points={`${tf_bkrt_mid[0] - bandW},${tf_bkrt_mid[1] - bandW * 0.5} ${tf_bkrt_mid[0] + bandW},${tf_bkrt_mid[1] + bandW * 0.5} ${tf_ltfr_mid[0] + bandW},${tf_ltfr_mid[1] + bandW * 0.5} ${tf_ltfr_mid[0] - bandW},${tf_ltfr_mid[1] - bandW * 0.5}`}
+          <polygon points={`${tf_bkrt_mid[0] - ybx},${tf_bkrt_mid[1] - yby} ${tf_bkrt_mid[0] + ybx},${tf_bkrt_mid[1] + yby} ${tf_ltfr_mid[0] + ybx},${tf_ltfr_mid[1] + yby} ${tf_ltfr_mid[0] - ybx},${tf_ltfr_mid[1] - yby}`}
             fill={H_HEX} stroke="#000" strokeWidth={0.5} />
           {/* Top face: front half (swapped) */}
-          <polygon points={`${tf_bkrt_mid[0] + bandW},${tf_bkrt_mid[1] + bandW * 0.5} ${rt[0]},${rt[1]} ${fr[0]},${fr[1]} ${tf_ltfr_mid[0] + bandW},${tf_ltfr_mid[1] + bandW * 0.5}`}
+          <polygon points={`${tf_bkrt_mid[0] + ybx},${tf_bkrt_mid[1] + yby} ${rt[0]},${rt[1]} ${fr[0]},${fr[1]} ${tf_ltfr_mid[0] + ybx},${tf_ltfr_mid[1] + yby}`}
             fill={topAbove} stroke="#000" strokeWidth={0.5} />
           {/* Left face: back half (original) */}
-          <polygon points={`${lt[0]},${lt[1]} ${lf_midT[0] - bandW},${lf_midT[1] - bandW * 0.5} ${lf_midB[0] - bandW},${lf_midB[1] - bandW * 0.5} ${lt[0]},${lt[1] + sideH}`}
+          <polygon points={`${lt[0]},${lt[1]} ${lf_midT[0] - ybx},${lf_midT[1] - yby} ${lf_midB[0] - ybx},${lf_midB[1] - yby} ${lt[0]},${lt[1] + sideH}`}
             fill={left} stroke="#000" strokeWidth={0.7} />
           {/* Left face: yellow band */}
-          <polygon points={`${lf_midT[0] - bandW},${lf_midT[1] - bandW * 0.5} ${lf_midT[0] + bandW},${lf_midT[1] + bandW * 0.5} ${lf_midB[0] + bandW},${lf_midB[1] + bandW * 0.5} ${lf_midB[0] - bandW},${lf_midB[1] - bandW * 0.5}`}
+          <polygon points={`${lf_midT[0] - ybx},${lf_midT[1] - yby} ${lf_midT[0] + ybx},${lf_midT[1] + yby} ${lf_midB[0] + ybx},${lf_midB[1] + yby} ${lf_midB[0] - ybx},${lf_midB[1] - yby}`}
             fill={H_HEX} stroke="#000" strokeWidth={0.5} />
           {/* Left face: front half (swapped) */}
-          <polygon points={`${lf_midT[0] + bandW},${lf_midT[1] + bandW * 0.5} ${fr[0]},${fr[1]} ${fr[0]},${fr[1] + sideH} ${lf_midB[0] + bandW},${lf_midB[1] + bandW * 0.5}`}
+          <polygon points={`${lf_midT[0] + ybx},${lf_midT[1] + yby} ${fr[0]},${fr[1]} ${fr[0]},${fr[1] + sideH} ${lf_midB[0] + ybx},${lf_midB[1] + yby}`}
             fill={leftAbove} stroke="#000" strokeWidth={0.7} />
         </>
       ) : (
@@ -275,10 +281,11 @@ function YPipePreviewSvg({ left, top, hadamard }: { left: string; top: string; h
 /** X-open pipe preview: wide cuboid extended left, left face open. */
 function XPipePreviewSvg({ right, top, hadamard }: { right: string; top: string; hadamard?: boolean }) {
   // Isometric: TQEC X → left (dxL, topHL, doubled for 2 units), TQEC Y → right (dxR, topHR)
-  const dxL = 12, topHL = 6;  // 2 units TQEC X
-  const dxR = 6, topHR = 3;   // 1 unit TQEC Y
-  const sideH = 7;
-  const cx = 14, cy = 2;
+  // Scaled to match Z-pipe: 9px per isometric unit
+  const dxL = 18, topHL = 10;  // 2 units TQEC X
+  const dxR = 9, topHR = 5;    // 1 unit TQEC Y
+  const sideH = 10;            // 1 unit height
+  const cx = 19, cy = 7;
 
   // Top face corners: back, right (+Y), front (+X+Y), left (+X)
   const bk = [cx, cy];
@@ -289,17 +296,20 @@ function XPipePreviewSvg({ right, top, hadamard }: { right: string; top: string;
   const rightAbove = hadamard ? top : right;
   const topAbove = hadamard ? right : top;
 
-  const bandW = 1;
+  const bandW = 2;
 
-  // Right face band midpoints (halfway along TQEC X edge on right face)
-  // Right face band midpoints (halfway along TQEC X on right face = midpoint of rt→fr edge)
-  const rf_rtfr_mid = [(rt[0] + fr[0]) / 2, (rt[1] + fr[1]) / 2];
-  const rf_midTR = [rf_rtfr_mid[0], rf_rtfr_mid[1]];
-  const rf_midBR = [rf_rtfr_mid[0], rf_rtfr_mid[1] + sideH];
+  // Normalized X direction (bk→lt) for proper isometric band offsets
+  const xLen = Math.sqrt(dxL * dxL + topHL * topHL);
+  const bx = bandW * dxL / xLen;   // SVG x offset toward bk
+  const by = bandW * topHL / xLen;  // SVG y offset toward bk
 
   // Top face band midpoints: midpoint of bk→lt edge and rt→fr edge
   const tf_bklt_mid = [(bk[0] + lt[0]) / 2, (bk[1] + lt[1]) / 2];
   const tf_rtfr_mid = [(rt[0] + fr[0]) / 2, (rt[1] + fr[1]) / 2];
+
+  // Right face band midpoints (halfway along TQEC X on right face = midpoint of rt→fr edge)
+  const rf_midTR = [(rt[0] + fr[0]) / 2, (rt[1] + fr[1]) / 2];
+  const rf_midBR = [rf_midTR[0], rf_midTR[1] + sideH];
 
   const svgW = rt[0] + 1;
   const svgH = Math.max(lt[1], fr[1]) + sideH + 1;
@@ -318,35 +328,75 @@ function XPipePreviewSvg({ right, top, hadamard }: { right: string; top: string;
       {hadamard ? (
         <>
           {/* Top face: back half (original) */}
-          <polygon points={`${bk[0]},${bk[1]} ${rt[0]},${rt[1]} ${tf_rtfr_mid[0] + bandW},${tf_rtfr_mid[1] + bandW * 0.5} ${tf_bklt_mid[0] + bandW},${tf_bklt_mid[1] + bandW * 0.5}`}
+          <polygon points={`${bk[0]},${bk[1]} ${rt[0]},${rt[1]} ${tf_rtfr_mid[0] + bx},${tf_rtfr_mid[1] - by} ${tf_bklt_mid[0] + bx},${tf_bklt_mid[1] - by}`}
             fill={top} stroke="#000" strokeWidth={0.5} />
           {/* Top face: yellow band */}
-          <polygon points={`${tf_bklt_mid[0] + bandW},${tf_bklt_mid[1] + bandW * 0.5} ${tf_rtfr_mid[0] + bandW},${tf_rtfr_mid[1] + bandW * 0.5} ${tf_rtfr_mid[0] - bandW},${tf_rtfr_mid[1] - bandW * 0.5} ${tf_bklt_mid[0] - bandW},${tf_bklt_mid[1] - bandW * 0.5}`}
+          <polygon points={`${tf_bklt_mid[0] + bx},${tf_bklt_mid[1] - by} ${tf_rtfr_mid[0] + bx},${tf_rtfr_mid[1] - by} ${tf_rtfr_mid[0] - bx},${tf_rtfr_mid[1] + by} ${tf_bklt_mid[0] - bx},${tf_bklt_mid[1] + by}`}
             fill={H_HEX} stroke="#000" strokeWidth={0.5} />
           {/* Top face: front half (swapped) */}
-          <polygon points={`${tf_bklt_mid[0] - bandW},${tf_bklt_mid[1] - bandW * 0.5} ${tf_rtfr_mid[0] - bandW},${tf_rtfr_mid[1] - bandW * 0.5} ${fr[0]},${fr[1]} ${lt[0]},${lt[1]}`}
+          <polygon points={`${tf_bklt_mid[0] - bx},${tf_bklt_mid[1] + by} ${tf_rtfr_mid[0] - bx},${tf_rtfr_mid[1] + by} ${fr[0]},${fr[1]} ${lt[0]},${lt[1]}`}
             fill={topAbove} stroke="#000" strokeWidth={0.5} />
           {/* Right face: back half (original) */}
-          <polygon points={`${rt[0]},${rt[1]} ${rf_midTR[0] + bandW * 0.87},${rf_midTR[1] + bandW * 0.5} ${rf_midBR[0] + bandW * 0.87},${rf_midBR[1] + bandW * 0.5} ${rt[0]},${rt[1] + sideH}`}
-            fill={right} stroke="#000" strokeWidth={0.7} opacity={0.7} />
+          <polygon points={`${rt[0]},${rt[1]} ${rf_midTR[0] + bx},${rf_midTR[1] - by} ${rf_midBR[0] + bx},${rf_midBR[1] - by} ${rt[0]},${rt[1] + sideH}`}
+            fill={right} stroke="#000" strokeWidth={0.7} />
           {/* Right face: yellow band */}
-          <polygon points={`${rf_midTR[0] + bandW * 0.87},${rf_midTR[1] + bandW * 0.5} ${rf_midTR[0] - bandW * 0.87},${rf_midTR[1] - bandW * 0.5} ${rf_midBR[0] - bandW * 0.87},${rf_midBR[1] - bandW * 0.5} ${rf_midBR[0] + bandW * 0.87},${rf_midBR[1] + bandW * 0.5}`}
-            fill={H_HEX} stroke="#000" strokeWidth={0.5} opacity={0.8} />
+          <polygon points={`${rf_midTR[0] + bx},${rf_midTR[1] - by} ${rf_midTR[0] - bx},${rf_midTR[1] + by} ${rf_midBR[0] - bx},${rf_midBR[1] + by} ${rf_midBR[0] + bx},${rf_midBR[1] - by}`}
+            fill={H_HEX} stroke="#000" strokeWidth={0.5} />
           {/* Right face: front half (swapped) */}
-          <polygon points={`${rf_midTR[0] - bandW * 0.87},${rf_midTR[1] - bandW * 0.5} ${fr[0]},${fr[1]} ${fr[0]},${fr[1] + sideH} ${rf_midBR[0] - bandW * 0.87},${rf_midBR[1] - bandW * 0.5}`}
-            fill={rightAbove} stroke="#000" strokeWidth={0.7} opacity={0.7} />
+          <polygon points={`${rf_midTR[0] - bx},${rf_midTR[1] + by} ${fr[0]},${fr[1]} ${fr[0]},${fr[1] + sideH} ${rf_midBR[0] - bx},${rf_midBR[1] + by}`}
+            fill={rightAbove} stroke="#000" strokeWidth={0.7} />
         </>
       ) : (
         <>
           {/* Right face (TQEC Y-axis) */}
           <polygon points={`${rt[0]},${rt[1]} ${fr[0]},${fr[1]} ${fr[0]},${fr[1] + sideH} ${rt[0]},${rt[1] + sideH}`}
-            fill={right} stroke="#000" strokeWidth={0.7} opacity={0.7} />
+            fill={right} stroke="#000" strokeWidth={0.7} />
         </>
       )}
       {/* Left face — dashed outline (open) */}
       <polygon points={`${lt[0]},${lt[1]} ${fr[0]},${fr[1]} ${fr[0]},${fr[1] + sideH} ${lt[0]},${lt[1] + sideH}`}
         fill="none" stroke="#000" strokeWidth={0.7} strokeDasharray="2 1.5" />
     </svg>
+  );
+}
+
+const GRID_SECTION = 5;
+const _gp = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const _gr = new THREE.Raycaster();
+const _gc = new THREE.Vector2(0, 0);
+const _gt = new THREE.Vector3();
+
+/**
+ * Grid that repositions to follow the camera, snapped to sectionSize
+ * so grid lines never shift. The underlying plane is large (1000×1000)
+ * and always centered near the camera's ground look-point.
+ */
+function FollowGrid() {
+  const ref = useRef<THREE.Group>(null!);
+  useFrame(({ camera }) => {
+    if (!ref.current) return;
+    _gr.setFromCamera(_gc, camera);
+    if (_gr.ray.intersectPlane(_gp, _gt)) {
+      // Snap to sectionSize multiples so grid lines stay aligned
+      ref.current.position.x = Math.round(_gt.x / GRID_SECTION) * GRID_SECTION;
+      ref.current.position.z = Math.round(_gt.z / GRID_SECTION) * GRID_SECTION;
+    }
+  });
+  return (
+    <group ref={ref}>
+      <Grid
+        args={[1000, 1000]}
+        infiniteGrid
+        cellSize={1}
+        sectionSize={GRID_SECTION}
+        cellColor="#aaaaaa"
+        sectionColor="#888888"
+        fadeDistance={500}
+        fadeStrength={3}
+        cellThickness={0.5}
+        sectionThickness={1}
+      />
+    </group>
   );
 }
 
@@ -359,6 +409,13 @@ const groupLabelStyle = {
   textAlign: "center" as const,
 };
 
+const previewWrapStyle: React.CSSProperties = {
+  flex: 1,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
 const blockBtnStyle = (active: boolean) => ({
   ...btnStyle(active),
   display: "flex" as const,
@@ -366,7 +423,6 @@ const blockBtnStyle = (active: boolean) => ({
   alignItems: "center" as const,
   justifyContent: "flex-start" as const,
   padding: "4px 8px",
-  minHeight: "46px",
 });
 
 const btnStyle = (active: boolean) => ({
@@ -406,15 +462,13 @@ function Toolbar({ onResetCamera }: { onResetCamera: () => void }) {
       }}
     >
       {/* Mode + reset buttons */}
-      <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-          <button onClick={() => setMode("place")} style={btnStyle(mode === "place")}>
-            Place
-          </button>
-          <button onClick={() => setMode("delete")} style={btnStyle(mode === "delete")}>
-            Delete
-          </button>
-        </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
+        <button onClick={() => setMode("place")} style={btnStyle(mode === "place")}>
+          Place
+        </button>
+        <button onClick={() => setMode("delete")} style={btnStyle(mode === "delete")}>
+          Delete
+        </button>
         <button onClick={onResetCamera} style={btnStyle(false)}>
           Origin
         </button>
@@ -423,10 +477,10 @@ function Toolbar({ onResetCamera }: { onResetCamera: () => void }) {
       {/* Separator */}
       <div style={{ width: 1, background: "#ddd" }} />
 
-      {/* ZXCube group */}
+      {/* Blocks group (ZXCubes + Y) */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-        <span style={groupLabelStyle}>ZXCube</span>
-        <div style={{ display: "flex", gap: "4px" }}>
+        <span style={groupLabelStyle}>Blocks</span>
+        <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           {CUBE_TYPES.map((ct) => (
             <button
               key={ct}
@@ -437,19 +491,9 @@ function Toolbar({ onResetCamera }: { onResetCamera: () => void }) {
               style={blockBtnStyle(cubeType === ct && mode === "place")}
             >
               {ct}
-              <CubePreview cubeType={ct} />
+              <div style={previewWrapStyle}><CubePreview cubeType={ct} /></div>
             </button>
           ))}
-        </div>
-      </div>
-
-      {/* Separator */}
-      <div style={{ width: 1, background: "#ddd" }} />
-
-      {/* YHalfCube group */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-        <span style={groupLabelStyle}>YHalfCube</span>
-        <div style={{ display: "flex", gap: "4px" }}>
           <button
             onClick={() => {
               setCubeType("Y");
@@ -458,7 +502,7 @@ function Toolbar({ onResetCamera }: { onResetCamera: () => void }) {
             style={blockBtnStyle(cubeType === "Y" && mode === "place")}
           >
             Y
-            <YHalfCubePreview />
+            <div style={previewWrapStyle}><YHalfCubePreview /></div>
           </button>
         </div>
       </div>
@@ -469,7 +513,7 @@ function Toolbar({ onResetCamera }: { onResetCamera: () => void }) {
       {/* Pipes group */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <span style={groupLabelStyle}>Pipes</span>
-        <div style={{ display: "flex", gap: "4px" }}>
+        <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           {PIPE_TYPES.map((pt) => (
             <button
               key={pt}
@@ -480,7 +524,7 @@ function Toolbar({ onResetCamera }: { onResetCamera: () => void }) {
               style={blockBtnStyle(cubeType === pt && mode === "place")}
             >
               {pt}
-              <PipePreview pipeType={pt} />
+              <div style={previewWrapStyle}><PipePreview pipeType={pt} /></div>
             </button>
           ))}
         </div>
@@ -526,18 +570,8 @@ export default function App() {
         <GhostBlock />
         <AxisLabels />
         <FpsSampler onFps={setFps} />
-        <Grid
-          infiniteGrid
-          cellSize={1}
-          sectionSize={5}
-          cellColor="#aaaaaa"
-          sectionColor="#888888"
-          fadeDistance={200}
-          fadeStrength={2}
-          cellThickness={0.5}
-          sectionThickness={1}
-        />
-        <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
+        <FollowGrid />
+        <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
           <OrientationGizmo />
         </GizmoHelper>
         <OrbitControls ref={controlsRef} makeDefault />
