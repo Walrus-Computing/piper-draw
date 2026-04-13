@@ -1,6 +1,6 @@
 import networkx as nx
-
 from .block import Block, Coordinate
+from .rulesets import surface_code_lattice_surgery
 
 
 class PipeDiagram:
@@ -17,7 +17,7 @@ class PipeDiagram:
         if any(c in self._spatial_map for c in block.coordinates):
             raise ValueError("Block contains coordinates that are already occupied.")
         # Since coordinates enter the hash value of Blocks, verifying that all 
-        if compatible_with_neighbors():
+        if self.compatible_with_neighbors(coordinate, block):
             self._graph.add_node(coordinate, block=block)
         raise ValueError
 
@@ -87,3 +87,26 @@ class PipeDiagram:
         #     f"PipeDiagram(blocks={self.num_blocks},"
         #     f" connections={self.num_connections})"
         # )
+
+    def compatible_with_neighbors(self, coordinate, block) -> bool:
+        # TODO: Johannes
+        pass
+
+
+def are_compatible(
+        block1: Block,
+        block2: Block,
+        coordinate1: Coordinate,
+        coordinate2: Coordinate
+    ) -> bool:
+    '''Executes a sequence of checks.'''
+    # TODO: Johannes 3
+    if check fails:
+        raise PipeDiagramError()
+    
+    # TODO: imported ruleset hardcoded for now. Make configurable.
+    for chekc in surface_code_lattice_surgery:
+        if check_fails:
+            raise
+    
+    pass

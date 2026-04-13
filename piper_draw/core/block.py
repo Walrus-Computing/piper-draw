@@ -40,15 +40,12 @@ class Coordinate(NamedTuple):
     x: int
     y: int
     z: int
+    # Extra dimension for 3d architecture
 
 
 @dataclass(frozen=True, slots=True)
 class Block:
-    coordinates: tuple[Coordinate]
-
-    def __post_init__(self) -> None:
-        if any(not isinstance(c, Coordinate) for c in self.coordinates):
-            raise TypeError('coordinates must be a tuple of Coordinates')
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,8 +59,14 @@ class SingleVoxelBlock(Block):
 
     def __post_init__(self):
         if len(self.coordinates) != 1:
-            raise ValueError('SingleVoxelBlock can only have one Coordinate')
+            raise BlockError('SingleVoxelBlock can only have one Coordinate')
+        if not self.is_valid_surface_code():
+            raise BlockError('')
         return super().__post_init__()
+    
+    def is_valid_suface_code(self):
+        # TODO: Johannes 1
+        pass
 
 
 @dataclass(frozen=True, slots=True)
