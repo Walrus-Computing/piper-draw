@@ -15,16 +15,18 @@ class FaceState(Enum):
     faces represent initialization/measurement in that basis.
 
     Remark: Redundancy...
+class FaceState(Enum):
+    """All possible states a Block face can be in.
 
-    
-    OPEN: This face is to be merged with another open face. A valid pipe diagram has every
-        open face connected to another open face.
-    PORT: Same as open, but remains open. Indicates input/output of the entire computation.
-        (NOTE: Determine if distinction between input and output is helpful.)
+    For the colored boundaries (RED, GREEN, BLUE), the meaning of the face depends on its
+    orientation: space-like faces carry the corresponding weight-2 stabilizers, while time-like
+    faces represent initialization/measurement in that basis.
+
+    OPEN: This face is to be merged with another open face unless it represents a port in time
+        direction. A valid pipe diagram has every open face connected to another open face except
+        ports.
     RED: X boundary. Space-like: weight-2 X-stabilizers. Time-like: |+> prep/measurement.
     GREEN: Y boundary. Space-like: weight-2 Y-stabilizers. Time-like: |+i> prep/measurement.
-        Morally indicates that the respective face is open and to be merged with a Y-Block.
-        (For now only in time direction. TODO: Make sense of Y-Blocks in space direction.)
     BLUE: Z boundary. Space-like: weight-2 Z-stabilizers. Time-like: |0> prep/measurement.
     HADAMARD: A Hadamard pipe connector that applies a basis change between two open faces of
         neighboring blocks. (TODO: determine whether this is actually needed as a face state.)
@@ -32,7 +34,6 @@ class FaceState(Enum):
         diagram must contain no NULL faces.
     """
     OPEN = "open"
-    PORT = "port"
     RED = "red"
     GREEN = "green"
     BLUE = "blue"
