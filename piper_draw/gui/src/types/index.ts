@@ -29,6 +29,8 @@ const Z_COLOR = new THREE.Color("#4488ff"); // Z basis = blue
 const Y_COLOR = new THREE.Color("#44cc44"); // Y basis = green
 const H_COLOR = new THREE.Color("#ffcc00"); // Hadamard = yellow
 const H_BAND_HALF_HEIGHT = 0.08;
+/** Tiny inset so pipe walls are never coplanar with adjacent blocks/pipes. */
+const WALL_EPS = 0.001;
 
 /**
  * Face colors per cube type, indexed by TQEC axis: [X, Y, Z].
@@ -75,7 +77,9 @@ function createZPipeGeometry(
 ): THREE.BufferGeometry {
   if (!hadamard) {
     // Non-H pipe: simple box with open faces removed
-    const geo = new THREE.BoxGeometry(1, 2, 1);
+    // Shrink closed dimensions by WALL_EPS to avoid coplanar z-fighting
+    const e = WALL_EPS;
+    const geo = new THREE.BoxGeometry(1 - 2 * e, 2, 1 - 2 * e);
     const colors = new Float32Array(24 * 3);
     const faceColors: (THREE.Color | null)[] = [
       xAxisColor, xAxisColor, // +X, -X = TQEC X-axis
@@ -108,7 +112,7 @@ function createZPipeGeometry(
 
   // Hadamard pipe: each wall subdivided into 3 strips (below, yellow band, above).
   // Above the band, X/Z basis colors are swapped per TQEC convention.
-  const hx = 0.5, hz = 0.5;
+  const hx = 0.5 - WALL_EPS, hz = 0.5 - WALL_EPS;
   const bh = H_BAND_HALF_HEIGHT;
   const xAbove = yAxisColor; // swapped above Hadamard
   const yAbove = xAxisColor;
@@ -173,7 +177,8 @@ function createYPipeGeometry(
   hadamard: boolean,
 ): THREE.BufferGeometry {
   if (!hadamard) {
-    const geo = new THREE.BoxGeometry(1, 1, 2);
+    const e = WALL_EPS;
+    const geo = new THREE.BoxGeometry(1 - 2 * e, 1 - 2 * e, 2);
     const colors = new Float32Array(24 * 3);
     const faceColors: (THREE.Color | null)[] = [
       xAxisColor, xAxisColor, // +X, -X = TQEC X-axis
@@ -206,7 +211,7 @@ function createYPipeGeometry(
 
   // Hadamard: each wall subdivided into 3 strips along Z (the open direction).
   // Colors swap past the band per TQEC convention.
-  const hx = 0.5, hy = 0.5;
+  const hx = 0.5 - WALL_EPS, hy = 0.5 - WALL_EPS;
   const bh = H_BAND_HALF_HEIGHT;
   const xAbove = zAxisColor; // swapped past Hadamard
   const zAbove = xAxisColor;
@@ -271,7 +276,8 @@ function createXPipeGeometry(
   hadamard: boolean,
 ): THREE.BufferGeometry {
   if (!hadamard) {
-    const geo = new THREE.BoxGeometry(2, 1, 1);
+    const e = WALL_EPS;
+    const geo = new THREE.BoxGeometry(2, 1 - 2 * e, 1 - 2 * e);
     const colors = new Float32Array(24 * 3);
     const faceColors: (THREE.Color | null)[] = [
       null, null,              // +X, -X = TQEC X-axis = open
@@ -303,7 +309,7 @@ function createXPipeGeometry(
   }
 
   // Hadamard: each wall subdivided into 3 strips along X (the open direction).
-  const hy = 0.5, hz = 0.5;
+  const hy = 0.5 - WALL_EPS, hz = 0.5 - WALL_EPS;
   const bh = H_BAND_HALF_HEIGHT;
   const yAbove = zAxisColor; // swapped past Hadamard
   const zAbove = yAxisColor;
@@ -436,8 +442,10 @@ export const createCubeGeometry = createBlockGeometry;
 
 /** Edge line segments for a block type, including Hadamard band edges for H pipes. */
 export function createBlockEdges(blockType: BlockType): THREE.BufferGeometry {
-  const fullBox = new THREE.BoxGeometry(...blockThreeSize(blockType));
-  const edges = new THREE.EdgesGeometry(fullBox);
+  const [bx, by, bz] = blockThreeSize(blockType);
+  const e2 = 2 * WALL_EPS;
+  // Inset all edges so they don't poke through adjacent pipe walls
+  const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(bx - e2, by - e2, bz - e2));
 
   const isZPipeH = blockType === "ZXOH" || blockType === "XZOH";
   const isYPipeH = blockType === "ZOXH" || blockType === "XOZH";
@@ -445,35 +453,33 @@ export function createBlockEdges(blockType: BlockType): THREE.BufferGeometry {
   if (!isZPipeH && !isYPipeH && !isXPipeH) return edges;
 
   const basePos = edges.getAttribute("position").array as Float32Array;
-  const o = 0.002; // tiny offset so lines render in front of coplanar faces
   const bandEdges: number[] = [];
+  // Band edge rings sit on the inset pipe walls (matching WALL_EPS)
+  const w = 0.5 - WALL_EPS;
 
   if (isZPipeH) {
     // Z-pipe: band rings at y = ±bh (perpendicular to open direction Three.js Y)
-    const hx = 0.5, hz = 0.5;
     for (const by of [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT]) {
-      bandEdges.push(-hx - o, by, -hz - o,  hx + o, by, -hz - o);
-      bandEdges.push( hx + o, by, -hz - o,  hx + o, by,  hz + o);
-      bandEdges.push( hx + o, by,  hz + o, -hx - o, by,  hz + o);
-      bandEdges.push(-hx - o, by,  hz + o, -hx - o, by, -hz - o);
+      bandEdges.push(-w, by, -w,  w, by, -w);
+      bandEdges.push( w, by, -w,  w, by,  w);
+      bandEdges.push( w, by,  w, -w, by,  w);
+      bandEdges.push(-w, by,  w, -w, by, -w);
     }
   } else if (isYPipeH) {
     // Y-pipe: band rings at z = ±bh (perpendicular to open direction Three.js Z)
-    const hx = 0.5, hy = 0.5;
     for (const bz of [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT]) {
-      bandEdges.push(-hx - o, -hy - o, bz,  hx + o, -hy - o, bz);
-      bandEdges.push( hx + o, -hy - o, bz,  hx + o,  hy + o, bz);
-      bandEdges.push( hx + o,  hy + o, bz, -hx - o,  hy + o, bz);
-      bandEdges.push(-hx - o,  hy + o, bz, -hx - o, -hy - o, bz);
+      bandEdges.push(-w, -w, bz,  w, -w, bz);
+      bandEdges.push( w, -w, bz,  w,  w, bz);
+      bandEdges.push( w,  w, bz, -w,  w, bz);
+      bandEdges.push(-w,  w, bz, -w, -w, bz);
     }
   } else {
     // X-pipe: band rings at x = ±bh (perpendicular to open direction Three.js X)
-    const hy = 0.5, hz = 0.5;
     for (const bx of [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT]) {
-      bandEdges.push(bx, -hy - o, -hz - o,  bx,  hy + o, -hz - o);
-      bandEdges.push(bx,  hy + o, -hz - o,  bx,  hy + o,  hz + o);
-      bandEdges.push(bx,  hy + o,  hz + o,  bx, -hy - o,  hz + o);
-      bandEdges.push(bx, -hy - o,  hz + o,  bx, -hy - o, -hz - o);
+      bandEdges.push(bx, -w, -w,  bx,  w, -w);
+      bandEdges.push(bx,  w, -w,  bx,  w,  w);
+      bandEdges.push(bx,  w,  w,  bx, -w,  w);
+      bandEdges.push(bx, -w,  w,  bx, -w, -w);
     }
   }
 
@@ -484,6 +490,22 @@ export function createBlockEdges(blockType: BlockType): THREE.BufferGeometry {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(merged, 3));
   return geo;
+}
+
+/** Check if placing a block at pos with the given type overlaps any existing block. */
+export function hasBlockOverlap(pos: Position3D, type: BlockType, blocks: Map<string, Block>): boolean {
+  const sz = blockTqecSize(type);
+  for (const block of blocks.values()) {
+    const bs = blockTqecSize(block.type);
+    if (
+      pos.x < block.pos.x + bs[0] && pos.x + sz[0] > block.pos.x &&
+      pos.y < block.pos.y + bs[1] && pos.y + sz[1] > block.pos.y &&
+      pos.z < block.pos.z + bs[2] && pos.z + sz[2] > block.pos.z
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function posKey(pos: Position3D): string {
