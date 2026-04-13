@@ -7,8 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "node --require ./scripts/vitest-crypto-shim.cjs ./node_modules/vitest/vitest.mjs run --run",
+    "test:watch": "node --require ./scripts/vitest-crypto-shim.cjs ./node_modules/vitest/vitest.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
