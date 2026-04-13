@@ -3,45 +3,45 @@ from .block import Block, Coordinate
 from .rulesets import surface_code_lattice_surgery
 
 
+class PipeDiagramError(Exception):
+    pass
+
+
 class PipeDiagram:
-    # NOTE: Since _graph and _spatial_map must be kept synchronized at all times, there is a lot of
-    # potential for error. This should be refactored into a class that is dedicated to only doing
-    # that correctly, once the logic is a bit more refined.
     def __init__(self) -> None:
         self._graph: nx.Graph = nx.Graph()
-        # NetworkX graph with nodes being Blocks (possibly multi-voxel) and edges corresponding
-        # to connections between two blocks.
-        
 
     def add_block(self, coordinate: Coordinate, block: Block) -> None:
-        if any(c in self._spatial_map for c in block.coordinates):
-            raise ValueError("Block contains coordinates that are already occupied.")
+        if coordinate in self._graph:
+            raise PipeDiagramError("coordinate already occupied.")
         # Since coordinates enter the hash value of Blocks, verifying that all 
         if self.compatible_with_neighbors(coordinate, block):
             self._graph.add_node(coordinate, block=block)
-        raise ValueError
+        raise PipeDiagramError
 
     def remove_block(self, block: Block) -> None:
-        if block not in self._graph:
-            raise KeyError('Block not in PipeDiagram')
+        # if block not in self._graph:
+        #     raise KeyError('Block not in PipeDiagram')
 
-        coords = block.coordinates
-        for c in coords:
-            del self._spatial_map[c]
-        self._graph.remove_node(block)
+        # coords = block.coordinates
+        # for c in coords:
+        #     del self._spatial_map[c]
+        # self._graph.remove_node(block)
+        pass
     
     def remove_block_from(self, coordinate: Coordinate) -> None:
-        if coordinate not in self._spatial_map:
-            raise KeyError('Coordinate is not occupied by a block.')
+        # if coordinate not in self._spatial_map:
+        #     raise KeyError('Coordinate is not occupied by a block.')
         
-        block = self._spatial_map[coordinate]
-        coords = block.coordinates
-        for c in coords:
-            del self._spatial_map[c]
-        self._graph.remove_node(block)
+        # block = self._spatial_map[coordinate]
+        # coords = block.coordinates
+        # for c in coords:
+        #     del self._spatial_map[c]
+        # self._graph.remove_node(block)
+        pass
 
     def get_block_at(self, coordinate: Coordinate) -> Block:
-        return self._spatial_map[coordinate]
+        pass
 
     def connect_blocks(
         self,
@@ -101,12 +101,8 @@ def are_compatible(
     ) -> bool:
     '''Executes a sequence of checks.'''
     # TODO: Johannes 3
-    if check fails:
-        raise PipeDiagramError()
+    for check in surface_code_lattice_surgery:
+        if not check:
+            raise PipeDiagramError
     
-    # TODO: imported ruleset hardcoded for now. Make configurable.
-    for chekc in surface_code_lattice_surgery:
-        if check_fails:
-            raise
-    
-    pass
+    return True

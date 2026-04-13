@@ -3,6 +3,10 @@ from enum import Enum
 from typing import NamedTuple
 
 
+class BlockError(Exception):
+    pass
+
+
 class FaceState(Enum):
     """All possible states a Block face can be in.
 
@@ -58,13 +62,11 @@ class SingleVoxelBlock(Block):
     bottom: FaceState = FaceState.OPEN
 
     def __post_init__(self):
-        if len(self.coordinates) != 1:
-            raise BlockError('SingleVoxelBlock can only have one Coordinate')
-        if not self.is_valid_surface_code():
+        if not self.is_valid_surface_code_bock():
             raise BlockError('')
         return super().__post_init__()
     
-    def is_valid_suface_code(self):
+    def is_valid_suface_code_block(self):
         # TODO: Johannes 1
         pass
 
