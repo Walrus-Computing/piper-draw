@@ -4,26 +4,23 @@ import type { ThreeEvent } from "@react-three/fiber";
 import { useFrame } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
 import { threeToTqecCell, hasBlockOverlap } from "../types";
+import { cameraGroundPoint } from "../utils/groundPlane";
 
-const PLANE_SIZE = 200;
-const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-const raycaster = new THREE.Raycaster();
-const screenCenter = new THREE.Vector2(0, 0);
-const target = new THREE.Vector3();
+const PLANE_SIZE = 1000;
 
 export function GridPlane() {
   const addBlock = useBlockStore((s) => s.addBlock);
   const mode = useBlockStore((s) => s.mode);
   const setHoveredGridPos = useBlockStore((s) => s.setHoveredGridPos);
   const meshRef = useRef<THREE.Mesh>(null!);
+  const target = useRef(new THREE.Vector3());
 
   // Keep the invisible raycast plane centered under the camera's look point
   useFrame(({ camera }) => {
     if (!meshRef.current) return;
-    raycaster.setFromCamera(screenCenter, camera);
-    if (raycaster.ray.intersectPlane(groundPlane, target)) {
-      meshRef.current.position.x = Math.round(target.x);
-      meshRef.current.position.z = Math.round(target.z);
+    if (cameraGroundPoint(camera, target.current)) {
+      meshRef.current.position.x = Math.round(target.current.x);
+      meshRef.current.position.z = Math.round(target.current.z);
     }
   });
 

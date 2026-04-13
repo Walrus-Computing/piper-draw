@@ -4,9 +4,9 @@ const AXIS_LENGTH = 20;
 const ORIGIN: [number, number, number] = [0, 0, 0];
 
 const axes: { label: string; color: string; end: [number, number, number] }[] = [
-  { label: "X", color: "#ff4444", end: [AXIS_LENGTH, 0, 0] },
+  { label: "X", color: "#ff7f7f", end: [AXIS_LENGTH, 0, 0] },
   { label: "Y", color: "#44cc44", end: [0, 0, -AXIS_LENGTH] },
-  { label: "Z", color: "#4488ff", end: [0, AXIS_LENGTH, 0] },
+  { label: "Z", color: "#7396ff", end: [0, AXIS_LENGTH, 0] },
 ];
 
 export function AxisLabels() {

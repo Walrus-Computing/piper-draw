@@ -5,6 +5,7 @@ import { useBlockStore } from "../stores/blockStore";
 import {
   tqecToThree,
   createBlockGeometry,
+  createBlockEdges,
   blockThreeSize,
   hasBlockOverlap,
   getAdjacentPos,
@@ -13,7 +14,7 @@ import {
 } from "../types";
 import type { BlockType, Block } from "../types";
 
-const MAX_INITIAL = 1024;
+const MIN_CAPACITY = 64;
 
 /** Shared 256x256 DataTexture: white interior with a 2px black border on every face. */
 const BORDER_TEX = (() => {
@@ -41,6 +42,38 @@ const BORDER_TEX = (() => {
   return tex;
 })();
 
+/** Module-level geometry caches — each block type's geometry never changes. */
+const geometryCache = new Map<BlockType, THREE.BufferGeometry>();
+const fullBoxCache = new Map<BlockType, THREE.BoxGeometry>();
+const edgesCache = new Map<BlockType, THREE.BufferGeometry>();
+
+export function getCachedGeometry(blockType: BlockType): THREE.BufferGeometry {
+  let geo = geometryCache.get(blockType);
+  if (!geo) {
+    geo = createBlockGeometry(blockType);
+    geometryCache.set(blockType, geo);
+  }
+  return geo;
+}
+
+export function getCachedEdges(blockType: BlockType): THREE.BufferGeometry {
+  let geo = edgesCache.get(blockType);
+  if (!geo) {
+    geo = createBlockEdges(blockType);
+    edgesCache.set(blockType, geo);
+  }
+  return geo;
+}
+
+function getCachedFullBox(blockType: BlockType): THREE.BoxGeometry {
+  let geo = fullBoxCache.get(blockType);
+  if (!geo) {
+    geo = new THREE.BoxGeometry(...blockThreeSize(blockType));
+    fullBoxCache.set(blockType, geo);
+  }
+  return geo;
+}
+
 function TypedInstances({
   cubeType,
   blocks,
@@ -51,14 +84,19 @@ function TypedInstances({
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const blocksRef = useRef(blocks);
   blocksRef.current = blocks;
+  const capacityRef = useRef(MIN_CAPACITY);
+
+  // Double capacity when needed; never shrink (avoids thrashing remounts)
+  if (blocks.length > capacityRef.current) {
+    while (capacityRef.current < blocks.length) {
+      capacityRef.current *= 2;
+    }
+  }
+  const maxCount = capacityRef.current;
 
   const isPipe = (PIPE_TYPES as readonly string[]).includes(cubeType);
-  const geometry = useMemo(() => createBlockGeometry(cubeType), [cubeType]);
-  // Full box geometry for pipe raycast (includes open faces)
-  const fullBoxGeometry = useMemo(
-    () => isPipe ? new THREE.BoxGeometry(...blockThreeSize(cubeType)) : null,
-    [cubeType, isPipe],
-  );
+  const geometry = getCachedGeometry(cubeType);
+  const fullBoxGeometry = isPipe ? getCachedFullBox(cubeType) : null;
   const material = useMemo(
     () => new THREE.MeshLambertMaterial({
       map: BORDER_TEX,
@@ -77,9 +115,7 @@ function TypedInstances({
     if (!mesh) return;
 
     // For pipes, override raycast to use the full box geometry (including open faces)
-    let originalRaycast: typeof mesh.raycast | undefined;
     if (isPipe && fullBoxGeometry) {
-      originalRaycast = mesh.raycast;
       const realGeo = mesh.geometry;
       mesh.raycast = function (raycaster, intersects) {
         this.geometry = fullBoxGeometry;
@@ -98,12 +134,12 @@ function TypedInstances({
     mesh.computeBoundingSphere();
 
     return () => {
-      // Restore original raycast on cleanup
-      if (originalRaycast) {
-        mesh.raycast = originalRaycast;
+      // Remove instance override, falls back to prototype — safe under Strict Mode double-mount
+      if (isPipe) {
+        delete (mesh as any).raycast;
       }
     };
-  }, [blocks, dummy, isPipe, fullBoxGeometry]);
+  }, [blocks, dummy, isPipe, fullBoxGeometry, cubeType]);
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
@@ -140,10 +176,9 @@ function TypedInstances({
 
   if (blocks.length === 0) return null;
 
-  const maxCount = Math.max(MAX_INITIAL, blocks.length);
-
   return (
     <instancedMesh
+      key={maxCount}
       ref={meshRef}
       args={[geometry, material, maxCount]}
       onPointerMove={handlePointerMove}
@@ -167,7 +202,7 @@ export function BlockInstances() {
 
   return (
     <>
-      {ALL_BLOCK_TYPES.map((ct) => (
+      {ALL_BLOCK_TYPES.filter((ct) => grouped.get(ct)!.length > 0).map((ct) => (
         <TypedInstances
           key={ct}
           cubeType={ct}

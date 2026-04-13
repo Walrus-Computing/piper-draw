@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
@@ -19,6 +19,7 @@ import { OrientationGizmo } from "./components/OrientationGizmo";
 import { useBlockStore } from "./stores/blockStore";
 import { CUBE_TYPES, PIPE_TYPES } from "./types";
 import type { BlockType } from "./types";
+import { cameraGroundPoint } from "./utils/groundPlane";
 
 const X_HEX = "#ff7f7f";
 const Z_HEX = "#7396ff";
@@ -361,10 +362,6 @@ function XPipePreviewSvg({ right, top, hadamard }: { right: string; top: string;
 }
 
 const GRID_SECTION = 5;
-const _gp = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-const _gr = new THREE.Raycaster();
-const _gc = new THREE.Vector2(0, 0);
-const _gt = new THREE.Vector3();
 
 /**
  * Grid that repositions to follow the camera, snapped to sectionSize
@@ -373,13 +370,12 @@ const _gt = new THREE.Vector3();
  */
 function FollowGrid() {
   const ref = useRef<THREE.Group>(null!);
+  const target = useRef(new THREE.Vector3());
   useFrame(({ camera }) => {
     if (!ref.current) return;
-    _gr.setFromCamera(_gc, camera);
-    if (_gr.ray.intersectPlane(_gp, _gt)) {
-      // Snap to sectionSize multiples so grid lines stay aligned
-      ref.current.position.x = Math.round(_gt.x / GRID_SECTION) * GRID_SECTION;
-      ref.current.position.z = Math.round(_gt.z / GRID_SECTION) * GRID_SECTION;
+    if (cameraGroundPoint(camera, target.current)) {
+      ref.current.position.x = Math.round(target.current.x / GRID_SECTION) * GRID_SECTION;
+      ref.current.position.z = Math.round(target.current.z / GRID_SECTION) * GRID_SECTION;
     }
   });
   return (
@@ -436,11 +432,27 @@ const btnStyle = (active: boolean) => ({
   fontWeight: "normal" as const,
 });
 
-function Toolbar({ onResetCamera }: { onResetCamera: () => void }) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function Toolbar({ onResetCamera, controlsRef }: { onResetCamera: () => void; controlsRef: React.RefObject<any> }) {
   const mode = useBlockStore((s) => s.mode);
   const setMode = useBlockStore((s) => s.setMode);
   const cubeType = useBlockStore((s) => s.cubeType);
   const setCubeType = useBlockStore((s) => s.setCubeType);
+  const historyLen = useBlockStore((s) => s.history.length);
+  const futureLen = useBlockStore((s) => s.future.length);
+  const undo = useBlockStore((s) => s.undo);
+  const redo = useBlockStore((s) => s.redo);
+  const clearAll = useBlockStore((s) => s.clearAll);
+  const blocksEmpty = useBlockStore((s) => s.blocks.size === 0);
+
+  const setCameraPreset = (position: [number, number, number]) => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    const camera = controls.object as THREE.PerspectiveCamera;
+    camera.position.set(...position);
+    controls.target.set(0, 0, 0);
+    controls.update();
+  };
 
   return (
     <div
@@ -461,7 +473,7 @@ function Toolbar({ onResetCamera }: { onResetCamera: () => void }) {
         boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
       }}
     >
-      {/* Mode + reset buttons */}
+      {/* Mode buttons */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
         <button onClick={() => setMode("place")} style={btnStyle(mode === "place")}>
           Place
@@ -471,6 +483,44 @@ function Toolbar({ onResetCamera }: { onResetCamera: () => void }) {
         </button>
         <button onClick={onResetCamera} style={btnStyle(false)}>
           Origin
+        </button>
+      </div>
+
+      {/* View buttons */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
+        <button onClick={() => setCameraPreset([35, 35, 0.01])} style={{ ...btnStyle(false), whiteSpace: "nowrap" }}>
+          X View
+        </button>
+        <button onClick={() => setCameraPreset([0.01, 35, 35])} style={{ ...btnStyle(false), whiteSpace: "nowrap" }}>
+          Y View
+        </button>
+        <button onClick={() => setCameraPreset([0, 50, 0.01])} style={{ ...btnStyle(false), whiteSpace: "nowrap" }}>
+          Z View
+        </button>
+      </div>
+
+      {/* Undo / Redo / Clear */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
+        <button
+          onClick={undo}
+          disabled={historyLen === 0}
+          style={{ ...btnStyle(false), opacity: historyLen === 0 ? 0.4 : 1, cursor: historyLen === 0 ? "default" : "pointer" }}
+        >
+          Undo
+        </button>
+        <button
+          onClick={redo}
+          disabled={futureLen === 0}
+          style={{ ...btnStyle(false), opacity: futureLen === 0 ? 0.4 : 1, cursor: futureLen === 0 ? "default" : "pointer" }}
+        >
+          Redo
+        </button>
+        <button
+          onClick={clearAll}
+          disabled={blocksEmpty}
+          style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
+        >
+          Clear
         </button>
       </div>
 
@@ -538,9 +588,29 @@ export default function App() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
 
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (!ctrl) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" && e.shiftKey) {
+        e.preventDefault();
+        useBlockStore.getState().redo();
+      } else if (key === "z") {
+        e.preventDefault();
+        useBlockStore.getState().undo();
+      } else if (key === "y") {
+        e.preventDefault();
+        useBlockStore.getState().redo();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   return (
     <>
-      <Toolbar onResetCamera={() => controlsRef.current?.reset()} />
+      <Toolbar onResetCamera={() => controlsRef.current?.reset()} controlsRef={controlsRef} />
       <div
         onPointerDown={(e) => e.stopPropagation()}
         style={{

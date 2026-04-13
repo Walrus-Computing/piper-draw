@@ -1,10 +1,12 @@
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
 import * as THREE from "three";
+import { useThree } from "@react-three/fiber";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { useBlockStore } from "../stores/blockStore";
-import { tqecToThree, createBlockGeometry, createBlockEdges, blockThreeSize } from "../types";
+import { tqecToThree, blockThreeSize } from "../types";
+import { getCachedGeometry, getCachedEdges } from "./BlockInstances";
 import type { BlockType } from "../types";
 
 /** Box edges + both diagonals on every face, as a LineSegmentsGeometry for fat lines. */
@@ -46,6 +48,7 @@ export function GhostBlock() {
   const cubeType = useBlockStore((s) => s.cubeType);
   const hoveredBlockType = useBlockStore((s) => s.hoveredBlockType);
   const hoveredInvalid = useBlockStore((s) => s.hoveredInvalid);
+  const size = useThree((s) => s.size);
 
   // In delete mode, use the hovered block's type; in place mode, use selected type
   const activeType = mode === "delete" && hoveredBlockType ? hoveredBlockType : cubeType;
@@ -60,12 +63,17 @@ export function GhostBlock() {
     }),
     [],
   );
+  // Keep LineMaterial resolution in sync with viewport size
+  useEffect(() => {
+    deleteMaterial.resolution.set(size.width, size.height);
+  }, [deleteMaterial, size.width, size.height]);
+
   const deleteLineSegments = useMemo(
     () => new LineSegments2(deleteOutline, deleteMaterial),
     [deleteOutline, deleteMaterial],
   );
-  const ghostGeometry = useMemo(() => createBlockGeometry(activeType), [activeType]);
-  const ghostEdges = useMemo(() => createBlockEdges(activeType), [activeType]);
+  const ghostGeometry = getCachedGeometry(activeType);
+  const ghostEdges = getCachedEdges(activeType);
   const ghostMaterial = useMemo(
     () =>
       new THREE.MeshLambertMaterial({
@@ -74,9 +82,6 @@ export function GhostBlock() {
         opacity: 0.4,
         depthWrite: false,
         side: THREE.DoubleSide,
-        polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1,
       }),
     [],
   );
@@ -88,9 +93,6 @@ export function GhostBlock() {
         opacity: 0.4,
         depthWrite: false,
         side: THREE.DoubleSide,
-        polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1,
       }),
     [],
   );
@@ -106,7 +108,7 @@ export function GhostBlock() {
       {isDelete ? (
         <primitive object={deleteLineSegments} scale={1.005} />
       ) : (
-        <>
+        <group scale={isInvalid ? 1.005 : 1}>
           <mesh>
             <primitive object={ghostGeometry} attach="geometry" />
             <primitive object={isInvalid ? invalidMaterial : ghostMaterial} attach="material" />
@@ -115,7 +117,7 @@ export function GhostBlock() {
             <primitive object={ghostEdges} attach="geometry" />
             <lineBasicMaterial color={isInvalid ? "#ff0000" : "#000000"} transparent opacity={0.4} depthWrite={false} />
           </lineSegments>
-        </>
+        </group>
       )}
     </group>
   );
