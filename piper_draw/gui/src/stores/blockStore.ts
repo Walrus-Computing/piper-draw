@@ -10,10 +10,11 @@ interface BlockStore {
   cubeType: BlockType;
   hoveredGridPos: Position3D | null;
   hoveredBlockType: BlockType | null;
+  hoveredInvalid: boolean;
 
   setMode: (mode: Mode) => void;
   setCubeType: (cubeType: BlockType) => void;
-  setHoveredGridPos: (pos: Position3D | null, blockType?: BlockType) => void;
+  setHoveredGridPos: (pos: Position3D | null, blockType?: BlockType, invalid?: boolean) => void;
   addBlock: (pos: Position3D) => void;
   removeBlock: (pos: Position3D) => void;
 }
@@ -24,10 +25,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   cubeType: "XZZ",
   hoveredGridPos: null,
   hoveredBlockType: null,
+  hoveredInvalid: false,
 
   setMode: (mode) => set({ mode }),
   setCubeType: (cubeType) => set({ cubeType }),
-  setHoveredGridPos: (pos, blockType) => set({ hoveredGridPos: pos, hoveredBlockType: blockType ?? null }),
+  setHoveredGridPos: (pos, blockType, invalid) => set({ hoveredGridPos: pos, hoveredBlockType: blockType ?? null, hoveredInvalid: invalid ?? false }),
 
   addBlock: (pos) =>
     set((state) => {

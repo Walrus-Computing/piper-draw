@@ -116,7 +116,7 @@ function TypedInstances({
       if (!e.face) return;
       const adj = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, store.cubeType);
       if (hasBlockOverlap(adj, store.cubeType, store.blocks)) {
-        store.setHoveredGridPos(null);
+        store.setHoveredGridPos(adj, undefined, true);
       } else {
         store.setHoveredGridPos(adj);
       }
@@ -147,6 +147,7 @@ function TypedInstances({
       ref={meshRef}
       args={[geometry, material, maxCount]}
       onPointerMove={handlePointerMove}
+      onPointerLeave={() => useBlockStore.getState().setHoveredGridPos(null)}
       onClick={handleClick}
     />
   );

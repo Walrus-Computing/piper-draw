@@ -16,7 +16,7 @@ export function GridPlane() {
       const pos = threeToTqecCell(e.point.x, 0, e.point.z);
       const store = useBlockStore.getState();
       if (hasBlockOverlap(pos, store.cubeType, store.blocks)) {
-        setHoveredGridPos(null);
+        setHoveredGridPos(pos, undefined, true);
       } else {
         setHoveredGridPos(pos);
       }

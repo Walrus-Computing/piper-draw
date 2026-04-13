@@ -45,6 +45,7 @@ export function GhostBlock() {
   const mode = useBlockStore((s) => s.mode);
   const cubeType = useBlockStore((s) => s.cubeType);
   const hoveredBlockType = useBlockStore((s) => s.hoveredBlockType);
+  const hoveredInvalid = useBlockStore((s) => s.hoveredInvalid);
 
   // In delete mode, use the hovered block's type; in place mode, use selected type
   const activeType = mode === "delete" && hoveredBlockType ? hoveredBlockType : cubeType;
@@ -79,11 +80,26 @@ export function GhostBlock() {
       }),
     [],
   );
+  const invalidMaterial = useMemo(
+    () =>
+      new THREE.MeshLambertMaterial({
+        color: 0xff0000,
+        transparent: true,
+        opacity: 0.4,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1,
+      }),
+    [],
+  );
 
   if (!hoveredGridPos) return null;
 
   const [x, y, z] = tqecToThree(hoveredGridPos, activeType);
   const isDelete = mode === "delete";
+  const isInvalid = !isDelete && hoveredInvalid;
 
   return (
     <group position={[x, y, z]}>
@@ -93,11 +109,11 @@ export function GhostBlock() {
         <>
           <mesh>
             <primitive object={ghostGeometry} attach="geometry" />
-            <primitive object={ghostMaterial} attach="material" />
+            <primitive object={isInvalid ? invalidMaterial : ghostMaterial} attach="material" />
           </mesh>
           <lineSegments>
             <primitive object={ghostEdges} attach="geometry" />
-            <lineBasicMaterial color="#000000" transparent opacity={0.4} depthWrite={false} />
+            <lineBasicMaterial color={isInvalid ? "#ff0000" : "#000000"} transparent opacity={0.4} depthWrite={false} />
           </lineSegments>
         </>
       )}
