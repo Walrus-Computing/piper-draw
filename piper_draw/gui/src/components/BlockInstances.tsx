@@ -11,32 +11,49 @@ import {
   isValidPos,
   resolvePipeType,
   getAdjacentPos,
-  ALL_BLOCK_TYPES,
+  getHiddenFaceMaskForPos,
+  VARIANT_AXIS_MAP,
   PIPE_TYPES,
 } from "../types";
-import type { BlockType, Block } from "../types";
+import type { BlockType, Block, FaceMask, Position3D, PipeVariant } from "../types";
 
 const MIN_CAPACITY = 64;
 
-/** Module-level geometry caches — each block type's geometry never changes. */
-const geometryCache = new Map<BlockType, THREE.BufferGeometry>();
+/** Module-level geometry caches — each block type and hidden-face mask pair's geometry never changes. */
+const geometryCache = new Map<string, THREE.BufferGeometry>();
 const fullBoxCache = new Map<BlockType, THREE.BoxGeometry>();
-const edgesCache = new Map<BlockType, THREE.BufferGeometry>();
+const edgesCache = new Map<string, THREE.BufferGeometry>();
 
-export function getCachedGeometry(blockType: BlockType): THREE.BufferGeometry {
-  let geo = geometryCache.get(blockType);
+function resolvePipeTypeFromFace(
+  srcPos: Position3D,
+  srcType: BlockType,
+  normal: THREE.Vector3,
+  variant: PipeVariant,
+): BlockType | null {
+  for (const candidateType of VARIANT_AXIS_MAP[variant]) {
+    const probe = getAdjacentPos(srcPos, srcType, normal, candidateType);
+    const resolved = resolvePipeType(variant, probe);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+export function getCachedGeometry(blockType: BlockType, hiddenFaces: FaceMask): THREE.BufferGeometry {
+  const key = `${blockType}:${hiddenFaces}`;
+  let geo = geometryCache.get(key);
   if (!geo) {
-    geo = createBlockGeometry(blockType);
-    geometryCache.set(blockType, geo);
+    geo = createBlockGeometry(blockType, hiddenFaces);
+    geometryCache.set(key, geo);
   }
   return geo;
 }
 
-export function getCachedEdges(blockType: BlockType): THREE.BufferGeometry {
-  let geo = edgesCache.get(blockType);
+export function getCachedEdges(blockType: BlockType, hiddenFaces: FaceMask): THREE.BufferGeometry {
+  const key = `${blockType}:${hiddenFaces}`;
+  let geo = edgesCache.get(key);
   if (!geo) {
-    geo = createBlockEdges(blockType);
-    edgesCache.set(blockType, geo);
+    geo = createBlockEdges(blockType, hiddenFaces);
+    edgesCache.set(key, geo);
   }
   return geo;
 }
@@ -53,9 +70,11 @@ export function getCachedFullBox(blockType: BlockType): THREE.BoxGeometry {
 function TypedInstances({
   cubeType,
   blocks,
+  hiddenFaces,
 }: {
   cubeType: BlockType;
   blocks: Block[];
+  hiddenFaces: FaceMask;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const blocksRef = useRef(blocks);
@@ -71,7 +90,7 @@ function TypedInstances({
   const maxCount = capacityRef.current;
 
   const isPipe = (PIPE_TYPES as readonly string[]).includes(cubeType);
-  const geometry = getCachedGeometry(cubeType);
+  const geometry = getCachedGeometry(cubeType, hiddenFaces);
   const fullBoxGeometry = isPipe ? getCachedFullBox(cubeType) : null;
   const material = useMemo(
     () => new THREE.MeshLambertMaterial({
@@ -83,7 +102,7 @@ function TypedInstances({
   const dummy = useMemo(() => new THREE.Matrix4(), []);
 
   // Build batched edge wireframe geometry
-  const edgeTemplate = getCachedEdges(cubeType);
+  const edgeTemplate = getCachedEdges(cubeType, hiddenFaces);
   const templatePositions = edgeTemplate.getAttribute("position").array as Float32Array;
   const vertCount = templatePositions.length / 3;
 
@@ -96,7 +115,7 @@ function TypedInstances({
       const offset = i * vertCount * 3;
       for (let v = 0; v < vertCount; v++) {
         const vi = v * 3;
-        positions[offset + vi]     = templatePositions[vi]     + tx;
+        positions[offset + vi] = templatePositions[vi] + tx;
         positions[offset + vi + 1] = templatePositions[vi + 1] + ty;
         positions[offset + vi + 2] = templatePositions[vi + 2] + tz;
       }
@@ -155,11 +174,9 @@ function TypedInstances({
       // Determine the destination block type
       let dstType: BlockType = store.cubeType;
       if (store.pipeVariant) {
-        // Probe: compute adjacent with dst size 1 to find approximate position
-        const probe = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, store.cubeType);
-        const resolved = resolvePipeType(store.pipeVariant, probe);
+        const resolved = resolvePipeTypeFromFace(b[e.instanceId].pos, cubeType, e.face.normal, store.pipeVariant);
         if (!resolved) {
-          store.setHoveredGridPos(probe, undefined, true);
+          store.setHoveredGridPos(b[e.instanceId].pos, undefined, true);
           return;
         }
         dstType = resolved;
@@ -188,9 +205,9 @@ function TypedInstances({
 
       let dstType: BlockType = store.cubeType;
       if (store.pipeVariant) {
-        const probe = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, store.cubeType);
-        const resolved = resolvePipeType(store.pipeVariant, probe);
-        if (resolved) dstType = resolved;
+        const resolved = resolvePipeTypeFromFace(b[e.instanceId].pos, cubeType, e.face.normal, store.pipeVariant);
+        if (!resolved) return;
+        dstType = resolved;
       }
 
       const adj = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, dstType);
@@ -223,21 +240,37 @@ export function BlockInstances() {
   const blocks = useBlockStore((s) => s.blocks);
 
   const grouped = useMemo(() => {
-    const map = new Map<BlockType, Block[]>();
-    for (const ct of ALL_BLOCK_TYPES) map.set(ct, []);
+    type Group = {
+        type: BlockType;
+      hiddenFaces: FaceMask;
+      blocks: Block[];
+    };
+    const map = new Map<string, Group>();
     for (const block of blocks.values()) {
-      map.get(block.type)!.push(block);
+      const hiddenFaces = getHiddenFaceMaskForPos(block.pos, block.type, blocks);
+      const key = `${block.type}:${hiddenFaces}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.blocks.push(block);
+      } else {
+        map.set(key, {
+          type: block.type,
+          hiddenFaces,
+          blocks: [block],
+        });
+      }
     }
     return map;
   }, [blocks]);
 
   return (
     <>
-      {ALL_BLOCK_TYPES.filter((ct) => grouped.get(ct)!.length > 0).map((ct) => (
+      {Array.from(grouped.values()).map((group) => (
         <TypedInstances
-          key={ct}
-          cubeType={ct}
-          blocks={grouped.get(ct)!}
+          key={`${group.type}:${group.hiddenFaces}`}
+          cubeType={group.type}
+          hiddenFaces={group.hiddenFaces}
+          blocks={group.blocks}
         />
       ))}
     </>

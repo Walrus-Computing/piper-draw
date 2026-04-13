@@ -18,6 +18,23 @@ export type PipeType = (typeof PIPE_TYPES)[number];
 
 export type BlockType = CubeType | "Y" | PipeType;
 export const ALL_BLOCK_TYPES = [...CUBE_TYPES, "Y", ...PIPE_TYPES] as const;
+export type FaceMask = number;
+
+export const FACE_POS_X = 1 << 0; // +X face in Three.js box geometry order
+export const FACE_NEG_X = 1 << 1; // -X
+export const FACE_POS_Y = 1 << 2; // +Y
+export const FACE_NEG_Y = 1 << 3; // -Y
+export const FACE_POS_Z = 1 << 4; // +Z
+export const FACE_NEG_Z = 1 << 5; // -Z
+
+export const FACE_BIT_BY_INDEX: ReadonlyArray<number> = [
+  FACE_POS_X,
+  FACE_NEG_X,
+  FACE_POS_Y,
+  FACE_NEG_Y,
+  FACE_POS_Z,
+  FACE_NEG_Z,
+];
 
 /** Pipe variant: the two non-O face characters (+ optional H). Open axis determined by position. */
 export type PipeVariant = "ZX" | "XZ" | "ZXH" | "XZH";
@@ -41,6 +58,10 @@ function mod(n: number, m: number): number {
   return ((n % m) + m) % m;
 }
 
+function nearest3kPipeCoord(v: number): number {
+  return Math.round((v - 1) / 3) * 3 + 1;
+}
+
 /**
  * Grid spacing: repeating unit is 3 (block=1 + pipe=2).
  *   Block positions: all coordinates ≡ 0 (mod 3)
@@ -52,9 +73,8 @@ export function isValidBlockPos(pos: Position3D): boolean {
 
 export function isValidPipePos(pos: Position3D): boolean {
   const mx = mod(pos.x, 3), my = mod(pos.y, 3), mz = mod(pos.z, 3);
-  const count = (mx === 1 ? 1 : 0) + (my === 1 ? 1 : 0) + (mz === 1 ? 1 : 0);
-  const rest = (mx === 0 || mx === 1) && (my === 0 || my === 1) && (mz === 0 || mz === 1);
-  return count === 1 && rest;
+  const slots = (mx === 1 ? 1 : 0) + (my === 1 ? 1 : 0) + (mz === 1 ? 1 : 0);
+  return slots === 1;
 }
 
 export function isValidPos(pos: Position3D, blockType: BlockType): boolean {
@@ -62,16 +82,21 @@ export function isValidPos(pos: Position3D, blockType: BlockType): boolean {
   return isValidBlockPos(pos);
 }
 
+export function isPipeSlotCoord(v: number): boolean {
+  const r = mod(v, 3);
+  return r === 1;
+}
 /** Which TQEC axis (0=x, 1=y, 2=z) has the pipe slot at this position. */
 export function pipeAxisFromPos(pos: Position3D): 0 | 1 | 2 | null {
-  if (!isValidPipePos(pos)) return null;
-  if (mod(pos.x, 3) === 1) return 0;
-  if (mod(pos.y, 3) === 1) return 1;
+  if (!isPipeSlotCoord(pos.x) && !isPipeSlotCoord(pos.y) && !isPipeSlotCoord(pos.z)) return null;
+  if (isPipeSlotCoord(pos.x)) return 0;
+  if (isPipeSlotCoord(pos.y)) return 1;
+  if (isPipeSlotCoord(pos.z)) return 2;
   return 2;
 }
 
 /** Map a pipe variant + position → concrete PipeType. Returns null if position is not a valid pipe pos. */
-const VARIANT_AXIS_MAP: Record<PipeVariant, [PipeType, PipeType, PipeType]> = {
+export const VARIANT_AXIS_MAP: Record<PipeVariant, [PipeType, PipeType, PipeType]> = {
   ZX:  ["OZX",  "ZOX",  "ZXO"],
   XZ:  ["OXZ",  "XOZ",  "XZO"],
   ZXH: ["OZXH", "ZOXH", "ZXOH"],
@@ -104,9 +129,9 @@ function nearestMult3(v: number): number {
   return Math.round(v / 3) * 3;
 }
 
-/** Snap to nearest 3k+1 position (pipe slot). */
+/** Snap to nearest pipe slot coordinate (distance 1 from nearest block coordinate). */
 function nearest3kPlus1(v: number): number {
-  return Math.round((v - 1) / 3) * 3 + 1;
+  return nearest3kPipeCoord(v);
 }
 
 /** Snap raw TQEC X/Y coordinates (on ground plane z=0) to nearest valid position. */
@@ -114,7 +139,7 @@ export function snapGroundPos(rawX: number, rawY: number, forPipe: boolean): Pos
   if (!forPipe) {
     return { x: nearestMult3(rawX), y: nearestMult3(rawY), z: 0 };
   }
-  // For pipe on ground: z=0 ≡ 0 (mod 3), need exactly one of x,y ≡ 1 (mod 3)
+  // For pipe on ground: z=0 ≡ 0 (mod 3), need exactly one of x,y in a non-zero pipe remainder class
   const bx = nearestMult3(rawX), by = nearestMult3(rawY);
   const px = nearest3kPlus1(rawX), py = nearest3kPlus1(rawY);
   // Candidate: X-pipe at (px, by) or Y-pipe at (bx, py)
@@ -131,6 +156,11 @@ const H_COLOR = new THREE.Color("#ffff65"); // yellow RGBA(255,255,101)
 const H_BAND_HALF_HEIGHT = 0.08;
 /** Inset so pipe walls are never coplanar with adjacent blocks/pipes. */
 const WALL_EPS = 0.001;
+const FACE_MASK_EPS = 1e-9;
+
+function hasPositiveOverlap(a0: number, a1: number, b0: number, b1: number): boolean {
+  return Math.min(a1, b1) - Math.max(a0, b0) > FACE_MASK_EPS;
+}
 
 /**
  * Face colors per cube type, indexed by TQEC axis: [X, Y, Z].
@@ -174,6 +204,7 @@ function createZPipeGeometry(
   xAxisColor: THREE.Color,
   yAxisColor: THREE.Color,
   hadamard: boolean,
+  hiddenFaces: FaceMask = 0,
 ): THREE.BufferGeometry {
   if (!hadamard) {
     // Non-H pipe: simple box with open faces removed
@@ -187,6 +218,7 @@ function createZPipeGeometry(
       yAxisColor, yAxisColor,  // +Z, -Z = TQEC Y-axis
     ];
     for (let face = 0; face < 6; face++) {
+      if (hiddenFaces & FACE_BIT_BY_INDEX[face]) continue;
       const c = faceColors[face];
       if (!c) continue;
       for (let v = 0; v < 4; v++) {
@@ -199,6 +231,7 @@ function createZPipeGeometry(
     const oldIndex = geo.index!;
     const newIndices: number[] = [];
     for (let face = 0; face < 6; face++) {
+      if (hiddenFaces & FACE_BIT_BY_INDEX[face]) continue;
       if (face === 2 || face === 3) continue;
       for (let i = 0; i < 6; i++) {
         newIndices.push(oldIndex.getX(face * 6 + i));
@@ -241,21 +274,22 @@ function createZPipeGeometry(
   // 4 walls, each with 3 strips: below band, yellow band, above band.
   // Winding order: (v1-v0)×(v2-v0) must point outward for correct raycast normals.
   const wallDefs = [
-    { n: [1, 0, 0], below: xAxisColor, above: xAbove,
+    { face: FACE_POS_X, n: [1, 0, 0], below: xAxisColor, above: xAbove,
       quad: (y0: number, y1: number): number[][] =>
         [[hx, y0, -hz], [hx, y1, -hz], [hx, y1, hz], [hx, y0, hz]] },
-    { n: [-1, 0, 0], below: xAxisColor, above: xAbove,
+    { face: FACE_NEG_X, n: [-1, 0, 0], below: xAxisColor, above: xAbove,
       quad: (y0: number, y1: number): number[][] =>
         [[-hx, y0, hz], [-hx, y1, hz], [-hx, y1, -hz], [-hx, y0, -hz]] },
-    { n: [0, 0, 1], below: yAxisColor, above: yAbove,
+    { face: FACE_POS_Z, n: [0, 0, 1], below: yAxisColor, above: yAbove,
       quad: (y0: number, y1: number): number[][] =>
         [[hx, y0, hz], [hx, y1, hz], [-hx, y1, hz], [-hx, y0, hz]] },
-    { n: [0, 0, -1], below: yAxisColor, above: yAbove,
+    { face: FACE_NEG_Z, n: [0, 0, -1], below: yAxisColor, above: yAbove,
       quad: (y0: number, y1: number): number[][] =>
         [[-hx, y0, -hz], [-hx, y1, -hz], [hx, y1, -hz], [hx, y0, -hz]] },
   ];
 
   for (const wall of wallDefs) {
+    if (hiddenFaces & wall.face) continue;
     const [v0, v1, v2, v3] = wall.quad(-1, -bh);
     addQuad(v0, v1, v2, v3, wall.n, wall.below);          // bottom strip
     const [m0, m1, m2, m3] = wall.quad(-bh, bh);
@@ -278,6 +312,7 @@ function createYPipeGeometry(
   xAxisColor: THREE.Color,
   zAxisColor: THREE.Color,
   hadamard: boolean,
+  hiddenFaces: FaceMask = 0,
 ): THREE.BufferGeometry {
   if (!hadamard) {
     const e = WALL_EPS;
@@ -289,6 +324,7 @@ function createYPipeGeometry(
       null, null,              // +Z, -Z = TQEC Y-axis = open
     ];
     for (let face = 0; face < 6; face++) {
+      if (hiddenFaces & FACE_BIT_BY_INDEX[face]) continue;
       const c = faceColors[face];
       if (!c) continue;
       for (let v = 0; v < 4; v++) {
@@ -301,6 +337,7 @@ function createYPipeGeometry(
     const oldIndex = geo.index!;
     const newIndices: number[] = [];
     for (let face = 0; face < 6; face++) {
+      if (hiddenFaces & FACE_BIT_BY_INDEX[face]) continue;
       if (face === 4 || face === 5) continue; // skip ±Z (open)
       for (let i = 0; i < 6; i++) {
         newIndices.push(oldIndex.getX(face * 6 + i));
@@ -343,21 +380,22 @@ function createYPipeGeometry(
   // 4 walls, each with 3 strips along Z.
   // Winding: (v1-v0)×(v2-v0) must point outward.
   const wallDefs = [
-    { n: [1, 0, 0], below: xAxisColor, above: xAbove,
+    { face: FACE_POS_X, n: [1, 0, 0], below: xAxisColor, above: xAbove,
       quad: (z0: number, z1: number): number[][] =>
         [[hx, hy, z0], [hx, hy, z1], [hx, -hy, z1], [hx, -hy, z0]] },
-    { n: [-1, 0, 0], below: xAxisColor, above: xAbove,
+    { face: FACE_NEG_X, n: [-1, 0, 0], below: xAxisColor, above: xAbove,
       quad: (z0: number, z1: number): number[][] =>
         [[-hx, -hy, z0], [-hx, -hy, z1], [-hx, hy, z1], [-hx, hy, z0]] },
-    { n: [0, 1, 0], below: zAxisColor, above: zAbove,
+    { face: FACE_POS_Y, n: [0, 1, 0], below: zAxisColor, above: zAbove,
       quad: (z0: number, z1: number): number[][] =>
         [[-hx, hy, z0], [-hx, hy, z1], [hx, hy, z1], [hx, hy, z0]] },
-    { n: [0, -1, 0], below: zAxisColor, above: zAbove,
+    { face: FACE_NEG_Y, n: [0, -1, 0], below: zAxisColor, above: zAbove,
       quad: (z0: number, z1: number): number[][] =>
         [[hx, -hy, z0], [hx, -hy, z1], [-hx, -hy, z1], [-hx, -hy, z0]] },
   ];
 
   for (const wall of wallDefs) {
+    if (hiddenFaces & wall.face) continue;
     const [v0, v1, v2, v3] = wall.quad(-1, -bh);
     addQuad(v0, v1, v2, v3, wall.n, wall.below);
     const [m0, m1, m2, m3] = wall.quad(-bh, bh);
@@ -380,6 +418,7 @@ function createXPipeGeometry(
   yAxisColor: THREE.Color,
   zAxisColor: THREE.Color,
   hadamard: boolean,
+  hiddenFaces: FaceMask = 0,
 ): THREE.BufferGeometry {
   if (!hadamard) {
     const e = WALL_EPS;
@@ -391,6 +430,7 @@ function createXPipeGeometry(
       yAxisColor, yAxisColor,  // +Z, -Z = TQEC Y-axis
     ];
     for (let face = 0; face < 6; face++) {
+      if (hiddenFaces & FACE_BIT_BY_INDEX[face]) continue;
       const c = faceColors[face];
       if (!c) continue;
       for (let v = 0; v < 4; v++) {
@@ -403,6 +443,7 @@ function createXPipeGeometry(
     const oldIndex = geo.index!;
     const newIndices: number[] = [];
     for (let face = 0; face < 6; face++) {
+      if (hiddenFaces & FACE_BIT_BY_INDEX[face]) continue;
       if (face === 0 || face === 1) continue; // skip ±X (open)
       for (let i = 0; i < 6; i++) {
         newIndices.push(oldIndex.getX(face * 6 + i));
@@ -444,21 +485,22 @@ function createXPipeGeometry(
   // 4 walls, each with 3 strips along X.
   // Winding: (v1-v0)×(v2-v0) must point outward.
   const wallDefs = [
-    { n: [0, 1, 0], below: zAxisColor, above: zAbove,
+    { face: FACE_POS_Y, n: [0, 1, 0], below: zAxisColor, above: zAbove,
       quad: (x0: number, x1: number): number[][] =>
         [[x0, hy, hz], [x1, hy, hz], [x1, hy, -hz], [x0, hy, -hz]] },
-    { n: [0, -1, 0], below: zAxisColor, above: zAbove,
+    { face: FACE_NEG_Y, n: [0, -1, 0], below: zAxisColor, above: zAbove,
       quad: (x0: number, x1: number): number[][] =>
         [[x0, -hy, -hz], [x1, -hy, -hz], [x1, -hy, hz], [x0, -hy, hz]] },
-    { n: [0, 0, 1], below: yAxisColor, above: yAbove,
+    { face: FACE_POS_Z, n: [0, 0, 1], below: yAxisColor, above: yAbove,
       quad: (x0: number, x1: number): number[][] =>
         [[x0, -hy, hz], [x1, -hy, hz], [x1, hy, hz], [x0, hy, hz]] },
-    { n: [0, 0, -1], below: yAxisColor, above: yAbove,
+    { face: FACE_NEG_Z, n: [0, 0, -1], below: yAxisColor, above: yAbove,
       quad: (x0: number, x1: number): number[][] =>
         [[x0, hy, -hz], [x1, hy, -hz], [x1, -hy, -hz], [x0, -hy, -hz]] },
   ];
 
   for (const wall of wallDefs) {
+    if (hiddenFaces & wall.face) continue;
     const [v0, v1, v2, v3] = wall.quad(-1, -bh);
     addQuad(v0, v1, v2, v3, wall.n, wall.below);
     const [m0, m1, m2, m3] = wall.quad(-bh, bh);
@@ -476,7 +518,7 @@ function createXPipeGeometry(
   return geo;
 }
 
-export function createBlockGeometry(blockType: BlockType): THREE.BufferGeometry {
+export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask = 0): THREE.BufferGeometry {
   if (blockType === "ZXO" || blockType === "XZO" || blockType === "ZXOH" || blockType === "XZOH") {
     const isXFirst = blockType === "XZO" || blockType === "XZOH";
     const hasH = blockType === "ZXOH" || blockType === "XZOH";
@@ -484,6 +526,7 @@ export function createBlockGeometry(blockType: BlockType): THREE.BufferGeometry 
       isXFirst ? X_COLOR : Z_COLOR,
       isXFirst ? Z_COLOR : X_COLOR,
       hasH,
+      hiddenFaces,
     );
   }
 
@@ -494,6 +537,7 @@ export function createBlockGeometry(blockType: BlockType): THREE.BufferGeometry 
       isXFirst ? X_COLOR : Z_COLOR,
       isXFirst ? Z_COLOR : X_COLOR,
       hasH,
+      hiddenFaces,
     );
   }
 
@@ -504,6 +548,7 @@ export function createBlockGeometry(blockType: BlockType): THREE.BufferGeometry 
       isXFirst ? X_COLOR : Z_COLOR,
       isXFirst ? Z_COLOR : X_COLOR,
       hasH,
+      hiddenFaces,
     );
   }
 
@@ -511,12 +556,22 @@ export function createBlockGeometry(blockType: BlockType): THREE.BufferGeometry 
     // YHalfCube: 1×1×0.5 in TQEC → 1 (X) × 0.5 (Y) × 1 (Z) in Three.js, all green
     const geo = new THREE.BoxGeometry(1, 0.5, 1);
     const colors = new Float32Array(24 * 3);
+    const oldIndex = geo.index!;
+    const newIndices: number[] = [];
     for (let i = 0; i < 24; i++) {
       colors[i * 3] = Y_COLOR.r;
       colors[i * 3 + 1] = Y_COLOR.g;
       colors[i * 3 + 2] = Y_COLOR.b;
     }
+    for (let face = 0; face < 6; face++) {
+      if (hiddenFaces & FACE_BIT_BY_INDEX[face]) continue;
+      for (let i = 0; i < 6; i++) {
+        newIndices.push(oldIndex.getX(face * 6 + i));
+      }
+    }
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    geo.setIndex(newIndices);
+    geo.clearGroups();
     return geo;
   }
 
@@ -531,74 +586,187 @@ export function createBlockGeometry(blockType: BlockType): THREE.BufferGeometry 
 
   const geo = new THREE.BoxGeometry(1, 1, 1);
   const colors = new Float32Array(24 * 3); // 6 faces × 4 vertices × 3 rgb
+  const oldIndex = geo.index!;
+  const newIndices: number[] = [];
 
   for (let face = 0; face < 6; face++) {
     const c = faceColors[face];
+    if (hiddenFaces & FACE_BIT_BY_INDEX[face]) continue;
     for (let v = 0; v < 4; v++) {
       const idx = (face * 4 + v) * 3;
       colors[idx] = c.r;
       colors[idx + 1] = c.g;
       colors[idx + 2] = c.b;
     }
+    for (let i = 0; i < 6; i++) {
+      newIndices.push(oldIndex.getX(face * 6 + i));
+    }
   }
 
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geo.setIndex(newIndices);
+  geo.clearGroups();
   return geo;
 }
 
 /** Edge line segments for a block type, including Hadamard band edges for H pipes. */
-export function createBlockEdges(blockType: BlockType): THREE.BufferGeometry {
+export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0): THREE.BufferGeometry {
   const [bx, by, bz] = blockThreeSize(blockType);
-  // Pipes: edges inset to match pipe walls (visible from inside via renderOrder).
-  // Cubes: edges at full size, coplanar with faces (visible via renderOrder).
-  // Log depth buffer ensures the WALL_EPS gap reliably hides edges from adjacent pipes.
   const isPipe = (PIPE_TYPES as readonly string[]).includes(blockType);
   const e2 = isPipe ? 2 * WALL_EPS : 0;
-  const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(bx - e2, by - e2, bz - e2));
+  const hx = bx / 2 - e2 / 2;
+  const hy = by / 2 - e2 / 2;
+  const hz = bz / 2 - e2 / 2;
+  const corners: Array<[number, number, number]> = [
+    [-hx, -hy, -hz],
+    [-hx, -hy, hz],
+    [-hx, hy, -hz],
+    [-hx, hy, hz],
+    [hx, -hy, -hz],
+    [hx, -hy, hz],
+    [hx, hy, -hz],
+    [hx, hy, hz],
+  ];
+
+  const faceEdges: Record<number, [number, number][]> = {
+    [FACE_NEG_X]: [[0, 1], [1, 3], [3, 2], [2, 0]],
+    [FACE_POS_X]: [[4, 5], [5, 7], [7, 6], [6, 4]],
+    [FACE_NEG_Y]: [[0, 1], [1, 5], [5, 4], [4, 0]],
+    [FACE_POS_Y]: [[2, 3], [3, 7], [7, 6], [6, 2]],
+    [FACE_NEG_Z]: [[0, 2], [2, 6], [6, 4], [4, 0]],
+    [FACE_POS_Z]: [[1, 3], [3, 7], [7, 5], [5, 1]],
+  };
+
+  const seen = new Set<string>();
+  const linePoints: number[] = [];
+  const maybePushEdge = (i: number, j: number) => {
+    if (i > j) [i, j] = [j, i];
+    const key = `${i}|${j}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const a = corners[i];
+    const b = corners[j];
+    linePoints.push(...a, ...b);
+  };
+
+  for (const [faceBit, edges] of Object.entries(faceEdges) as unknown as Array<[string, [number, number][]]>) {
+    const bit = Number(faceBit) as FaceMask;
+    if (hiddenFaces & bit) continue;
+    for (const [i, j] of edges) {
+      maybePushEdge(i, j);
+    }
+  }
 
   const isZPipeH = blockType === "ZXOH" || blockType === "XZOH";
   const isYPipeH = blockType === "ZOXH" || blockType === "XOZH";
   const isXPipeH = blockType === "OZXH" || blockType === "OXZH";
-  if (!isZPipeH && !isYPipeH && !isXPipeH) return edges;
+  if (!isZPipeH && !isYPipeH && !isXPipeH) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(linePoints), 3));
+    return geo;
+  }
 
-  const basePos = edges.getAttribute("position").array as Float32Array;
   const bandEdges: number[] = [];
   // Band edge rings on the pipe wall surface (inset by WALL_EPS)
-  const w = 0.5 - WALL_EPS;
 
   if (isZPipeH) {
     // Z-pipe: band rings at y = ±bh (perpendicular to open direction Three.js Y)
-    for (const by of [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT]) {
-      bandEdges.push(-w, by, -w,  w, by, -w);
-      bandEdges.push( w, by, -w,  w, by,  w);
-      bandEdges.push( w, by,  w, -w, by,  w);
-      bandEdges.push(-w, by,  w, -w, by, -w);
+    const z = [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT];
+    for (const faceY of z) {
+      if (faceY > 0 && (hiddenFaces & FACE_POS_Y)) continue;
+      if (faceY < 0 && (hiddenFaces & FACE_NEG_Y)) continue;
+      bandEdges.push(-hx, faceY, -hz,  hx, faceY, -hz);
+      bandEdges.push(hx, faceY, -hz,  hx, faceY,  hz);
+      bandEdges.push(hx, faceY,  hz, -hx, faceY,  hz);
+      bandEdges.push(-hx, faceY,  hz, -hx, faceY, -hz);
     }
   } else if (isYPipeH) {
     // Y-pipe: band rings at z = ±bh (perpendicular to open direction Three.js Z)
-    for (const bz of [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT]) {
-      bandEdges.push(-w, -w, bz,  w, -w, bz);
-      bandEdges.push( w, -w, bz,  w,  w, bz);
-      bandEdges.push( w,  w, bz, -w,  w, bz);
-      bandEdges.push(-w,  w, bz, -w, -w, bz);
+    const z = [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT];
+    for (const faceZ of z) {
+      if (faceZ > 0 && (hiddenFaces & FACE_POS_Z)) continue;
+      if (faceZ < 0 && (hiddenFaces & FACE_NEG_Z)) continue;
+      bandEdges.push(-hx, -hy, faceZ,  hx, -hy, faceZ);
+      bandEdges.push(hx, -hy, faceZ,  hx,  hy, faceZ);
+      bandEdges.push(hx,  hy, faceZ, -hx,  hy, faceZ);
+      bandEdges.push(-hx,  hy, faceZ, -hx, -hy, faceZ);
     }
   } else {
     // X-pipe: band rings at x = ±bh (perpendicular to open direction Three.js X)
-    for (const bx of [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT]) {
-      bandEdges.push(bx, -w, -w,  bx,  w, -w);
-      bandEdges.push(bx,  w, -w,  bx,  w,  w);
-      bandEdges.push(bx,  w,  w,  bx, -w,  w);
-      bandEdges.push(bx, -w,  w,  bx, -w, -w);
+    const x = [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT];
+    for (const faceX of x) {
+      if (faceX > 0 && (hiddenFaces & FACE_POS_X)) continue;
+      if (faceX < 0 && (hiddenFaces & FACE_NEG_X)) continue;
+      bandEdges.push(faceX, -hy, -hz,  faceX,  hy, -hz);
+      bandEdges.push(faceX,  hy, -hz,  faceX,  hy,  hz);
+      bandEdges.push(faceX,  hy,  hz,  faceX, -hy,  hz);
+      bandEdges.push(faceX, -hy,  hz,  faceX, -hy, -hz);
     }
   }
 
-  const merged = new Float32Array(basePos.length + bandEdges.length);
-  merged.set(basePos);
-  merged.set(new Float32Array(bandEdges), basePos.length);
+  const merged = new Float32Array(linePoints.length + bandEdges.length);
+  merged.set(linePoints);
+  merged.set(new Float32Array(bandEdges), linePoints.length);
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(merged, 3));
   return geo;
+}
+
+/**
+ * Compute which outward faces should be hidden because another block touches it directly.
+ *
+ * Face order follows three.js order:
+ * +X, -X, +Y, -Y, +Z, -Z.
+ */
+export function getHiddenFaceMaskForPos(
+  pos: Position3D,
+  type: BlockType,
+  blocks: Map<string, Block>,
+): FaceMask {
+  const [sx, sy, sz] = blockTqecSize(type);
+  const x0 = pos.x;
+  const y0 = pos.y;
+  const z0 = pos.z;
+  const x1 = x0 + sx;
+  const y1 = y0 + sy;
+  const z1 = z0 + sz;
+  let mask = 0;
+
+  for (const block of blocks.values()) {
+    if (block.pos.x === pos.x && block.pos.y === pos.y && block.pos.z === pos.z) {
+      continue;
+    }
+
+    const [bx, by, bz] = blockTqecSize(block.type);
+    const nx0 = block.pos.x;
+    const ny0 = block.pos.y;
+    const nz0 = block.pos.z;
+    const nx1 = nx0 + bx;
+    const ny1 = ny0 + by;
+    const nz1 = nz0 + bz;
+
+    if (Math.abs(nx0 - x1) <= FACE_MASK_EPS && hasPositiveOverlap(y0, y1, ny0, ny1) && hasPositiveOverlap(z0, z1, nz0, nz1)) {
+      mask |= FACE_POS_X;
+    }
+    if (Math.abs(nx1 - x0) <= FACE_MASK_EPS && hasPositiveOverlap(y0, y1, ny0, ny1) && hasPositiveOverlap(z0, z1, nz0, nz1)) {
+      mask |= FACE_NEG_X;
+    }
+    if (Math.abs(ny0 - y1) <= FACE_MASK_EPS && hasPositiveOverlap(x0, x1, nx0, nx1) && hasPositiveOverlap(z0, z1, nz0, nz1)) {
+      mask |= FACE_NEG_Z;
+    }
+    if (Math.abs(ny1 - y0) <= FACE_MASK_EPS && hasPositiveOverlap(x0, x1, nx0, nx1) && hasPositiveOverlap(z0, z1, nz0, nz1)) {
+      mask |= FACE_POS_Z;
+    }
+    if (Math.abs(nz0 - z1) <= FACE_MASK_EPS && hasPositiveOverlap(x0, x1, nx0, nx1) && hasPositiveOverlap(y0, y1, ny0, ny1)) {
+      mask |= FACE_POS_Y;
+    }
+    if (Math.abs(nz1 - z0) <= FACE_MASK_EPS && hasPositiveOverlap(x0, x1, nx0, nx1) && hasPositiveOverlap(y0, y1, ny0, ny1)) {
+      mask |= FACE_NEG_Y;
+    }
+  }
+
+  return mask;
 }
 
 /** Check if placing a block at pos with the given type overlaps any existing block. */

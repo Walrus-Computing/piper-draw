@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
-import { tqecToThree } from "../types";
+import { tqecToThree, getHiddenFaceMaskForPos } from "../types";
 import { getCachedGeometry, getCachedEdges, getCachedFullBox } from "./BlockInstances";
 
 const noRaycast = () => {};
@@ -12,14 +12,16 @@ export function GhostBlock() {
   const cubeType = useBlockStore((s) => s.cubeType);
   const hoveredBlockType = useBlockStore((s) => s.hoveredBlockType);
   const hoveredInvalid = useBlockStore((s) => s.hoveredInvalid);
+  const blocks = useBlockStore((s) => s.blocks);
 
   // In delete mode, use the hovered block's type; in place mode, use resolved type from hover
   const activeType = mode === "delete"
     ? (hoveredBlockType ?? cubeType)
     : (hoveredBlockType ?? cubeType);
 
-  const ghostGeometry = getCachedGeometry(activeType);
-  const ghostEdges = getCachedEdges(activeType);
+  const previewHiddenFaces = hoveredGridPos ? getHiddenFaceMaskForPos(hoveredGridPos, activeType, blocks) : 0;
+  const ghostGeometry = getCachedGeometry(activeType, previewHiddenFaces);
+  const ghostEdges = getCachedEdges(activeType, previewHiddenFaces);
   const ghostMaterial = useMemo(
     () =>
       new THREE.MeshLambertMaterial({
