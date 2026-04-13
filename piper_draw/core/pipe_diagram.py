@@ -11,13 +11,15 @@ class PipeDiagram:
         self._graph: nx.Graph = nx.Graph()
         # NetworkX graph with nodes being Blocks (possibly multi-voxel) and edges corresponding
         # to connections between two blocks.
-        self._spatial_map: dict[Coordinate, Block] = {}
+        
 
-    def add_block(self, block: Block) -> None:
+    def add_block(self, coordinate: Coordinate, block: Block) -> None:
         if any(c in self._spatial_map for c in block.coordinates):
             raise ValueError("Block contains coordinates that are already occupied.")
         # Since coordinates enter the hash value of Blocks, verifying that all 
-        self._graph.add_node(Block)
+        if compatible_with_neighbors():
+            self._graph.add_node(coordinate, block=block)
+        raise ValueError
 
     def remove_block(self, block: Block) -> None:
         if block not in self._graph:
