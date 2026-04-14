@@ -56,6 +56,10 @@ export function GridPlane() {
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     if (e.delta > 2) return; // ignore drags
+    if (mode === "select") {
+      useBlockStore.getState().clearSelection();
+      return;
+    }
     if (mode !== "place") return;
 
     const store = useBlockStore.getState();
@@ -69,6 +73,20 @@ export function GridPlane() {
   };
 
   if (mode === "delete") return null;
+  if (mode === "select") {
+    return (
+      <mesh
+        ref={meshRef}
+        rotation-x={-Math.PI / 2}
+        position={[0, 0, 0]}
+        onClick={handleClick}
+        onPointerLeave={handlePointerLeave}
+      >
+        <planeGeometry args={[PLANE_SIZE, PLANE_SIZE]} />
+        <meshBasicMaterial visible={false} side={THREE.FrontSide} />
+      </mesh>
+    );
+  }
 
   return (
     <mesh

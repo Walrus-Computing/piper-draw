@@ -14,6 +14,7 @@ function reset() {
     hoveredGridPos: null,
     hoveredBlockType: null,
     hoveredInvalid: false,
+    selectedKeys: new Set(),
   });
 }
 
@@ -143,6 +144,149 @@ describe("blockStore", () => {
       useBlockStore.getState().clearAll();
       useBlockStore.getState().undo();
       expect(useBlockStore.getState().blocks.size).toBe(1);
+    });
+  });
+
+  describe("selectBlock", () => {
+    it("selects a single block", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
+      expect(useBlockStore.getState().selectedKeys.size).toBe(1);
+      expect(useBlockStore.getState().selectedKeys.has("0,0,0")).toBe(true);
+    });
+
+    it("replaces selection when additive is false", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
+      useBlockStore.getState().selectBlock({ x: 3, y: 0, z: 0 }, false);
+      expect(useBlockStore.getState().selectedKeys.size).toBe(1);
+      expect(useBlockStore.getState().selectedKeys.has("3,0,0")).toBe(true);
+    });
+
+    it("adds to selection when additive is true", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
+      useBlockStore.getState().selectBlock({ x: 3, y: 0, z: 0 }, true);
+      expect(useBlockStore.getState().selectedKeys.size).toBe(2);
+    });
+
+    it("toggles off when shift-clicking an already-selected block", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, true);
+      expect(useBlockStore.getState().selectedKeys.size).toBe(0);
+    });
+
+    it("is a no-op for a non-existent block", () => {
+      useBlockStore.getState().selectBlock({ x: 99, y: 0, z: 0 }, false);
+      expect(useBlockStore.getState().selectedKeys.size).toBe(0);
+    });
+  });
+
+  describe("clearSelection", () => {
+    it("clears all selected keys", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
+      useBlockStore.getState().clearSelection();
+      expect(useBlockStore.getState().selectedKeys.size).toBe(0);
+    });
+
+    it("is a no-op when nothing is selected", () => {
+      const before = useBlockStore.getState().selectedKeys;
+      useBlockStore.getState().clearSelection();
+      expect(useBlockStore.getState().selectedKeys).toBe(before);
+    });
+  });
+
+  describe("selectAll", () => {
+    it("selects all blocks", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      expect(useBlockStore.getState().selectedKeys.size).toBe(2);
+    });
+
+    it("is a no-op when no blocks exist", () => {
+      const before = useBlockStore.getState().selectedKeys;
+      useBlockStore.getState().selectAll();
+      expect(useBlockStore.getState().selectedKeys).toBe(before);
+    });
+  });
+
+  describe("deleteSelected", () => {
+    it("removes all selected blocks", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().deleteSelected();
+      expect(useBlockStore.getState().blocks.size).toBe(0);
+      expect(useBlockStore.getState().selectedKeys.size).toBe(0);
+    });
+
+    it("pushes a single bulk-remove command to history", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      const histBefore = useBlockStore.getState().history.length;
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().deleteSelected();
+      expect(useBlockStore.getState().history.length).toBe(histBefore + 1);
+    });
+
+    it("can be undone to restore all deleted blocks", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().deleteSelected();
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.size).toBe(2);
+    });
+
+    it("can be redone after undo", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().deleteSelected();
+      useBlockStore.getState().undo();
+      useBlockStore.getState().redo();
+      expect(useBlockStore.getState().blocks.size).toBe(0);
+    });
+
+    it("is a no-op when nothing is selected", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      const histBefore = useBlockStore.getState().history.length;
+      useBlockStore.getState().deleteSelected();
+      expect(useBlockStore.getState().blocks.size).toBe(1);
+      expect(useBlockStore.getState().history.length).toBe(histBefore);
+    });
+
+    it("skips stale keys that no longer exist in blocks", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().removeBlock({ x: 0, y: 0, z: 0 });
+      // selectedKeys still has "0,0,0" but block was removed
+      useBlockStore.getState().deleteSelected();
+      expect(useBlockStore.getState().blocks.size).toBe(0);
+    });
+  });
+
+  describe("setMode clears selection", () => {
+    it("clears selection when switching to place mode", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ mode: "select" });
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
+      useBlockStore.getState().setMode("place");
+      expect(useBlockStore.getState().selectedKeys.size).toBe(0);
+    });
+
+    it("preserves selection when switching to delete mode", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ mode: "select" });
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
+      useBlockStore.getState().setMode("delete");
+      expect(useBlockStore.getState().selectedKeys.size).toBe(1);
     });
   });
 });

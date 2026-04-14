@@ -14,7 +14,7 @@ import {
   recomputeAffectedHiddenFaces,
 } from "../types";
 
-export type Mode = "place" | "delete";
+export type Mode = "place" | "delete" | "select";
 
 const MAX_HISTORY = 100;
 
@@ -31,6 +31,7 @@ const PIPE_VARIANT_CANONICAL: Record<PipeVariant, BlockType> = {
 type UndoCommand =
   | { kind: "add"; key: string; block: Block }
   | { kind: "remove"; key: string; block: Block }
+  | { kind: "bulk-remove"; entries: Array<{ key: string; block: Block }> }
   | { kind: "clear"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask> };
 
 interface BlockStore {
@@ -46,6 +47,7 @@ interface BlockStore {
   hoveredBlockType: BlockType | null;
   hoveredInvalid: boolean;
   hoveredInvalidReason: string | null;
+  selectedKeys: Set<string>;
 
   setMode: (mode: Mode) => void;
   setCubeType: (cubeType: BlockType) => void;
@@ -58,6 +60,10 @@ interface BlockStore {
   clearAll: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
+  selectBlock: (pos: Position3D, additive: boolean) => void;
+  clearSelection: () => void;
+  deleteSelected: () => void;
+  selectAll: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,8 +118,16 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   hoveredBlockType: null,
   hoveredInvalid: false,
   hoveredInvalidReason: null,
+  selectedKeys: new Set(),
 
-  setMode: (mode) => set({ mode, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null }),
+  setMode: (mode) => set({
+    mode,
+    hoveredGridPos: null,
+    hoveredBlockType: null,
+    hoveredInvalid: false,
+    hoveredInvalidReason: null,
+    ...(mode === "place" ? { selectedKeys: new Set<string>() } : {}),
+  }),
   setCubeType: (cubeType) => set({ cubeType, pipeVariant: null }),
   setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant] }),
   setHoveredGridPos: (pos, blockType, invalid, reason) => set((state) => {
@@ -209,6 +223,20 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         };
       }
 
+      if (cmd.kind === "bulk-remove") {
+        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        for (const entry of cmd.entries) {
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, entry.key, entry.block));
+        }
+        return {
+          blocks,
+          hiddenFaces,
+          history: newHistory,
+          future: [cmd, ...state.future].slice(0, MAX_HISTORY),
+          hoveredGridPos: null,
+        };
+      }
+
       // cmd.kind === "clear" — restore saved state, rebuild spatial index
       const newIndex = buildSpatialIndex(cmd.savedBlocks);
       return {
@@ -249,6 +277,21 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         };
       }
 
+      if (cmd.kind === "bulk-remove") {
+        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        for (const entry of cmd.entries) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, entry.key, entry.block));
+        }
+        return {
+          blocks,
+          hiddenFaces,
+          history: [...state.history, cmd],
+          future: newFuture,
+          hoveredGridPos: null,
+          selectedKeys: new Set<string>(),
+        };
+      }
+
       // cmd.kind === "clear" — save current state, then clear
       const savedCmd: UndoCommand = {
         kind: "clear",
@@ -280,9 +323,58 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         history: [...state.history, cmd].slice(-MAX_HISTORY),
         future: [],
         hoveredGridPos: null,
+        selectedKeys: new Set<string>(),
       };
     }),
 
   canUndo: () => get().history.length > 0,
   canRedo: () => get().future.length > 0,
+
+  selectBlock: (pos, additive) =>
+    set((state) => {
+      const key = posKey(pos);
+      if (!state.blocks.has(key)) return state;
+      const next = additive ? new Set(state.selectedKeys) : new Set<string>();
+      if (additive && next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return { selectedKeys: next };
+    }),
+
+  clearSelection: () =>
+    set((state) => {
+      if (state.selectedKeys.size === 0) return state;
+      return { selectedKeys: new Set<string>() };
+    }),
+
+  deleteSelected: () =>
+    set((state) => {
+      if (state.selectedKeys.size === 0) return state;
+      const entries: Array<{ key: string; block: Block }> = [];
+      let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+      for (const key of state.selectedKeys) {
+        const block = blocks.get(key);
+        if (!block) continue;
+        entries.push({ key, block });
+        ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, key, block));
+      }
+      if (entries.length === 0) return state;
+      const cmd: UndoCommand = { kind: "bulk-remove", entries };
+      return {
+        blocks,
+        hiddenFaces,
+        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+        selectedKeys: new Set<string>(),
+        hoveredGridPos: null,
+      };
+    }),
+
+  selectAll: () =>
+    set((state) => {
+      if (state.blocks.size === 0) return state;
+      return { selectedKeys: new Set(state.blocks.keys()) };
+    }),
 }));

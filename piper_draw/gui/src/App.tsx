@@ -18,6 +18,7 @@ import { OrientationGizmo } from "./components/OrientationGizmo";
 import { Toolbar } from "./components/Toolbar";
 import { ValidationToast } from "./components/ValidationToast";
 import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
+import { SelectionHighlights } from "./components/SelectionHighlights";
 import { useBlockStore } from "./stores/blockStore";
 import { cameraGroundPoint } from "./utils/groundPlane";
 
@@ -154,10 +155,34 @@ export default function App() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const ctrl = e.ctrlKey || e.metaKey;
-      if (!ctrl) return;
       const key = e.key.toLowerCase();
-      if (key === "z" && e.shiftKey) {
+      const ctrl = e.ctrlKey || e.metaKey;
+
+      // Non-modifier shortcuts
+      if (!ctrl) {
+        if (key === "delete" || key === "backspace") {
+          const store = useBlockStore.getState();
+          if (store.selectedKeys.size > 0) {
+            e.preventDefault();
+            store.deleteSelected();
+          }
+          return;
+        }
+        if (key === "escape") {
+          if (useBlockStore.getState().selectedKeys.size > 0) {
+            e.preventDefault();
+            useBlockStore.getState().clearSelection();
+          }
+          return;
+        }
+        return;
+      }
+
+      // Ctrl/Cmd shortcuts
+      if (key === "a" && useBlockStore.getState().mode === "select") {
+        e.preventDefault();
+        useBlockStore.getState().selectAll();
+      } else if (key === "z" && e.shiftKey) {
         e.preventDefault();
         useBlockStore.getState().redo();
       } else if (key === "z") {
@@ -203,6 +228,7 @@ export default function App() {
         <directionalLight position={[10, 10, 10]} intensity={1.0} />
         <BlockInstances />
         <InvalidBlockHighlights />
+        <SelectionHighlights />
         <GridPlane />
         <GhostBlock />
         <AxisLabels />
