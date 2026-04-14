@@ -16,6 +16,8 @@ import { AxisLabels } from "./components/AxisLabels";
 import { FpsDisplay, FpsSampler } from "./components/FpsCounter";
 import { OrientationGizmo } from "./components/OrientationGizmo";
 import { Toolbar } from "./components/Toolbar";
+import { ValidationToast } from "./components/ValidationToast";
+import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { useBlockStore } from "./stores/blockStore";
 import { cameraGroundPoint } from "./utils/groundPlane";
 
@@ -118,10 +120,37 @@ function CheckerboardGrid() {
   );
 }
 
+function PlacementWarning() {
+  const reason = useBlockStore((s) => s.hoveredInvalidReason);
+  if (!reason) return null;
+  return (
+    <div
+      style={{
+        position: "fixed",
+        bottom: 24,
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 1,
+        background: "rgba(180, 40, 40, 0.92)",
+        color: "#fff",
+        padding: "8px 18px",
+        borderRadius: "8px",
+        fontSize: "14px",
+        fontWeight: 500,
+        pointerEvents: "none",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+      }}
+    >
+      {reason}
+    </div>
+  );
+}
+
 export default function App() {
   const fpsRef = useRef<HTMLSpanElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -145,7 +174,8 @@ export default function App() {
 
   return (
     <>
-      <Toolbar onResetCamera={() => controlsRef.current?.reset()} controlsRef={controlsRef} />
+      <Toolbar onResetCamera={() => controlsRef.current?.reset()} controlsRef={controlsRef} toolbarRef={toolbarRef} />
+      <ValidationToast toolbarRef={toolbarRef} />
       <div
         onPointerDown={(e) => e.stopPropagation()}
         style={{
@@ -162,6 +192,7 @@ export default function App() {
       >
         <FpsDisplay spanRef={fpsRef} />
       </div>
+      <PlacementWarning />
       <Canvas
         camera={{ position: [10, 10, -10], fov: 35 }}
         gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }}
@@ -171,6 +202,7 @@ export default function App() {
         <ambientLight intensity={1.4} />
         <directionalLight position={[10, 10, 10]} intensity={1.0} />
         <BlockInstances />
+        <InvalidBlockHighlights />
         <GridPlane />
         <GhostBlock />
         <AxisLabels />

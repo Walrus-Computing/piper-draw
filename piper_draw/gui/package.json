@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "dev:frontend": "vite",
+    "dev:backend": "cd ../.. && uv run uvicorn server:app --reload --port 8000",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "node --require ./scripts/vitest-crypto-shim.cjs ./node_modules/vitest/vitest.mjs run --run",
@@ -20,6 +22,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "concurrently": "^9.1.2",
     "@eslint/js": "^9.39.4",
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.14",
