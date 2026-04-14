@@ -201,7 +201,7 @@ function TypedInstances({
       if (store.pipeVariant) {
         const resolved = resolvePipeTypeFromFace(b[e.instanceId].pos, b[e.instanceId].type, e.face.normal, store.pipeVariant);
         if (!resolved) {
-          store.setHoveredGridPos(b[e.instanceId].pos, undefined, true);
+          store.setHoveredGridPos(null);
           return;
         }
         dstType = resolved;
