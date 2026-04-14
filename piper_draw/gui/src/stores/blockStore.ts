@@ -8,7 +8,6 @@ import {
   buildSpatialIndex,
   addToSpatialIndex,
   removeFromSpatialIndex,
-  getHiddenFaceMaskForPos,
   recomputeAffectedHiddenFaces,
 } from "../types";
 
