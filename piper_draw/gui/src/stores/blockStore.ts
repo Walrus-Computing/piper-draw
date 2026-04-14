@@ -24,7 +24,6 @@ import {
   cameraAzimuthForDirection,
   CUBE_TYPES,
   PIPE_TYPES,
-  tqecToThree,
 } from "../types";
 
 export type Mode = "place" | "delete" | "select" | "build";
@@ -579,7 +578,6 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         }
 
         const newBuildHistory = [...state.buildHistory, step];
-        const destPos = step.cube ? step.cube.block.pos : computeDestCubePos(step.prevCursorPos, { tqecAxis: 0, sign: 1 }); // fallback
 
         return {
           blocks,

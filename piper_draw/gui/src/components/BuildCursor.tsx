@@ -2,8 +2,7 @@ import { useRef, useMemo } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
-import { tqecToThree, blockThreeSize, posKey } from "../types";
-import type { Block } from "../types";
+import { tqecToThree, posKey } from "../types";
 
 const cursorMaterial = new THREE.MeshBasicMaterial({
   color: 0xcccccc,
