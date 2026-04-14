@@ -230,6 +230,14 @@ function TypedInstances({
     const b = blocksRef.current;
     if (e.instanceId == null || e.instanceId >= b.length) return;
     const store = useBlockStore.getState();
+    if (store.mode === "build") {
+      // In build mode, clicking a cube moves the cursor there
+      const clicked = b[e.instanceId];
+      if (!isPipeType(clicked.type)) {
+        store.moveBuildCursor(clicked.pos);
+      }
+      return;
+    }
     if (store.mode === "select") {
       store.selectBlock(b[e.instanceId].pos, e.nativeEvent.shiftKey);
       return;
@@ -273,6 +281,7 @@ function TypedInstances({
 export function BlockInstances() {
   const blocks = useBlockStore((s) => s.blocks);
   const hiddenFaces = useBlockStore((s) => s.hiddenFaces);
+  const undeterminedCubes = useBlockStore((s) => s.undeterminedCubes);
 
   const grouped = useMemo(() => {
     type Group = {
@@ -281,8 +290,10 @@ export function BlockInstances() {
       blocks: Block[];
     };
     // Hidden faces are pre-computed in the store — just group by (type, mask)
+    // Skip undetermined cubes (rendered by BuildCursor instead)
     const map = new Map<string, Group>();
     for (const block of blocks.values()) {
+      if (undeterminedCubes.has(posKey(block.pos))) continue;
       const hf = hiddenFaces.get(posKey(block.pos)) ?? 0;
       const key = `${block.type}:${hf}`;
       const existing = map.get(key);
@@ -297,7 +308,7 @@ export function BlockInstances() {
       }
     }
     return map;
-  }, [blocks, hiddenFaces]);
+  }, [blocks, hiddenFaces, undeterminedCubes]);
 
   return (
     <>

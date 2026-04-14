@@ -128,6 +128,9 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         <button onClick={() => setMode("delete")} style={btnStyle(mode === "delete")}>
           Delete
         </button>
+        <button onClick={() => setMode("build")} style={btnStyle(mode === "build")}>
+          Build
+        </button>
         <button onClick={onResetCamera} style={btnStyle(false)}>
           Origin
         </button>
@@ -217,7 +220,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
       <div style={{ width: 1, background: "#ddd" }} />
 
       {/* Blocks group (ZXCubes + Y) */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px", opacity: mode === "build" ? 0.4 : 1, pointerEvents: mode === "build" ? "none" : "auto" }}>
         <span style={groupLabelStyle}>Blocks</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           {CUBE_TYPES.map((ct) => (
@@ -250,7 +253,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
       <div style={{ width: 1, background: "#ddd" }} />
 
       {/* Pipes group */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px", opacity: mode === "build" ? 0.4 : 1, pointerEvents: mode === "build" ? "none" : "auto" }}>
         <span style={groupLabelStyle}>Pipes</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           {PIPE_VARIANTS.map((v) => (

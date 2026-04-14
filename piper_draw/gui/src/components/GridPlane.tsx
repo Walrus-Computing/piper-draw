@@ -74,7 +74,7 @@ export function GridPlane() {
     setHoveredGridPos(null);
   };
 
-  if (mode === "delete") return null;
+  if (mode === "delete" || mode === "build") return null;
   if (mode === "select") {
     return (
       <mesh
