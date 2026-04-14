@@ -650,6 +650,7 @@ dev = [
     { name = "matplotlib" },
     { name = "pytest-randomly" },
     { name = "ruff" },
+    { name = "tqec" },
 ]
 
 [package.metadata]
@@ -667,6 +668,7 @@ dev = [
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "pytest-randomly", specifier = ">=4.0.1" },
     { name = "ruff", specifier = ">=0.11.0" },
+    { name = "tqec", git = "https://github.com/tqec/tqec.git" },
 ]
 
 [[package]]
