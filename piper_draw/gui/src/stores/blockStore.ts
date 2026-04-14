@@ -5,6 +5,7 @@ import {
   hasBlockOverlap,
   hasCubeColorConflict,
   hasPipeColorConflict,
+  hasYCubePipeAxisConflict,
   isPipeType,
   isValidPos,
   resolvePipeType,
@@ -153,6 +154,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       if (hasBlockOverlap(pos, blockType, state.blocks, state.spatialIndex)) return state;
       if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, state.blocks)) return state;
       if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
+      if (hasYCubePipeAxisConflict(blockType, pos, state.blocks)) return state;
 
       const key = posKey(pos);
       const block: Block = { pos, type: blockType };
