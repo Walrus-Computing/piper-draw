@@ -45,11 +45,12 @@ interface BlockStore {
   hoveredGridPos: Position3D | null;
   hoveredBlockType: BlockType | null;
   hoveredInvalid: boolean;
+  hoveredInvalidReason: string | null;
 
   setMode: (mode: Mode) => void;
   setCubeType: (cubeType: BlockType) => void;
   setPipeVariant: (variant: PipeVariant) => void;
-  setHoveredGridPos: (pos: Position3D | null, blockType?: BlockType, invalid?: boolean) => void;
+  setHoveredGridPos: (pos: Position3D | null, blockType?: BlockType, invalid?: boolean, reason?: string) => void;
   addBlock: (pos: Position3D) => void;
   removeBlock: (pos: Position3D) => void;
   undo: () => void;
@@ -110,22 +111,25 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   hoveredGridPos: null,
   hoveredBlockType: null,
   hoveredInvalid: false,
+  hoveredInvalidReason: null,
 
-  setMode: (mode) => set({ mode, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false }),
+  setMode: (mode) => set({ mode, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null }),
   setCubeType: (cubeType) => set({ cubeType, pipeVariant: null }),
   setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant] }),
-  setHoveredGridPos: (pos, blockType, invalid) => set((state) => {
+  setHoveredGridPos: (pos, blockType, invalid, reason) => set((state) => {
     const bt = blockType ?? null;
     const inv = invalid ?? false;
+    const rsn = reason ?? null;
     // Skip no-op updates to avoid unnecessary re-renders
     if (
       state.hoveredGridPos?.x === pos?.x &&
       state.hoveredGridPos?.y === pos?.y &&
       state.hoveredGridPos?.z === pos?.z &&
       state.hoveredBlockType === bt &&
-      state.hoveredInvalid === inv
+      state.hoveredInvalid === inv &&
+      state.hoveredInvalidReason === rsn
     ) return state;
-    return { hoveredGridPos: pos, hoveredBlockType: bt, hoveredInvalid: inv };
+    return { hoveredGridPos: pos, hoveredBlockType: bt, hoveredInvalid: inv, hoveredInvalidReason: rsn };
   }),
 
   addBlock: (pos) =>

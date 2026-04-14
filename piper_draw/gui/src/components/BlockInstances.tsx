@@ -207,13 +207,12 @@ function TypedInstances({
 
       const adj = getAdjacentPos(b[e.instanceId].pos, b[e.instanceId].type, e.face.normal, dstType);
 
-      if (
-        !isValidPos(adj, dstType) ||
-        hasBlockOverlap(adj, dstType, store.blocks, store.spatialIndex) ||
-        (isPipeType(dstType) && hasPipeColorConflict(dstType, adj, store.blocks)) ||
-        (!isPipeType(dstType) && dstType !== "Y" && hasCubeColorConflict(dstType as CubeType, adj, store.blocks))
-      ) {
+      if (!isValidPos(adj, dstType) || hasBlockOverlap(adj, dstType, store.blocks, store.spatialIndex)) {
         store.setHoveredGridPos(adj, dstType, true);
+      } else if (isPipeType(dstType) && hasPipeColorConflict(dstType, adj, store.blocks)) {
+        store.setHoveredGridPos(adj, dstType, true, "Pipe colors don't match the adjacent cube");
+      } else if (!isPipeType(dstType) && dstType !== "Y" && hasCubeColorConflict(dstType as CubeType, adj, store.blocks)) {
+        store.setHoveredGridPos(adj, dstType, true, "Cube colors don't match the adjacent pipe");
       } else {
         store.setHoveredGridPos(adj, dstType);
       }
