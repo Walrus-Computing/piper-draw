@@ -8,6 +8,9 @@ import {
   createBlockEdges,
   blockThreeSize,
   hasBlockOverlap,
+  hasCubeColorConflict,
+  hasPipeColorConflict,
+  isValidPipePos,
   isValidPos,
   isPipeType,
   resolvePipeType,
@@ -15,7 +18,7 @@ import {
   posKey,
   VARIANT_AXIS_MAP,
 } from "../types";
-import type { BlockType, Block, FaceMask, Position3D, PipeVariant } from "../types";
+import type { BlockType, CubeType, Block, FaceMask, Position3D, PipeVariant } from "../types";
 
 const MIN_CAPACITY = 64;
 
@@ -36,6 +39,7 @@ function resolvePipeTypeFromFace(
 ): BlockType | null {
   for (const candidateType of VARIANT_AXIS_MAP[variant]) {
     const probe = getAdjacentPos(srcPos, srcType, normal, candidateType);
+    if (!isValidPipePos(probe)) continue;
     const resolved = resolvePipeType(variant, probe);
     if (resolved) return resolved;
   }
@@ -207,6 +211,10 @@ function TypedInstances({
 
       if (!isValidPos(adj, dstType) || hasBlockOverlap(adj, dstType, store.blocks, store.spatialIndex)) {
         store.setHoveredGridPos(adj, dstType, true);
+      } else if (isPipeType(dstType) && hasPipeColorConflict(dstType, adj, store.blocks)) {
+        store.setHoveredGridPos(adj, dstType, true, "Pipe colors don't match the adjacent cube");
+      } else if (!isPipeType(dstType) && dstType !== "Y" && hasCubeColorConflict(dstType as CubeType, adj, store.blocks)) {
+        store.setHoveredGridPos(adj, dstType, true, "Cube colors don't match the adjacent pipe");
       } else {
         store.setHoveredGridPos(adj, dstType);
       }

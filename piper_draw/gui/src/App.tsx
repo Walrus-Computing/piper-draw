@@ -120,6 +120,32 @@ function CheckerboardGrid() {
   );
 }
 
+function PlacementWarning() {
+  const reason = useBlockStore((s) => s.hoveredInvalidReason);
+  if (!reason) return null;
+  return (
+    <div
+      style={{
+        position: "fixed",
+        bottom: 24,
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 1,
+        background: "rgba(180, 40, 40, 0.92)",
+        color: "#fff",
+        padding: "8px 18px",
+        borderRadius: "8px",
+        fontSize: "14px",
+        fontWeight: 500,
+        pointerEvents: "none",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+      }}
+    >
+      {reason}
+    </div>
+  );
+}
+
 export default function App() {
   const fpsRef = useRef<HTMLSpanElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -166,6 +192,7 @@ export default function App() {
       >
         <FpsDisplay spanRef={fpsRef} />
       </div>
+      <PlacementWarning />
       <Canvas
         camera={{ position: [10, 10, -10], fov: 35 }}
         gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }}

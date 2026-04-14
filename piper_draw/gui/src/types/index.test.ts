@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createBlockGeometry, getHiddenFaceMaskForPos, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos } from "./index";
+import { createBlockGeometry, getHiddenFaceMaskForPos, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict } from "./index";
+import type { PipeType, CubeType } from "./index";
 import type { BlockType } from "./index";
 import { Vector3 } from "three";
 
@@ -129,6 +130,134 @@ describe("pipe snapping and adjacency consistency", () => {
     expect(isValidPipePos(northSnap)).toBe(true);
     expect(southSnap.x === south.x || southSnap.y === south.y).toBe(true);
     expect(northSnap.x === north.x || northSnap.y === north.y).toBe(true);
+  });
+});
+
+describe("hasPipeColorConflict", () => {
+  it("allows pipe when closed-axis colors match the adjacent cube", () => {
+    // Pipe "OXZ" (open X): axis 1='X', axis 2='Z'
+    // Cube "ZXZ": axis 1='X', axis 2='Z' → match
+    const blocks = makeBlocks([{ x: 0, y: 0, z: 0, type: "ZXZ" }]);
+    expect(hasPipeColorConflict("OXZ" as PipeType, { x: 1, y: 0, z: 0 }, blocks)).toBe(false);
+  });
+
+  it("rejects pipe when closed-axis colors don't match", () => {
+    // Pipe "OZX" (open X): axis 1='Z', axis 2='X'
+    // Cube "XZZ": axis 1='Z', axis 2='Z' → mismatch on axis 2
+    const blocks = makeBlocks([{ x: 0, y: 0, z: 0, type: "XZZ" }]);
+    expect(hasPipeColorConflict("OZX" as PipeType, { x: 1, y: 0, z: 0 }, blocks)).toBe(true);
+  });
+
+  it("allows pipe with no adjacent cubes", () => {
+    const blocks = makeBlocks([]);
+    expect(hasPipeColorConflict("OZX" as PipeType, { x: 1, y: 0, z: 0 }, blocks)).toBe(false);
+  });
+
+  it("skips Y-type neighbors", () => {
+    const blocks = makeBlocks([{ x: 0, y: 0, z: 0, type: "Y" }]);
+    expect(hasPipeColorConflict("OZX" as PipeType, { x: 1, y: 0, z: 0 }, blocks)).toBe(false);
+  });
+
+  it("checks both ends of the pipe", () => {
+    // Pipe "ZOX" (open Y) at (0,1,0): start neighbor at (0,0,0), far neighbor at (0,3,0)
+    // Both cubes must match axis 0='Z', axis 2='X'
+    const blocks = makeBlocks([
+      { x: 0, y: 0, z: 0, type: "ZZX" },
+      { x: 0, y: 3, z: 0, type: "ZZX" },
+    ]);
+    expect(hasPipeColorConflict("ZOX" as PipeType, { x: 0, y: 1, z: 0 }, blocks)).toBe(false);
+  });
+
+  it("rejects when far-end cube doesn't match", () => {
+    const blocks = makeBlocks([
+      { x: 0, y: 0, z: 0, type: "ZZX" },  // matches
+      { x: 0, y: 3, z: 0, type: "XZZ" },  // axis 0: 'X' vs 'Z' → mismatch
+    ]);
+    expect(hasPipeColorConflict("ZOX" as PipeType, { x: 0, y: 1, z: 0 }, blocks)).toBe(true);
+  });
+});
+
+describe("hasPipeColorConflict — Hadamard", () => {
+  it("uses swapped colors at the far end for X-open pipes", () => {
+    // Pipe "OZXH" (open X): base "OZX", axis 1='Z', axis 2='X'
+    // Far end (+2 offset, x=3): swapped → axis 1='X', axis 2='Z'
+    // Cube at x=3 with axis 1='X', axis 2='Z' should match
+    const blocks = makeBlocks([{ x: 3, y: 0, z: 0, type: "ZXZ" }]);
+    expect(hasPipeColorConflict("OZXH" as PipeType, { x: 1, y: 0, z: 0 }, blocks)).toBe(false);
+  });
+
+  it("rejects far-end cube with unswapped colors for X-open Hadamard", () => {
+    // Same pipe, but cube has original (unswapped) colors
+    const blocks = makeBlocks([{ x: 3, y: 0, z: 0, type: "ZZX" }]);
+    expect(hasPipeColorConflict("OZXH" as PipeType, { x: 1, y: 0, z: 0 }, blocks)).toBe(true);
+  });
+
+  it("reverses swap direction for Y-open Hadamard pipes", () => {
+    // Pipe "XOZH" (open Y): base "XOZ", axis 0='X', axis 2='Z'
+    // Y-open: swap is at START end (offset -1, cube at y=0)
+    // Start end swapped: axis 0='Z', axis 2='X'
+    // Cube "XZZ" at (0,0,0): axis 0='X' → mismatch with swapped 'Z'
+    const blocks = makeBlocks([{ x: 0, y: 0, z: 0, type: "XZZ" }]);
+    expect(hasPipeColorConflict("XOZH" as PipeType, { x: 0, y: 1, z: 0 }, blocks)).toBe(true);
+  });
+
+  it("allows Y-open Hadamard when start-end cube matches swapped colors", () => {
+    // Pipe "XOZH" start end swapped: axis 0='Z', axis 2='X'
+    // Cube "ZZX" at (0,0,0): axis 0='Z', axis 2='X' → match
+    const blocks = makeBlocks([{ x: 0, y: 0, z: 0, type: "ZZX" }]);
+    expect(hasPipeColorConflict("XOZH" as PipeType, { x: 0, y: 1, z: 0 }, blocks)).toBe(false);
+  });
+
+  it("uses original colors at far end for Y-open Hadamard", () => {
+    // Pipe "XOZH" far end (y=3): NOT swapped → axis 0='X', axis 2='Z'
+    // Cube "XZZ" at (0,3,0): axis 0='X', axis 2='Z' → match
+    const blocks = makeBlocks([{ x: 0, y: 3, z: 0, type: "XZZ" }]);
+    expect(hasPipeColorConflict("XOZH" as PipeType, { x: 0, y: 1, z: 0 }, blocks)).toBe(false);
+  });
+});
+
+describe("hasCubeColorConflict", () => {
+  it("allows cube when adjacent pipe colors match", () => {
+    // Pipe "OXZ" at (1,0,0): axis 1='X', axis 2='Z'
+    // Cube "ZXZ": axis 1='X', axis 2='Z' → match
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OXZ" as BlockType }]);
+    expect(hasCubeColorConflict("ZXZ" as CubeType, { x: 0, y: 0, z: 0 }, blocks)).toBe(false);
+  });
+
+  it("rejects cube when adjacent pipe colors don't match", () => {
+    // Pipe "OZX" at (1,0,0): axis 1='Z', axis 2='X'
+    // Cube "XZZ": axis 1='Z' ✓, axis 2='Z' vs pipe 'X' → mismatch
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OZX" as BlockType }]);
+    expect(hasCubeColorConflict("XZZ" as CubeType, { x: 0, y: 0, z: 0 }, blocks)).toBe(true);
+  });
+
+  it("rejects cube when pipe on the -2 side doesn't match", () => {
+    // Pipe "OZX" at (-2,0,0) (open X): far end faces cube at (0,0,0)
+    // axis 1='Z', axis 2='X'. Cube "XZZ": axis 1='Z' ✓, axis 2='Z' vs 'X' → mismatch
+    const blocks = makeBlocks([{ x: -2, y: 0, z: 0, type: "OZX" as BlockType }]);
+    expect(hasCubeColorConflict("XZZ" as CubeType, { x: 0, y: 0, z: 0 }, blocks)).toBe(true);
+  });
+
+  it("uses swapped colors for Hadamard pipe's far end facing cube", () => {
+    // Pipe "OZXH" at (-2,0,0): far end (+2 = x=0) faces the cube
+    // base "OZX", swapped at far end: axis 1='X', axis 2='Z'
+    // Cube "ZXZ": axis 1='X', axis 2='Z' → match
+    const blocks = makeBlocks([{ x: -2, y: 0, z: 0, type: "OZXH" as BlockType }]);
+    expect(hasCubeColorConflict("ZXZ" as CubeType, { x: 0, y: 0, z: 0 }, blocks)).toBe(false);
+  });
+
+  it("reverses Hadamard swap for Y-open pipe facing cube", () => {
+    // Pipe "XOZH" at (0,1,0): cube at (0,0,0) is on start side
+    // Y-open: swapped at start → axis 0='Z', axis 2='X'
+    // Cube "XZZ": axis 0='X' vs 'Z' → mismatch
+    const blocks = makeBlocks([{ x: 0, y: 1, z: 0, type: "XOZH" as BlockType }]);
+    expect(hasCubeColorConflict("XZZ" as CubeType, { x: 0, y: 0, z: 0 }, blocks)).toBe(true);
+  });
+
+  it("skips pipes not oriented toward the cube", () => {
+    // Pipe "ZOX" (open Y) at (1,0,0): openAxis=1 but offset axis=0 → skip
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "ZOX" as BlockType }]);
+    expect(hasCubeColorConflict("XZZ" as CubeType, { x: 0, y: 0, z: 0 }, blocks)).toBe(false);
   });
 });
 

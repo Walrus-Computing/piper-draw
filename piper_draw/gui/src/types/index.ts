@@ -744,6 +744,103 @@ export function hasBlockOverlap(pos: Position3D, type: BlockType, blocks: Map<st
   return false;
 }
 
+/**
+ * Get the effective basis character for a pipe on a given TQEC axis at one end.
+ * Hadamard pipes swap their two closed-axis colors above the band.
+ * Because TQEC Y maps to -Three.js Z, the "above band" end is at:
+ *   - offset +2 (far end) for X-open and Z-open pipes
+ *   - offset -1 (start end) for Y-open pipes (axis direction is reversed)
+ * `swapped` = true means this end sees the swapped colors.
+ */
+function pipeEndBasis(base: string, hadamard: boolean, openAxis: number, axis: number, swapped: boolean): string {
+  if (!hadamard || !swapped) return base[axis];
+  // Swap: return the other closed axis's character
+  const closedAxes = [0, 1, 2].filter(a => a !== openAxis);
+  const otherAxis = closedAxes[0] === axis ? closedAxes[1] : closedAxes[0];
+  return base[otherAxis];
+}
+
+/**
+ * Check whether a pipe placement conflicts with adjacent cube colors.
+ * For each of the pipe's two closed TQEC axes, the pipe's basis character
+ * must match any adjacent cube's basis character on the same axis.
+ * For Hadamard pipes, the far end (offset +2) uses swapped colors.
+ * Returns true if there IS a conflict (placement should be rejected).
+ */
+export function hasPipeColorConflict(
+  pipeType: PipeType,
+  pipePos: Position3D,
+  blocks: Map<string, Block>,
+): boolean {
+  const base = pipeType.replace("H", "");
+  const hadamard = pipeType.length > 3;
+  const openAxis = base.indexOf("O"); // 0, 1, or 2
+
+  const coords: [number, number, number] = [pipePos.x, pipePos.y, pipePos.z];
+
+  for (const offset of [-1, 2]) {
+    const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
+    nCoords[openAxis] += offset;
+    const neighbor = blocks.get(posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] }));
+
+    if (!neighbor) continue;
+    if (neighbor.type === "Y") continue;
+    if (isPipeType(neighbor.type)) continue;
+
+    // Y-open pipes reverse direction (TQEC Y → -Three.js Z), so the
+    // "above band" (swapped) end is at offset -1 instead of +2.
+    const swapped = openAxis === 1 ? offset === -1 : offset === 2;
+    for (let axis = 0; axis < 3; axis++) {
+      if (axis === openAxis) continue;
+      if (pipeEndBasis(base, hadamard, openAxis, axis, swapped) !== neighbor.type[axis]) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Check whether a cube placement conflicts with adjacent pipe colors.
+ * For each of the 3 TQEC axes, checks both possible neighboring pipe positions.
+ * For Hadamard pipes, determines which end faces the cube and uses the right colors.
+ * Returns true if there IS a conflict (placement should be rejected).
+ */
+export function hasCubeColorConflict(
+  cubeType: CubeType,
+  cubePos: Position3D,
+  blocks: Map<string, Block>,
+): boolean {
+  const coords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
+
+  for (let axis = 0; axis < 3; axis++) {
+    // Two pipe positions along this axis: pos[axis]+1 and pos[axis]-2
+    for (const offset of [1, -2]) {
+      const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
+      nCoords[axis] += offset;
+      const neighbor = blocks.get(posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] }));
+
+      if (!neighbor) continue;
+      if (!isPipeType(neighbor.type)) continue;
+
+      const base = neighbor.type.replace("H", "");
+      const hadamard = neighbor.type.length > 3;
+      const openAxis = base.indexOf("O");
+      if (openAxis !== axis) continue;
+
+      // offset +1: cube is at pipe's start (-1 neighbor)
+      // offset -2: cube is at pipe's far end (+2 neighbor)
+      // Y-open pipes reverse: swapped end is at start (offset +1 from cube = -1 from pipe)
+      const swapped = openAxis === 1 ? offset === 1 : offset === -2;
+      for (let i = 0; i < 3; i++) {
+        if (i === openAxis) continue;
+        if (pipeEndBasis(base, hadamard, openAxis, i, swapped) !== cubeType[i]) return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Adjacency
 // ---------------------------------------------------------------------------
