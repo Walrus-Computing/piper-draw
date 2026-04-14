@@ -93,6 +93,6 @@ function GhostBlockInner() {
 export function GhostBlock() {
   const hasHover = useBlockStore((s) => s.hoveredGridPos !== null);
   const mode = useBlockStore((s) => s.mode);
-  if (!hasHover || mode === "select") return null;
+  if (!hasHover || mode === "select" || mode === "build") return null;
   return <GhostBlockInner />;
 }

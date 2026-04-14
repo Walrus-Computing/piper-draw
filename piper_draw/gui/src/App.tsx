@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 
 // Disable color management to match tqec's Three.js v0.138.0 pipeline:
@@ -19,7 +19,9 @@ import { Toolbar } from "./components/Toolbar";
 import { ValidationToast } from "./components/ValidationToast";
 import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { SelectionHighlights } from "./components/SelectionHighlights";
+import { BuildCursor } from "./components/BuildCursor";
 import { useBlockStore } from "./stores/blockStore";
+import { wasdToBuildDirection, tqecToThree } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 
 const GRID_SNAP = 3;
@@ -178,6 +180,58 @@ function SelectModeHints() {
   );
 }
 
+/**
+ * Snaps the camera to the build direction target when cameraSnapTarget changes.
+ * Uses OrbitControls to set azimuthal angle and target position.
+ */
+function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> }) {
+  const cameraSnapTarget = useBlockStore((s) => s.cameraSnapTarget);
+  const clearCameraSnap = useBlockStore((s) => s.clearCameraSnap);
+  const { camera } = useThree();
+  const prevTarget = useRef<{ azimuth: number | null; targetPos: { x: number; y: number; z: number } } | null>(null);
+
+  useFrame(() => {
+    if (!cameraSnapTarget || !controlsRef.current) return;
+    if (prevTarget.current === cameraSnapTarget) return;
+    prevTarget.current = cameraSnapTarget;
+
+    const controls = controlsRef.current;
+    const [tx, ty, tz] = tqecToThree(cameraSnapTarget.targetPos, "XZZ");
+
+    if (cameraSnapTarget.azimuth !== null) {
+      // Compute distance BEFORE moving target so it stays constant
+      const currentDistance = camera.position.distanceTo(controls.target);
+      const dist = Math.max(currentDistance, 15);
+      // Update orbit target to follow cursor
+      controls.target.set(tx, ty, tz);
+      // Clamp polar angle to at most ~55° from horizontal (1.2 rad from vertical)
+      // so the camera looks slightly down rather than from above
+      const polar = Math.min(controls.getPolarAngle(), 1.2);
+      const az = cameraSnapTarget.azimuth;
+
+      camera.position.set(
+        tx + dist * Math.sin(polar) * Math.sin(az),
+        ty + dist * Math.cos(polar),
+        tz + dist * Math.sin(polar) * Math.cos(az),
+      );
+    } else {
+      // Z movement — translate camera + slight rotation to reveal vertical build
+      const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+      const nudge = 0.08; // ~5° rotation around Y axis
+      const cos = Math.cos(nudge), sin = Math.sin(nudge);
+      const rx = offset.x * cos - offset.z * sin;
+      const rz = offset.x * sin + offset.z * cos;
+      controls.target.set(tx, ty, tz);
+      camera.position.set(tx + rx, ty + offset.y, tz + rz);
+    }
+
+    controls.update();
+    clearCameraSnap();
+  });
+
+  return null;
+}
+
 function PlacementWarning() {
   const reason = useBlockStore((s) => s.hoveredInvalidReason);
   if (!reason) return null;
@@ -214,11 +268,45 @@ export default function App() {
     const handler = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       const ctrl = e.ctrlKey || e.metaKey;
+      const store = useBlockStore.getState();
+
+      // Build mode keys (no modifier)
+      if (!ctrl && store.mode === "build") {
+        if (["w", "a", "s", "d"].includes(key) || key === "arrowup" || key === "arrowdown") {
+          e.preventDefault();
+          const controls = controlsRef.current;
+          if (!controls) return;
+          const azimuth = controls.getAzimuthalAngle();
+          const dirKey = key as "w" | "a" | "s" | "d" | "arrowup" | "arrowdown";
+          const direction = wasdToBuildDirection(dirKey, azimuth);
+          store.buildMove(direction);
+          return;
+        }
+        if (key === "q") {
+          e.preventDefault();
+          store.undoBuildStep();
+          return;
+        }
+        if (key === "r") {
+          e.preventDefault();
+          store.cycleCubeType();
+          return;
+        }
+        if (key === "h") {
+          e.preventDefault();
+          store.toggleHadamard();
+          return;
+        }
+        if (key === "escape") {
+          e.preventDefault();
+          store.setMode("place");
+          return;
+        }
+      }
 
       // Non-modifier shortcuts
       if (!ctrl) {
         if (key === "delete" || key === "backspace") {
-          const store = useBlockStore.getState();
           if (store.selectedKeys.size > 0) {
             e.preventDefault();
             store.deleteSelected();
@@ -226,9 +314,9 @@ export default function App() {
           return;
         }
         if (key === "escape") {
-          if (useBlockStore.getState().selectedKeys.size > 0) {
+          if (store.selectedKeys.size > 0) {
             e.preventDefault();
-            useBlockStore.getState().clearSelection();
+            store.clearSelection();
           }
           return;
         }
@@ -236,18 +324,18 @@ export default function App() {
       }
 
       // Ctrl/Cmd shortcuts
-      if (key === "a" && useBlockStore.getState().mode === "select") {
+      if (key === "a" && store.mode === "select") {
         e.preventDefault();
-        useBlockStore.getState().selectAll();
+        store.selectAll();
       } else if (key === "z" && e.shiftKey) {
         e.preventDefault();
-        useBlockStore.getState().redo();
+        store.redo();
       } else if (key === "z") {
         e.preventDefault();
-        useBlockStore.getState().undo();
+        store.undo();
       } else if (key === "y") {
         e.preventDefault();
-        useBlockStore.getState().redo();
+        store.redo();
       }
     };
     window.addEventListener("keydown", handler);
@@ -287,6 +375,8 @@ export default function App() {
         <BlockInstances />
         <InvalidBlockHighlights />
         <SelectionHighlights />
+        <BuildCursor />
+        <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
         <GhostBlock />
         <AxisLabels />

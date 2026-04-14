@@ -895,6 +895,170 @@ export function hasYCubePipeAxisConflict(
  *   (0, ±1, 0) → TQEC Z ± srcSizeZ / dstSizeZ
  *   (0, 0, ±1) → TQEC Y ∓ srcSizeY / dstSizeY
  */
+// ---------------------------------------------------------------------------
+// Build mode types & logic
+// ---------------------------------------------------------------------------
+
+export type BuildDirection = { tqecAxis: 0 | 1 | 2; sign: 1 | -1 };
+
+export type UndeterminedCubeInfo = {
+  options: CubeType[];
+  currentIndex: number;
+};
+
+/**
+ * Compute destination cube position from cursor position and build direction.
+ * Cubes are spaced 3 apart on the grid.
+ */
+export function computeDestCubePos(cursorPos: Position3D, dir: BuildDirection): Position3D {
+  const dst = { ...cursorPos };
+  const key: keyof Position3D = dir.tqecAxis === 0 ? "x" : dir.tqecAxis === 1 ? "y" : "z";
+  dst[key] += dir.sign * 3;
+  return dst;
+}
+
+/**
+ * Compute pipe position between cursor and destination for a build direction.
+ * Pipe occupies the slot at cursor[axis]+1 (positive dir) or cursor[axis]-2 (negative dir).
+ */
+export function computePipePos(cursorPos: Position3D, dir: BuildDirection): Position3D {
+  const pipe = { ...cursorPos };
+  const key: keyof Position3D = dir.tqecAxis === 0 ? "x" : dir.tqecAxis === 1 ? "y" : "z";
+  pipe[key] += dir.sign > 0 ? 1 : -2;
+  return pipe;
+}
+
+/**
+ * Infer the non-Hadamard PipeType to place from a source cube along the given axis.
+ * The pipe's closed-axis characters come from the source cube's type characters.
+ * Returns null if the closed-axis characters are both the same (e.g. "OZZ"),
+ * which is not a valid pipe variant.
+ */
+export function inferPipeType(srcType: CubeType, tqecAxis: 0 | 1 | 2): PipeType | null {
+  const chars = [srcType[0], srcType[1], srcType[2]];
+  chars[tqecAxis] = "O";
+  const result = chars.join("");
+  return (PIPE_TYPES as readonly string[]).includes(result) ? result as PipeType : null;
+}
+
+/**
+ * Determine valid CubeType options for a cube at cubePos given adjacent pipes in blocks.
+ * Each adjacent pipe constrains 2 of the cube's 3 axis characters.
+ * For Hadamard pipes, the swapped end has its two closed-axis chars exchanged.
+ */
+export function determineCubeOptions(
+  cubePos: Position3D,
+  blocks: Map<string, Block>,
+): { determined: true; type: CubeType } | { determined: false; options: CubeType[] } {
+  const constraints: (string | null)[] = [null, null, null];
+  const coords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
+
+  for (let axis = 0; axis < 3; axis++) {
+    for (const pipeOffset of [1, -2]) {
+      const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
+      nCoords[axis] += pipeOffset;
+      const neighbor = blocks.get(posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] }));
+
+      if (!neighbor || !isPipeType(neighbor.type)) continue;
+
+      const base = neighbor.type.replace("H", "");
+      const hadamard = neighbor.type.length > 3;
+      const openAxis = base.indexOf("O");
+      if (openAxis !== axis) continue;
+
+      // Cube at pipeOffset +1 from cube = pipe's -1 end; pipeOffset -2 = pipe's +2 end.
+      // Y-open: swapped at -1 end. X/Z-open: swapped at +2 end.
+      const cubeAtPipeEnd = pipeOffset === 1 ? -1 : 2;
+      const swapped = openAxis === 1 ? cubeAtPipeEnd === -1 : cubeAtPipeEnd === 2;
+
+      for (let ca = 0; ca < 3; ca++) {
+        if (ca === openAxis) continue;
+        const required = pipeEndBasis(base, hadamard, openAxis, ca, swapped);
+        if (constraints[ca] === null) {
+          constraints[ca] = required;
+        } else if (constraints[ca] !== required) {
+          return { determined: false, options: [] };
+        }
+      }
+    }
+  }
+
+  const valid = CUBE_TYPES.filter(ct => {
+    for (let i = 0; i < 3; i++) {
+      if (constraints[i] !== null && ct[i] !== constraints[i]) return false;
+    }
+    return true;
+  });
+
+  if (valid.length === 1) return { determined: true, type: valid[0] };
+  return { determined: false, options: [...valid] };
+}
+
+/**
+ * Map a WASD/Arrow key + camera azimuthal angle to a TQEC BuildDirection.
+ * Camera azimuth is snapped to the nearest 90° to align with grid axes.
+ *
+ * OrbitControls azimuthal angle reference:
+ *   0    = camera on +Z (Three.js), looking toward -Z = TQEC +Y
+ *   π/2  = camera on +X, looking toward -X = TQEC -X
+ *   π    = camera on -Z, looking toward +Z = TQEC -Y
+ *  -π/2  = camera on -X, looking toward +X = TQEC +X
+ */
+export function wasdToBuildDirection(
+  key: "w" | "a" | "s" | "d" | "arrowup" | "arrowdown",
+  cameraAzimuth: number,
+): BuildDirection {
+  if (key === "arrowup") return { tqecAxis: 2, sign: 1 };
+  if (key === "arrowdown") return { tqecAxis: 2, sign: -1 };
+
+  // Snap to nearest 90° quadrant: 0, 1, 2, 3
+  const q = ((Math.round(cameraAzimuth / (Math.PI / 2)) % 4) + 4) % 4;
+
+  // [forward, right] pairs in TQEC coordinates per quadrant
+  const cardinals: Array<[BuildDirection, BuildDirection]> = [
+    [{ tqecAxis: 1, sign: 1 },  { tqecAxis: 0, sign: 1 }],   // q=0: fwd +Y, right +X
+    [{ tqecAxis: 0, sign: -1 }, { tqecAxis: 1, sign: 1 }],   // q=1: fwd -X, right +Y
+    [{ tqecAxis: 1, sign: -1 }, { tqecAxis: 0, sign: -1 }],  // q=2: fwd -Y, right -X
+    [{ tqecAxis: 0, sign: 1 },  { tqecAxis: 1, sign: -1 }],  // q=3: fwd +X, right -Y
+  ];
+
+  const [forward, right] = cardinals[q];
+
+  switch (key) {
+    case "w": return forward;
+    case "s": return { tqecAxis: forward.tqecAxis, sign: (forward.sign * -1) as 1 | -1 };
+    case "d": return right;
+    case "a": return { tqecAxis: right.tqecAxis, sign: (right.sign * -1) as 1 | -1 };
+  }
+}
+
+/**
+ * Compute the camera azimuthal angle to "look from behind" a build direction.
+ * Returns null for Z-axis movement (no azimuth change for temporal axis).
+ */
+export function cameraAzimuthForDirection(dir: BuildDirection): number | null {
+  if (dir.tqecAxis === 2) return null;
+  // Camera should be behind the build direction:
+  //   build +Y → camera at +Z → azimuth 0
+  //   build -Y → camera at -Z → azimuth π
+  //   build +X → camera at -X → azimuth -π/2
+  //   build -X → camera at +X → azimuth π/2
+  if (dir.tqecAxis === 1) return dir.sign === 1 ? 0 : Math.PI;
+  return dir.sign === 1 ? -Math.PI / 2 : Math.PI / 2;
+}
+
+// ---------------------------------------------------------------------------
+// Adjacency
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the TQEC position for a new block placed adjacent to an existing block's face.
+ *
+ * Three.js face normal → TQEC axis:
+ *   (±1, 0, 0) → TQEC X ± srcSizeX / dstSizeX
+ *   (0, ±1, 0) → TQEC Z ± srcSizeZ / dstSizeZ
+ *   (0, 0, ±1) → TQEC Y ∓ srcSizeY / dstSizeY
+ */
 export function getAdjacentPos(
   srcPos: Position3D,
   srcType: BlockType,
