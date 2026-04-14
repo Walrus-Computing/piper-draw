@@ -13,8 +13,11 @@ export interface ThreeState {
 
 export function MarqueeSelect({
   threeStateRef,
+  controlsRef,
 }: {
   threeStateRef: React.RefObject<ThreeState | null>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  controlsRef: React.RefObject<any>;
 }) {
   const mode = useBlockStore((s) => s.mode);
 
@@ -37,9 +40,13 @@ export function MarqueeSelect({
     (e: PointerEvent) => {
       if (mode !== "select") return;
       if (e.button !== 0) return;
+      if (e.altKey) return; // Alt+drag = orbit rotation
       // Only start on the canvas element itself
       const target = e.target as HTMLElement;
       if (target.tagName !== "CANVAS") return;
+
+      // Disable orbit rotation for the duration of the marquee drag
+      if (controlsRef.current) controlsRef.current.enableRotate = false;
 
       const canvasRect = target.getBoundingClientRect();
       dragRef.current = {
@@ -51,7 +58,7 @@ export function MarqueeSelect({
       };
       target.setPointerCapture(e.pointerId);
     },
-    [mode],
+    [mode, controlsRef],
   );
 
   const onPointerMove = useCallback((e: PointerEvent) => {
@@ -73,12 +80,23 @@ export function MarqueeSelect({
       if (!drag) return;
       dragRef.current = null;
 
-      drag.target.releasePointerCapture(drag.pointerId);
+      // Clear visual rect before anything that might throw
+      setRect(null);
+
+      try {
+        drag.target.releasePointerCapture(drag.pointerId);
+      } catch {
+        // Pointer capture may already be released (e.g., element removed)
+      }
+
+      // Re-enable orbit rotation
+      if (controlsRef.current) controlsRef.current.enableRotate = true;
+
+      // Bail if mode changed mid-drag
+      if (useBlockStore.getState().mode !== "select") return;
 
       const dx = e.clientX - drag.startX;
       const dy = e.clientY - drag.startY;
-
-      setRect(null);
 
       // Only trigger marquee if drag exceeded threshold
       if (Math.abs(dx) + Math.abs(dy) < DRAG_THRESHOLD) return;
@@ -86,7 +104,8 @@ export function MarqueeSelect({
       const ts = threeStateRef.current;
       if (!ts) return;
 
-      const { canvasRect } = drag;
+      // Re-query canvas rect in case of scroll/resize during drag
+      const canvasRect = drag.target.getBoundingClientRect();
       const screenRect = {
         x1: Math.min(e.clientX, drag.startX) - canvasRect.left,
         y1: Math.min(e.clientY, drag.startY) - canvasRect.top,
@@ -104,7 +123,7 @@ export function MarqueeSelect({
       );
       useBlockStore.getState().selectBlocks(keys, e.shiftKey);
     },
-    [threeStateRef],
+    [threeStateRef, controlsRef],
   );
 
   useEffect(() => {
