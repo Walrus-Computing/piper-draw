@@ -1,4 +1,4 @@
-import type { Block, BlockType } from "../types";
+import type { Block } from "../types";
 import { isPipeType } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -202,9 +202,11 @@ export async function downloadDae(blocks: Map<string, Block>, filename = "diagra
   const xml = exportBlocksToDae(blocks);
   const blob = new Blob([xml], { type: "model/vnd.collada+xml" });
 
-  if (typeof window.showSaveFilePicker === "function") {
+  // Use File System Access API when available (Chromium browsers)
+  const w = window as Window & { showSaveFilePicker?: (opts: unknown) => Promise<FileSystemFileHandle> };
+  if (typeof w.showSaveFilePicker === "function") {
     try {
-      const handle = await window.showSaveFilePicker({
+      const handle = await w.showSaveFilePicker({
         suggestedName: filename,
         types: [
           {
