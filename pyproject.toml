@@ -7,6 +7,9 @@ requires-python = ">=3.14"
 dependencies = [
     "networkx>=3.2",
     "stim>=1.15.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "tqec @ git+https://github.com/tqec/tqec.git",
 ]
 
 [dependency-groups]
