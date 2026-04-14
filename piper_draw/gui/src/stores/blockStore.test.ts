@@ -145,4 +145,40 @@ describe("blockStore", () => {
       expect(useBlockStore.getState().blocks.size).toBe(1);
     });
   });
+
+  describe("loadBlocks", () => {
+    it("replaces all blocks with incoming blocks", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      const incoming = new Map([["3,0,0", { pos: { x: 3, y: 0, z: 0 }, type: "ZXZ" as const }]]);
+      useBlockStore.getState().loadBlocks(incoming);
+      expect(useBlockStore.getState().blocks.size).toBe(1);
+      expect(useBlockStore.getState().blocks.get("3,0,0")?.type).toBe("ZXZ");
+      expect(useBlockStore.getState().blocks.has("0,0,0")).toBe(false);
+    });
+
+    it("can be undone to restore previous state", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      const incoming = new Map([["3,0,0", { pos: { x: 3, y: 0, z: 0 }, type: "ZXZ" as const }]]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.size).toBe(1);
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZZ");
+    });
+
+    it("can be redone to restore imported state", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      const incoming = new Map([["3,0,0", { pos: { x: 3, y: 0, z: 0 }, type: "ZXZ" as const }]]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.getState().undo();
+      useBlockStore.getState().redo();
+      expect(useBlockStore.getState().blocks.size).toBe(1);
+      expect(useBlockStore.getState().blocks.get("3,0,0")?.type).toBe("ZXZ");
+    });
+
+    it("is a no-op when both empty", () => {
+      const histBefore = useBlockStore.getState().history.length;
+      useBlockStore.getState().loadBlocks(new Map());
+      expect(useBlockStore.getState().history.length).toBe(histBefore);
+    });
+  });
 });

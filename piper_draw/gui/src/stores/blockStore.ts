@@ -9,6 +9,7 @@ import {
   addToSpatialIndex,
   removeFromSpatialIndex,
   recomputeAffectedHiddenFaces,
+  getHiddenFaceMaskForPos,
 } from "../types";
 
 export type Mode = "place" | "delete";
@@ -28,7 +29,9 @@ const PIPE_VARIANT_CANONICAL: Record<PipeVariant, BlockType> = {
 type UndoCommand =
   | { kind: "add"; key: string; block: Block }
   | { kind: "remove"; key: string; block: Block }
-  | { kind: "clear"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask> };
+  | { kind: "clear"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask> }
+  | { kind: "load"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask>;
+      newBlocks: Map<string, Block>; newIndex: SpatialIndex; newHiddenFaces: Map<string, FaceMask> };
 
 interface BlockStore {
   blocks: Map<string, Block>;
@@ -51,6 +54,7 @@ interface BlockStore {
   removeBlock: (pos: Position3D) => void;
   undo: () => void;
   redo: () => void;
+  loadBlocks: (blocks: Map<string, Block>) => void;
   clearAll: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
@@ -200,6 +204,19 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         };
       }
 
+      if (cmd.kind === "load") {
+        // Undo a load — restore the state before the import
+        const newIndex = buildSpatialIndex(cmd.savedBlocks);
+        return {
+          blocks: cmd.savedBlocks,
+          spatialIndex: newIndex,
+          hiddenFaces: cmd.savedHiddenFaces,
+          history: newHistory,
+          future: [cmd, ...state.future].slice(0, MAX_HISTORY),
+          hoveredGridPos: null,
+        };
+      }
+
       // cmd.kind === "clear" — restore saved state, rebuild spatial index
       const newIndex = buildSpatialIndex(cmd.savedBlocks);
       return {
@@ -240,6 +257,18 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         };
       }
 
+      if (cmd.kind === "load") {
+        // Redo a load — restore the imported state
+        return {
+          blocks: cmd.newBlocks,
+          spatialIndex: cmd.newIndex,
+          hiddenFaces: cmd.newHiddenFaces,
+          history: [...state.history, cmd],
+          future: newFuture,
+          hoveredGridPos: null,
+        };
+      }
+
       // cmd.kind === "clear" — save current state, then clear
       const savedCmd: UndoCommand = {
         kind: "clear",
@@ -252,6 +281,33 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         hiddenFaces: new Map(),
         history: [...state.history, savedCmd],
         future: newFuture,
+        hoveredGridPos: null,
+      };
+    }),
+
+  loadBlocks: (incoming) =>
+    set((state) => {
+      if (incoming.size === 0 && state.blocks.size === 0) return state;
+      const newIndex = buildSpatialIndex(incoming);
+      const newHidden: Map<string, FaceMask> = new Map();
+      for (const [key, block] of incoming) {
+        const mask = getHiddenFaceMaskForPos(block.pos, block.type, incoming, newIndex);
+        if (mask !== 0) newHidden.set(key, mask);
+      }
+      const cmd: UndoCommand = {
+        kind: "load",
+        savedBlocks: state.blocks,
+        savedHiddenFaces: state.hiddenFaces,
+        newBlocks: incoming,
+        newIndex,
+        newHiddenFaces: newHidden,
+      };
+      return {
+        blocks: incoming,
+        spatialIndex: newIndex,
+        hiddenFaces: newHidden,
+        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        future: [],
         hoveredGridPos: null,
       };
     }),

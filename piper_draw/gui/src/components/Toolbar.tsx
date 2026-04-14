@@ -1,6 +1,8 @@
 import { useBlockStore } from "../stores/blockStore";
 import { CUBE_TYPES, PIPE_VARIANTS, X_HEX, Z_HEX, Y_HEX, H_HEX } from "../types";
 import type { BlockType, PipeVariant } from "../types";
+import { downloadDae } from "../utils/daeExport";
+import { triggerDaeImport } from "../utils/daeImport";
 import * as THREE from "three";
 
 function basisHex(ch: string): string {
@@ -353,6 +355,7 @@ export function Toolbar({ onResetCamera, controlsRef }: { onResetCamera: () => v
   const undo = useBlockStore((s) => s.undo);
   const redo = useBlockStore((s) => s.redo);
   const clearAll = useBlockStore((s) => s.clearAll);
+  const loadBlocks = useBlockStore((s) => s.loadBlocks);
   const blocksEmpty = useBlockStore((s) => s.blocks.size === 0);
 
   const setCameraPreset = (position: [number, number, number]) => {
@@ -431,6 +434,20 @@ export function Toolbar({ onResetCamera, controlsRef }: { onResetCamera: () => v
           style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
         >
           Clear
+        </button>
+      </div>
+
+      {/* Import / Export */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
+        <button onClick={() => triggerDaeImport(loadBlocks)} style={btnStyle(false)}>
+          Import
+        </button>
+        <button
+          onClick={() => downloadDae(useBlockStore.getState().blocks)}
+          disabled={blocksEmpty}
+          style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
+        >
+          Export
         </button>
       </div>
 
