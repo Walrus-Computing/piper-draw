@@ -164,9 +164,7 @@ describe("validationStore", () => {
     });
 
     it("is a no-op when already idle", () => {
-      const stateBefore = useValidationStore.getState();
       useValidationStore.getState().dismiss();
-      // Should not trigger a new state object when already idle
       expect(useValidationStore.getState().status).toBe("idle");
     });
   });
