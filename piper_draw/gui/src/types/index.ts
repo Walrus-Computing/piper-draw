@@ -105,7 +105,8 @@ export function isValidBlockPos(pos: Position3D): boolean {
 export function isValidPipePos(pos: Position3D): boolean {
   const mx = mod(pos.x, 3), my = mod(pos.y, 3), mz = mod(pos.z, 3);
   const slots = (mx === 1 ? 1 : 0) + (my === 1 ? 1 : 0) + (mz === 1 ? 1 : 0);
-  return slots === 1;
+  const zeros = (mx === 0 ? 1 : 0) + (my === 0 ? 1 : 0) + (mz === 0 ? 1 : 0);
+  return slots === 1 && zeros === 2;
 }
 
 export function isValidPos(pos: Position3D, blockType: BlockType): boolean {
