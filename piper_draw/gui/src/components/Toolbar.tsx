@@ -1,4 +1,5 @@
 import { useBlockStore } from "../stores/blockStore";
+import { useValidationStore } from "../stores/validationStore";
 import { CUBE_TYPES, PIPE_VARIANTS } from "../types";
 import type { BlockType } from "../types";
 import * as THREE from "three";
@@ -51,7 +52,7 @@ const blockBtnStyle = (active: boolean) => ({
 // ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function Toolbar({ onResetCamera, controlsRef }: { onResetCamera: () => void; controlsRef: React.RefObject<any> }) {
+export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCamera: () => void; controlsRef: React.RefObject<any>; toolbarRef: React.RefObject<HTMLDivElement | null> }) {
   const mode = useBlockStore((s) => s.mode);
   const setMode = useBlockStore((s) => s.setMode);
   const cubeType = useBlockStore((s) => s.cubeType);
@@ -66,6 +67,9 @@ export function Toolbar({ onResetCamera, controlsRef }: { onResetCamera: () => v
   const blocksEmpty = useBlockStore((s) => s.blocks.size === 0);
 
   const previewImages = usePreviewImages(controlsRef);
+
+  const validationStatus = useValidationStore((s) => s.status);
+  const runValidation = useValidationStore((s) => s.validate);
 
   const setCameraPreset = (position: [number, number, number]) => {
     const controls = controlsRef.current;
@@ -85,6 +89,7 @@ export function Toolbar({ onResetCamera, controlsRef }: { onResetCamera: () => v
 
   return (
     <div
+      ref={toolbarRef}
       onPointerDown={(e) => e.stopPropagation()}
       style={{
         position: "fixed",
@@ -150,6 +155,26 @@ export function Toolbar({ onResetCamera, controlsRef }: { onResetCamera: () => v
           style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
         >
           Clear
+        </button>
+        <button
+          onClick={runValidation}
+          disabled={blocksEmpty || validationStatus === "loading"}
+          style={{
+            ...btnStyle(false),
+            opacity: blocksEmpty ? 0.4 : 1,
+            cursor: blocksEmpty || validationStatus === "loading" ? "default" : "pointer",
+            borderColor:
+              validationStatus === "valid" ? "#28a745" :
+              validationStatus === "invalid" ? "#dc3545" :
+              "#ccc",
+            background:
+              validationStatus === "valid" ? "#d4edda" :
+              validationStatus === "invalid" ? "#f8d7da" :
+              validationStatus === "loading" ? "#e8f0fe" :
+              "#fff",
+          }}
+        >
+          {validationStatus === "loading" ? "Verifying..." : "Verify"}
         </button>
       </div>
 
