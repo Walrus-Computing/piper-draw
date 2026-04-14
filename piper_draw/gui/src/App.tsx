@@ -20,6 +20,7 @@ import { ValidationToast } from "./components/ValidationToast";
 import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { SelectionHighlights } from "./components/SelectionHighlights";
 import { BuildCursor } from "./components/BuildCursor";
+import { MarqueeSelect, type ThreeState } from "./components/MarqueeSelect";
 import { useBlockStore } from "./stores/blockStore";
 import { wasdToBuildDirection, tqecToThree } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
@@ -132,6 +133,7 @@ function SelectModeHints() {
 
   const hints = [
     ["Click", "Select"],
+    ["Drag", "Box select"],
     ["Shift+Click", "Add/remove"],
     [`${modKey}A`, "Select all"],
     ["Delete", "Delete selected"],
@@ -232,6 +234,13 @@ function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> })
   return null;
 }
 
+/** Exposes Three.js camera + viewport size to HTML components via a shared ref. */
+function ThreeStateBridge({ stateRef }: { stateRef: React.MutableRefObject<ThreeState | null> }) {
+  const { camera, size } = useThree();
+  stateRef.current = { camera, size };
+  return null;
+}
+
 function PlacementWarning() {
   const reason = useBlockStore((s) => s.hoveredInvalidReason);
   if (!reason) return null;
@@ -263,6 +272,8 @@ export default function App() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const threeStateRef = useRef<ThreeState | null>(null);
+  const mode = useBlockStore((s) => s.mode);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -385,8 +396,10 @@ export default function App() {
         <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
           <OrientationGizmo />
         </GizmoHelper>
-        <OrbitControls ref={controlsRef} makeDefault />
+        <ThreeStateBridge stateRef={threeStateRef} />
+        <OrbitControls ref={controlsRef} makeDefault enableRotate={mode !== "select"} />
       </Canvas>
+      <MarqueeSelect threeStateRef={threeStateRef} />
     </>
   );
 }

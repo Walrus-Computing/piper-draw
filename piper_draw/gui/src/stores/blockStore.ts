@@ -113,6 +113,7 @@ interface BlockStore {
   clearSelection: () => void;
   deleteSelected: () => void;
   selectAll: () => void;
+  selectBlocks: (keys: string[], additive: boolean) => void;
 
   // Build mode actions
   buildMove: (direction: BuildDirection) => boolean;
@@ -751,6 +752,15 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     set((state) => {
       if (state.blocks.size === 0) return state;
       return { selectedKeys: new Set(state.blocks.keys()) };
+    }),
+
+  selectBlocks: (keys, additive) =>
+    set((state) => {
+      const next = additive ? new Set(state.selectedKeys) : new Set<string>();
+      for (const key of keys) {
+        if (state.blocks.has(key)) next.add(key);
+      }
+      return { selectedKeys: next };
     }),
 
   // ---------------------------------------------------------------------------
