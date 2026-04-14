@@ -215,6 +215,15 @@ class TestValidateEndpoint:
         ])
         assert result["valid"] is True
 
+    def test_y_open_hadamard_pipe_validation(self):
+        # Y-open Hadamard pipe connecting XZZ to ZZX should be valid
+        result = self._run([
+            BlockInput(pos=[0, 0, 0], type="XZZ"),
+            BlockInput(pos=[0, 3, 0], type="ZZX"),
+            BlockInput(pos=[0, 1, 0], type="XOZH"),
+        ])
+        assert result["valid"] is True
+
     def test_collects_all_errors(self):
         # Two cubes with mismatched pipes -> should collect errors from both cubes
         result = self._run([
