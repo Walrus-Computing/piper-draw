@@ -26,6 +26,7 @@ const MIN_CAPACITY = 64;
 const geometryCache = new Map<string, THREE.BufferGeometry>();
 const fullBoxCache = new Map<BlockType, THREE.BoxGeometry>();
 const edgesCache = new Map<string, THREE.BufferGeometry>();
+const edgeLineMaterial = new THREE.LineBasicMaterial({ color: "#000000" });
 
 function resolvePipeTypeFromFace(
   srcPos: Position3D,
@@ -147,14 +148,30 @@ function TypedInstances({
       };
     }
 
+    // Set instance matrices and compute bounding sphere in a single pass
+    // (avoids Three.js computeBoundingSphere which decomposes matrices)
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
     for (let i = 0; i < blocks.length; i++) {
       const [tx, ty, tz] = tqecToThree(blocks[i].pos, cubeType);
       dummy.makeTranslation(tx, ty, tz);
       mesh.setMatrixAt(i, dummy);
+      if (tx < minX) minX = tx; if (tx > maxX) maxX = tx;
+      if (ty < minY) minY = ty; if (ty > maxY) maxY = ty;
+      if (tz < minZ) minZ = tz; if (tz > maxZ) maxZ = tz;
     }
     mesh.count = blocks.length;
     mesh.instanceMatrix.needsUpdate = true;
-    mesh.computeBoundingSphere();
+
+    if (blocks.length > 0) {
+      const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (minZ + maxZ) / 2;
+      const dx = (maxX - minX) / 2, dy = (maxY - minY) / 2, dz = (maxZ - minZ) / 2;
+      const [bx, by, bz] = blockThreeSize(cubeType);
+      const halfDiag = Math.sqrt(bx * bx + by * by + bz * bz) / 2;
+      if (!mesh.boundingSphere) mesh.boundingSphere = new THREE.Sphere();
+      mesh.boundingSphere.center.set(cx, cy, cz);
+      mesh.boundingSphere.radius = Math.sqrt(dx * dx + dy * dy + dz * dz) + halfDiag;
+    }
 
     return () => {
       // Remove instance override, falls back to prototype — safe under Strict Mode double-mount
@@ -232,9 +249,7 @@ function TypedInstances({
         onClick={handleClick}
       />
       {batchedEdgesGeo && (
-        <lineSegments geometry={batchedEdgesGeo}>
-          <lineBasicMaterial color="#000000" />
-        </lineSegments>
+        <lineSegments geometry={batchedEdgesGeo} material={edgeLineMaterial} />
       )}
     </>
   );

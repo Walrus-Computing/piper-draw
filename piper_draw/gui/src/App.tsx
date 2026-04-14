@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
@@ -119,7 +119,7 @@ function CheckerboardGrid() {
 }
 
 export default function App() {
-  const [fps, setFps] = useState(0);
+  const fpsRef = useRef<HTMLSpanElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
 
@@ -160,7 +160,7 @@ export default function App() {
           boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
         }}
       >
-        <FpsDisplay fps={fps} />
+        <FpsDisplay spanRef={fpsRef} />
       </div>
       <Canvas
         camera={{ position: [10, 10, -10], fov: 35 }}
@@ -174,7 +174,7 @@ export default function App() {
         <GridPlane />
         <GhostBlock />
         <AxisLabels />
-        <FpsSampler onFps={setFps} />
+        <FpsSampler targetRef={fpsRef} />
         <CheckerboardGrid />
         <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
           <OrientationGizmo />

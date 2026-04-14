@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
 import { tqecToThree, getHiddenFaceMaskForPos } from "../types";
@@ -6,8 +5,47 @@ import { getCachedGeometry, getCachedEdges, getCachedFullBox } from "./BlockInst
 
 const noRaycast = () => {};
 
-export function GhostBlock() {
-  const hoveredGridPos = useBlockStore((s) => s.hoveredGridPos);
+// Shared materials — allocated once, never re-created
+const ghostMaterial = new THREE.MeshLambertMaterial({
+  vertexColors: true,
+  transparent: true,
+  opacity: 0.4,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
+const invalidMaterial = new THREE.MeshLambertMaterial({
+  color: 0xff0000,
+  transparent: true,
+  opacity: 0.4,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
+const deleteMaterial = new THREE.MeshBasicMaterial({
+  color: 0xff0000,
+  transparent: true,
+  opacity: 0.35,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
+const validLineMaterial = new THREE.LineBasicMaterial({
+  color: "#000000",
+  transparent: true,
+  opacity: 0.4,
+  depthWrite: false,
+});
+const invalidLineMaterial = new THREE.LineBasicMaterial({
+  color: "#ff0000",
+  transparent: true,
+  opacity: 0.4,
+  depthWrite: false,
+});
+
+/**
+ * Inner component — only mounts when hoveredGridPos is non-null.
+ * Subscribes to blocks/spatialIndex for hidden-face computation.
+ */
+function GhostBlockInner() {
+  const hoveredGridPos = useBlockStore((s) => s.hoveredGridPos)!;
   const mode = useBlockStore((s) => s.mode);
   const cubeType = useBlockStore((s) => s.cubeType);
   const hoveredBlockType = useBlockStore((s) => s.hoveredBlockType);
@@ -17,52 +55,9 @@ export function GhostBlock() {
 
   const activeType = hoveredBlockType ?? cubeType;
 
-  const previewHiddenFaces = hoveredGridPos ? getHiddenFaceMaskForPos(hoveredGridPos, activeType, blocks, spatialIndex) : 0;
+  const previewHiddenFaces = getHiddenFaceMaskForPos(hoveredGridPos, activeType, blocks, spatialIndex);
   const ghostGeometry = getCachedGeometry(activeType, previewHiddenFaces);
   const ghostEdges = getCachedEdges(activeType, previewHiddenFaces);
-  const ghostMaterial = useMemo(
-    () =>
-      new THREE.MeshLambertMaterial({
-        vertexColors: true,
-        transparent: true,
-        opacity: 0.4,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      }),
-    [],
-  );
-  const invalidMaterial = useMemo(
-    () =>
-      new THREE.MeshLambertMaterial({
-        color: 0xff0000,
-        transparent: true,
-        opacity: 0.4,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      }),
-    [],
-  );
-  const deleteMaterial = useMemo(
-    () =>
-      new THREE.MeshBasicMaterial({
-        color: 0xff0000,
-        transparent: true,
-        opacity: 0.35,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      }),
-    [],
-  );
-  const validLineMaterial = useMemo(
-    () => new THREE.LineBasicMaterial({ color: "#000000", transparent: true, opacity: 0.4, depthWrite: false }),
-    [],
-  );
-  const invalidLineMaterial = useMemo(
-    () => new THREE.LineBasicMaterial({ color: "#ff0000", transparent: true, opacity: 0.4, depthWrite: false }),
-    [],
-  );
-
-  if (!hoveredGridPos) return null;
 
   const [x, y, z] = tqecToThree(hoveredGridPos, activeType);
   const isDelete = mode === "delete";
@@ -89,4 +84,14 @@ export function GhostBlock() {
       )}
     </group>
   );
+}
+
+/**
+ * Outer component — only subscribes to hoveredGridPos.
+ * When null, renders nothing and avoids subscribing to blocks/spatialIndex.
+ */
+export function GhostBlock() {
+  const hasHover = useBlockStore((s) => s.hoveredGridPos !== null);
+  if (!hasHover) return null;
+  return <GhostBlockInner />;
 }

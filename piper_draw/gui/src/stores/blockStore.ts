@@ -111,7 +111,19 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   setMode: (mode) => set({ mode, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false }),
   setCubeType: (cubeType) => set({ cubeType, pipeVariant: null }),
   setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant] }),
-  setHoveredGridPos: (pos, blockType, invalid) => set({ hoveredGridPos: pos, hoveredBlockType: blockType ?? null, hoveredInvalid: invalid ?? false }),
+  setHoveredGridPos: (pos, blockType, invalid) => set((state) => {
+    const bt = blockType ?? null;
+    const inv = invalid ?? false;
+    // Skip no-op updates to avoid unnecessary re-renders
+    if (
+      state.hoveredGridPos?.x === pos?.x &&
+      state.hoveredGridPos?.y === pos?.y &&
+      state.hoveredGridPos?.z === pos?.z &&
+      state.hoveredBlockType === bt &&
+      state.hoveredInvalid === inv
+    ) return state;
+    return { hoveredGridPos: pos, hoveredBlockType: bt, hoveredInvalid: inv };
+  }),
 
   addBlock: (pos) =>
     set((state) => {

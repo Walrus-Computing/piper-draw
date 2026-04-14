@@ -593,10 +593,11 @@ export function addToSpatialIndex(index: SpatialIndex, block: Block): void {
 
 /** Incrementally remove a block from an existing spatial index. */
 export function removeFromSpatialIndex(index: SpatialIndex, block: Block): void {
+  const pk = posKey(block.pos);
   for (const key of blockCells(block)) {
     const list = index.get(key);
     if (!list) continue;
-    const idx = list.indexOf(block);
+    const idx = list.findIndex(b => posKey(b.pos) === pk);
     if (idx >= 0) list.splice(idx, 1);
     if (list.length === 0) index.delete(key);
   }
