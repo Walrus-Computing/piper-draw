@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createBlockGeometry, getHiddenFaceMaskForPos, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict } from "./index";
+import { createBlockGeometry, getHiddenFaceMaskForPos, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict } from "./index";
 import type { PipeType, CubeType } from "./index";
 import type { BlockType } from "./index";
 import { Vector3 } from "three";
@@ -258,6 +258,63 @@ describe("hasCubeColorConflict", () => {
     // Pipe "ZOX" (open Y) at (1,0,0): openAxis=1 but offset axis=0 → skip
     const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "ZOX" as BlockType }]);
     expect(hasCubeColorConflict("XZZ" as CubeType, { x: 0, y: 0, z: 0 }, blocks)).toBe(false);
+  });
+});
+
+describe("hasYCubePipeAxisConflict", () => {
+  it("rejects Y cube next to an X-open pipe", () => {
+    // X-open pipe "OZX" at (1,0,0), Y cube at (0,0,0)
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OZX" as BlockType }]);
+    expect(hasYCubePipeAxisConflict("Y", { x: 0, y: 0, z: 0 }, blocks)).toBe(true);
+  });
+
+  it("rejects Y cube next to a Y-open pipe", () => {
+    // Y-open pipe "ZOX" at (0,1,0), Y cube at (0,0,0)
+    const blocks = makeBlocks([{ x: 0, y: 1, z: 0, type: "ZOX" as BlockType }]);
+    expect(hasYCubePipeAxisConflict("Y", { x: 0, y: 0, z: 0 }, blocks)).toBe(true);
+  });
+
+  it("allows Y cube next to a Z-open pipe", () => {
+    // Z-open pipe "ZXO" at (0,0,1), Y cube at (0,0,0)
+    const blocks = makeBlocks([{ x: 0, y: 0, z: 1, type: "ZXO" as BlockType }]);
+    expect(hasYCubePipeAxisConflict("Y", { x: 0, y: 0, z: 0 }, blocks)).toBe(false);
+  });
+
+  it("rejects Y cube next to an X-open Hadamard pipe", () => {
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OZXH" as BlockType }]);
+    expect(hasYCubePipeAxisConflict("Y", { x: 0, y: 0, z: 0 }, blocks)).toBe(true);
+  });
+
+  it("allows Y cube with no adjacent pipes", () => {
+    const blocks = makeBlocks([]);
+    expect(hasYCubePipeAxisConflict("Y", { x: 0, y: 0, z: 0 }, blocks)).toBe(false);
+  });
+
+  it("rejects Y cube on the far side (-2 offset) of an X-open pipe", () => {
+    // X-open pipe at (1,0,0), Y cube at (3,0,0) — far endpoint
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OXZ" as BlockType }]);
+    expect(hasYCubePipeAxisConflict("Y", { x: 3, y: 0, z: 0 }, blocks)).toBe(true);
+  });
+
+  it("rejects X-open pipe when Y cube is at endpoint", () => {
+    // Y cube at (0,0,0), placing X-open pipe "OZX" at (1,0,0)
+    const blocks = makeBlocks([{ x: 0, y: 0, z: 0, type: "Y" }]);
+    expect(hasYCubePipeAxisConflict("OZX" as BlockType, { x: 1, y: 0, z: 0 }, blocks)).toBe(true);
+  });
+
+  it("rejects Y-open pipe when Y cube is at endpoint", () => {
+    const blocks = makeBlocks([{ x: 0, y: 0, z: 0, type: "Y" }]);
+    expect(hasYCubePipeAxisConflict("ZOX" as BlockType, { x: 0, y: 1, z: 0 }, blocks)).toBe(true);
+  });
+
+  it("allows Z-open pipe next to a Y cube", () => {
+    const blocks = makeBlocks([{ x: 0, y: 0, z: 0, type: "Y" }]);
+    expect(hasYCubePipeAxisConflict("ZXO" as BlockType, { x: 0, y: 0, z: 1 }, blocks)).toBe(false);
+  });
+
+  it("does not affect regular cube placement", () => {
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OZX" as BlockType }]);
+    expect(hasYCubePipeAxisConflict("XZZ" as BlockType, { x: 0, y: 0, z: 0 }, blocks)).toBe(false);
   });
 });
 

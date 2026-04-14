@@ -842,6 +842,47 @@ export function hasCubeColorConflict(
   return false;
 }
 
+/**
+ * Check whether a Y cube is being placed next to an X-open or Y-open pipe,
+ * or an X/Y-open pipe is being placed next to a Y cube.
+ * Only Z-open pipes (axis 2) are allowed adjacent to Y cubes.
+ * Returns true if there IS a conflict (placement should be rejected).
+ */
+export function hasYCubePipeAxisConflict(
+  blockType: BlockType,
+  pos: Position3D,
+  blocks: Map<string, Block>,
+): boolean {
+  if (blockType === "Y") {
+    const coords: [number, number, number] = [pos.x, pos.y, pos.z];
+    for (let axis = 0; axis < 3; axis++) {
+      for (const offset of [1, -2]) {
+        const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
+        nCoords[axis] += offset;
+        const neighbor = blocks.get(posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] }));
+        if (!neighbor || !isPipeType(neighbor.type)) continue;
+        const openAxis = neighbor.type.replace("H", "").indexOf("O");
+        if (openAxis === 0 || openAxis === 1) return true;
+      }
+    }
+    return false;
+  }
+
+  if (isPipeType(blockType)) {
+    const openAxis = blockType.replace("H", "").indexOf("O");
+    if (openAxis !== 0 && openAxis !== 1) return false;
+    const coords: [number, number, number] = [pos.x, pos.y, pos.z];
+    for (const offset of [-1, 2]) {
+      const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
+      nCoords[openAxis] += offset;
+      const neighbor = blocks.get(posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] }));
+      if (neighbor?.type === "Y") return true;
+    }
+  }
+
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Adjacency
 // ---------------------------------------------------------------------------

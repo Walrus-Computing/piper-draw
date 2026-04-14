@@ -3,7 +3,7 @@ import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useFrame } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
-import { snapGroundPos, hasBlockOverlap, hasCubeColorConflict, hasPipeColorConflict, isValidPos, isPipeType, resolvePipeType } from "../types";
+import { snapGroundPos, hasBlockOverlap, hasCubeColorConflict, hasPipeColorConflict, hasYCubePipeAxisConflict, isValidPos, isPipeType, resolvePipeType } from "../types";
 import type { CubeType } from "../types";
 import { cameraGroundPoint } from "../utils/groundPlane";
 
@@ -48,6 +48,8 @@ export function GridPlane() {
       setHoveredGridPos(pos, blockType, true, "Pipe colors don't match the adjacent cube");
     } else if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, store.blocks)) {
       setHoveredGridPos(pos, blockType, true, "Cube colors don't match the adjacent pipe");
+    } else if (hasYCubePipeAxisConflict(blockType, pos, store.blocks)) {
+      setHoveredGridPos(pos, blockType, true, "Y cube cannot be next to an X-open or Y-open pipe");
     } else {
       setHoveredGridPos(pos, blockType);
     }
