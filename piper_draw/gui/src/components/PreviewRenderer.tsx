@@ -39,13 +39,10 @@ export function usePreviewImages(controlsRef: React.RefObject<any>) {
   const lastQuatRef = useRef(new THREE.Quaternion());
   const rafRef = useRef(0);
   const lastRenderRef = useRef(0);
-
-  // Build the offscreen renderer and scenes once
-  const initRef = useRef(false);
+  const dirVec = useRef(new THREE.Vector3());
 
   const init = useCallback(() => {
-    if (initRef.current) return;
-    initRef.current = true;
+    if (rendererRef.current) return;
 
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     renderer.setSize(RENDER_SIZE, RENDER_SIZE);
@@ -104,15 +101,18 @@ export function usePreviewImages(controlsRef: React.RefObject<any>) {
       const camera = cameraRef.current!;
 
       // Compute camera direction from main camera's quaternion
-      const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
+      const dir = dirVec.current.set(0, 0, 1).applyQuaternion(quat);
 
       const newImages = new Map<string, string>();
 
       for (const { key } of PREVIEW_TYPES) {
         const entry = meshesRef.current.get(key)!;
 
-        // Clear scene children except lights
-        while (scene.children.length > 2) scene.remove(scene.children[2]);
+        // Swap preview mesh: remove previous, add current
+        if (scene.children.length > 2) {
+          scene.remove(scene.children[scene.children.length - 1]);
+          scene.remove(scene.children[scene.children.length - 1]);
+        }
         scene.add(entry.mesh);
         scene.add(entry.edges);
 
@@ -132,7 +132,15 @@ export function usePreviewImages(controlsRef: React.RefObject<any>) {
 
     return () => {
       cancelAnimationFrame(rafRef.current);
+      for (const entry of meshesRef.current.values()) {
+        entry.mesh.geometry.dispose();
+        entry.edges.geometry.dispose();
+      }
+      meshesRef.current.clear();
       rendererRef.current?.dispose();
+      rendererRef.current = null;
+      sceneRef.current = null;
+      cameraRef.current = null;
     };
   }, [controlsRef, init]);
 

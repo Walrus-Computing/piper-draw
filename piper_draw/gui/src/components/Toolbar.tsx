@@ -79,7 +79,7 @@ export function Toolbar({ onResetCamera, controlsRef }: { onResetCamera: () => v
   const previewImg = (key: string) => {
     const src = previewImages.get(key);
     return src ? (
-      <img src={src} style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} />
+      <img src={src} alt={key} style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} />
     ) : null;
   };
 
