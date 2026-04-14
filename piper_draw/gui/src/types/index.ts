@@ -130,8 +130,8 @@ export function pipeAxisFromPos(pos: Position3D): 0 | 1 | 2 | null {
 export const VARIANT_AXIS_MAP: Record<PipeVariant, [PipeType, PipeType, PipeType]> = {
   ZX:  ["OZX",  "ZOX",  "ZXO"],
   XZ:  ["OXZ",  "XOZ",  "XZO"],
-  ZXH: ["OZXH", "ZOXH", "ZXOH"],
-  XZH: ["OXZH", "XOZH", "XZOH"],
+  ZXH: ["OZXH", "XOZH", "ZXOH"],
+  XZH: ["OXZH", "ZOXH", "XZOH"],
 };
 
 export function resolvePipeType(variant: PipeVariant, pos: Position3D): PipeType | null {
@@ -391,7 +391,13 @@ export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask 
     const tqecOpenAxis = base.indexOf("O") as 0 | 1 | 2;
     const threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpenAxis];
     const closedAxes = [0, 1, 2].filter(a => a !== threeOpenAxis) as [number, number];
-    const wallColors = closedAxes.map(ta => basisColor(base[THREE_TO_TQEC_AXIS[ta]])) as [THREE.Color, THREE.Color];
+    let wallColors = closedAxes.map(ta => basisColor(base[THREE_TO_TQEC_AXIS[ta]])) as [THREE.Color, THREE.Color];
+    // For Y-open Hadamard pipes, the geometry "below band" end (negative Three.js Z)
+    // corresponds to the tail (higher TQEC Y). Pre-swap so below-band shows tail
+    // (flipped) colors and above-band shows head (original) colors.
+    if (hadamard && tqecOpenAxis === 1) {
+      wallColors = [wallColors[1], wallColors[0]];
+    }
     return createPipeGeometry(threeOpenAxis, wallColors, hadamard, hiddenFaces);
   }
 
@@ -747,11 +753,9 @@ export function hasBlockOverlap(pos: Position3D, type: BlockType, blocks: Map<st
 
 /**
  * Get the effective basis character for a pipe on a given TQEC axis at one end.
- * Hadamard pipes swap their two closed-axis colors above the band.
- * Because TQEC Y maps to -Three.js Z, the "above band" end is at:
- *   - offset +2 (far end) for X-open and Z-open pipes
- *   - offset -1 (start end) for Y-open pipes (axis direction is reversed)
- * `swapped` = true means this end sees the swapped colors.
+ * Hadamard pipes swap their two closed-axis colors at the far end (offset +2,
+ * higher position = tail in TQEC). `swapped` = true means this end sees the
+ * swapped colors.
  */
 function pipeEndBasis(base: string, hadamard: boolean, openAxis: number, axis: number, swapped: boolean): string {
   if (!hadamard || !swapped) return base[axis];
@@ -788,9 +792,7 @@ export function hasPipeColorConflict(
     if (neighbor.type === "Y") continue;
     if (isPipeType(neighbor.type)) continue;
 
-    // Y-open pipes reverse direction (TQEC Y → -Three.js Z), so the
-    // "above band" (swapped) end is at offset -1 instead of +2.
-    const swapped = openAxis === 1 ? offset === -1 : offset === 2;
+    const swapped = offset === 2;
     for (let axis = 0; axis < 3; axis++) {
       if (axis === openAxis) continue;
       if (pipeEndBasis(base, hadamard, openAxis, axis, swapped) !== neighbor.type[axis]) return true;
@@ -828,10 +830,9 @@ export function hasCubeColorConflict(
       const openAxis = base.indexOf("O");
       if (openAxis !== axis) continue;
 
-      // offset +1: cube is at pipe's start (-1 neighbor)
-      // offset -2: cube is at pipe's far end (+2 neighbor)
-      // Y-open pipes reverse: swapped end is at start (offset +1 from cube = -1 from pipe)
-      const swapped = openAxis === 1 ? offset === 1 : offset === -2;
+      // offset +1: cube is at pipe's start (-1 neighbor = head)
+      // offset -2: cube is at pipe's far end (+2 neighbor = tail, swapped for Hadamard)
+      const swapped = offset === -2;
       for (let i = 0; i < 3; i++) {
         if (i === openAxis) continue;
         if (pipeEndBasis(base, hadamard, openAxis, i, swapped) !== cubeType[i]) return true;
