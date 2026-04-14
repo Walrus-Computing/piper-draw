@@ -8,6 +8,8 @@ import {
   createBlockEdges,
   blockThreeSize,
   hasBlockOverlap,
+  hasCubeColorConflict,
+  hasPipeColorConflict,
   isValidPos,
   isPipeType,
   resolvePipeType,
@@ -15,7 +17,7 @@ import {
   posKey,
   VARIANT_AXIS_MAP,
 } from "../types";
-import type { BlockType, Block, FaceMask, Position3D, PipeVariant } from "../types";
+import type { BlockType, CubeType, Block, FaceMask, Position3D, PipeVariant } from "../types";
 
 const MIN_CAPACITY = 64;
 
@@ -205,7 +207,12 @@ function TypedInstances({
 
       const adj = getAdjacentPos(b[e.instanceId].pos, b[e.instanceId].type, e.face.normal, dstType);
 
-      if (!isValidPos(adj, dstType) || hasBlockOverlap(adj, dstType, store.blocks, store.spatialIndex)) {
+      if (
+        !isValidPos(adj, dstType) ||
+        hasBlockOverlap(adj, dstType, store.blocks, store.spatialIndex) ||
+        (isPipeType(dstType) && hasPipeColorConflict(dstType, adj, store.blocks)) ||
+        (!isPipeType(dstType) && dstType !== "Y" && hasCubeColorConflict(dstType as CubeType, adj, store.blocks))
+      ) {
         store.setHoveredGridPos(adj, dstType, true);
       } else {
         store.setHoveredGridPos(adj, dstType);

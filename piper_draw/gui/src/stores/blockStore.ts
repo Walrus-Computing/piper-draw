@@ -1,8 +1,11 @@
 import { create } from "zustand";
-import type { Position3D, Block, BlockType, PipeVariant, SpatialIndex, FaceMask } from "../types";
+import type { Position3D, Block, BlockType, CubeType, PipeVariant, SpatialIndex, FaceMask } from "../types";
 import {
   posKey,
   hasBlockOverlap,
+  hasCubeColorConflict,
+  hasPipeColorConflict,
+  isPipeType,
   isValidPos,
   resolvePipeType,
   buildSpatialIndex,
@@ -140,6 +143,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       // Validate position parity
       if (!isValidPos(pos, blockType)) return state;
       if (hasBlockOverlap(pos, blockType, state.blocks, state.spatialIndex)) return state;
+      if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, state.blocks)) return state;
+      if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
 
       const key = posKey(pos);
       const block: Block = { pos, type: blockType };

@@ -744,6 +744,77 @@ export function hasBlockOverlap(pos: Position3D, type: BlockType, blocks: Map<st
   return false;
 }
 
+/**
+ * Check whether a pipe placement conflicts with adjacent cube colors.
+ * For each of the pipe's two closed TQEC axes, the pipe's basis character
+ * must match any adjacent cube's basis character on the same axis.
+ * Returns true if there IS a conflict (placement should be rejected).
+ */
+export function hasPipeColorConflict(
+  pipeType: PipeType,
+  pipePos: Position3D,
+  blocks: Map<string, Block>,
+): boolean {
+  const base = pipeType.replace("H", "");
+  const openAxis = base.indexOf("O"); // 0, 1, or 2
+
+  const coords: [number, number, number] = [pipePos.x, pipePos.y, pipePos.z];
+
+  for (const offset of [-1, 2]) {
+    const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
+    nCoords[openAxis] += offset;
+    const neighborKey = posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
+    const neighbor = blocks.get(neighborKey);
+
+    if (!neighbor) continue;
+    if (neighbor.type === "Y") continue;
+    if (isPipeType(neighbor.type)) continue;
+
+    for (let axis = 0; axis < 3; axis++) {
+      if (axis === openAxis) continue;
+      if (base[axis] !== neighbor.type[axis]) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Check whether a cube placement conflicts with adjacent pipe colors.
+ * For each of the 3 TQEC axes, checks both possible neighboring pipe positions.
+ * Returns true if there IS a conflict (placement should be rejected).
+ */
+export function hasCubeColorConflict(
+  cubeType: CubeType,
+  cubePos: Position3D,
+  blocks: Map<string, Block>,
+): boolean {
+  const coords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
+
+  for (let axis = 0; axis < 3; axis++) {
+    // Two pipe positions along this axis: pos[axis]+1 and pos[axis]-2
+    for (const offset of [1, -2]) {
+      const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
+      nCoords[axis] += offset;
+      const neighbor = blocks.get(posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] }));
+
+      if (!neighbor) continue;
+      if (!isPipeType(neighbor.type)) continue;
+
+      const base = neighbor.type.replace("H", "");
+      const openAxis = base.indexOf("O");
+      if (openAxis !== axis) continue; // pipe isn't oriented toward this cube
+
+      for (let i = 0; i < 3; i++) {
+        if (i === openAxis) continue;
+        if (base[i] !== cubeType[i]) return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Adjacency
 // ---------------------------------------------------------------------------

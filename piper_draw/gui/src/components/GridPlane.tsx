@@ -3,7 +3,8 @@ import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useFrame } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
-import { snapGroundPos, hasBlockOverlap, isValidPos, resolvePipeType } from "../types";
+import { snapGroundPos, hasBlockOverlap, hasCubeColorConflict, hasPipeColorConflict, isValidPos, isPipeType, resolvePipeType } from "../types";
+import type { CubeType } from "../types";
 import { cameraGroundPoint } from "../utils/groundPlane";
 
 const PLANE_SIZE = 1000;
@@ -41,7 +42,12 @@ export function GridPlane() {
       blockType = resolved;
     }
 
-    if (!isValidPos(pos, blockType) || hasBlockOverlap(pos, blockType, store.blocks, store.spatialIndex)) {
+    if (
+      !isValidPos(pos, blockType) ||
+      hasBlockOverlap(pos, blockType, store.blocks, store.spatialIndex) ||
+      (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, store.blocks)) ||
+      (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, store.blocks))
+    ) {
       setHoveredGridPos(pos, blockType, true);
     } else {
       setHoveredGridPos(pos, blockType);
