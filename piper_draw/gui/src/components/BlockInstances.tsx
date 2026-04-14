@@ -10,6 +10,7 @@ import {
   hasBlockOverlap,
   hasCubeColorConflict,
   hasPipeColorConflict,
+  isValidPipePos,
   isValidPos,
   isPipeType,
   resolvePipeType,
@@ -38,6 +39,7 @@ function resolvePipeTypeFromFace(
 ): BlockType | null {
   for (const candidateType of VARIANT_AXIS_MAP[variant]) {
     const probe = getAdjacentPos(srcPos, srcType, normal, candidateType);
+    if (!isValidPipePos(probe)) continue;
     const resolved = resolvePipeType(variant, probe);
     if (resolved) return resolved;
   }
