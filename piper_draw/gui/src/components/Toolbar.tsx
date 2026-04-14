@@ -68,6 +68,13 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
   const clearAll = useBlockStore((s) => s.clearAll);
   const loadBlocks = useBlockStore((s) => s.loadBlocks);
   const blocksEmpty = useBlockStore((s) => s.blocks.size === 0);
+  const selectedCount = useBlockStore((s) => {
+    if (s.selectedKeys.size === 0) return 0;
+    let count = 0;
+    for (const key of s.selectedKeys) if (s.blocks.has(key)) count++;
+    return count;
+  });
+  const deleteSelected = useBlockStore((s) => s.deleteSelected);
 
   const previewImages = usePreviewImages(controlsRef);
 
@@ -115,6 +122,9 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         <button onClick={() => setMode("place")} style={btnStyle(mode === "place")}>
           Place
         </button>
+        <button onClick={() => setMode("select")} style={btnStyle(mode === "select")}>
+          Select
+        </button>
         <button onClick={() => setMode("delete")} style={btnStyle(mode === "delete")}>
           Delete
         </button>
@@ -159,6 +169,14 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         >
           Clear
         </button>
+        {selectedCount > 0 && (
+          <button
+            onClick={deleteSelected}
+            style={{ ...btnStyle(false), borderColor: "#dc3545", color: "#dc3545" }}
+          >
+            Delete {selectedCount}
+          </button>
+        )}
         <button
           onClick={runValidation}
           disabled={blocksEmpty || validationStatus === "loading"}

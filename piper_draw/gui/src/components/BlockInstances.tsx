@@ -190,7 +190,7 @@ function TypedInstances({
     const b = blocksRef.current;
     if (e.instanceId == null || e.instanceId >= b.length) return;
     const store = useBlockStore.getState();
-    if (store.mode === "delete") {
+    if (store.mode === "delete" || store.mode === "select") {
       // Read the actual block type from the instance, not the group prop
       store.setHoveredGridPos(b[e.instanceId].pos, b[e.instanceId].type);
     } else {
@@ -227,6 +227,10 @@ function TypedInstances({
     const b = blocksRef.current;
     if (e.instanceId == null || e.instanceId >= b.length) return;
     const store = useBlockStore.getState();
+    if (store.mode === "select") {
+      store.selectBlock(b[e.instanceId].pos, e.nativeEvent.shiftKey);
+      return;
+    }
     if (store.mode === "delete") {
       store.removeBlock(b[e.instanceId].pos);
     } else {
