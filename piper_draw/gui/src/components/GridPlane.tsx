@@ -41,7 +41,7 @@ export function GridPlane() {
       blockType = resolved;
     }
 
-    if (!isValidPos(pos, blockType) || hasBlockOverlap(pos, blockType, store.blocks)) {
+    if (!isValidPos(pos, blockType) || hasBlockOverlap(pos, blockType, store.blocks, store.spatialIndex)) {
       setHoveredGridPos(pos, blockType, true);
     } else {
       setHoveredGridPos(pos, blockType);

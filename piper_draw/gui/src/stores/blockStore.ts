@@ -1,15 +1,42 @@
 import { create } from "zustand";
-import type { Position3D, Block, BlockType, PipeVariant } from "../types";
-import { posKey, hasBlockOverlap, isValidPos, resolvePipeType } from "../types";
+import type { Position3D, Block, BlockType, PipeVariant, SpatialIndex, FaceMask } from "../types";
+import {
+  posKey,
+  hasBlockOverlap,
+  isValidPos,
+  resolvePipeType,
+  buildSpatialIndex,
+  addToSpatialIndex,
+  removeFromSpatialIndex,
+  getHiddenFaceMaskForPos,
+  recomputeAffectedHiddenFaces,
+} from "../types";
 
 export type Mode = "place" | "delete";
 
 const MAX_HISTORY = 100;
 
+/** Canonical X-open PipeType for each variant, used as cubeType fallback. */
+const PIPE_VARIANT_CANONICAL: Record<PipeVariant, BlockType> = {
+  ZX: "OZX", XZ: "OXZ", ZXH: "OZXH", XZH: "OXZH",
+};
+
+// ---------------------------------------------------------------------------
+// Command-based undo — stores the operation, not a full state snapshot.
+// Add/remove commands are O(1) memory; clear saves the full map (rare).
+// ---------------------------------------------------------------------------
+
+type UndoCommand =
+  | { kind: "add"; key: string; block: Block }
+  | { kind: "remove"; key: string; block: Block }
+  | { kind: "clear"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask> };
+
 interface BlockStore {
   blocks: Map<string, Block>;
-  history: Map<string, Block>[];
-  future: Map<string, Block>[];
+  spatialIndex: SpatialIndex;
+  hiddenFaces: Map<string, FaceMask>;
+  history: UndoCommand[];
+  future: UndoCommand[];
   mode: Mode;
   cubeType: BlockType;
   pipeVariant: PipeVariant | null;
@@ -30,8 +57,49 @@ interface BlockStore {
   canRedo: () => boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Helpers for incremental spatial-index + hidden-face updates
+// ---------------------------------------------------------------------------
+
+function doAdd(
+  blocks: Map<string, Block>,
+  spatialIndex: SpatialIndex,
+  hiddenFaces: Map<string, FaceMask>,
+  key: string,
+  block: Block,
+): { blocks: Map<string, Block>; hiddenFaces: Map<string, FaceMask> } {
+  // Mutate spatial index in place (not selected by React components)
+  addToSpatialIndex(spatialIndex, block);
+  // Clone blocks + hiddenFaces (new references trigger re-render)
+  const newBlocks = new Map(blocks);
+  newBlocks.set(key, block);
+  const affected = recomputeAffectedHiddenFaces(block.pos, block.type, newBlocks, spatialIndex);
+  const newHidden = new Map(hiddenFaces);
+  for (const [k, v] of affected) newHidden.set(k, v);
+  return { blocks: newBlocks, hiddenFaces: newHidden };
+}
+
+function doRemove(
+  blocks: Map<string, Block>,
+  spatialIndex: SpatialIndex,
+  hiddenFaces: Map<string, FaceMask>,
+  key: string,
+  block: Block,
+): { blocks: Map<string, Block>; hiddenFaces: Map<string, FaceMask> } {
+  removeFromSpatialIndex(spatialIndex, block);
+  const newBlocks = new Map(blocks);
+  newBlocks.delete(key);
+  const affected = recomputeAffectedHiddenFaces(block.pos, block.type, newBlocks, spatialIndex);
+  const newHidden = new Map(hiddenFaces);
+  newHidden.delete(key);
+  for (const [k, v] of affected) newHidden.set(k, v);
+  return { blocks: newBlocks, hiddenFaces: newHidden };
+}
+
 export const useBlockStore = create<BlockStore>((set, get) => ({
   blocks: new Map(),
+  spatialIndex: new Map(),
+  hiddenFaces: new Map(),
   history: [],
   future: [],
   mode: "place",
@@ -43,11 +111,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
   setMode: (mode) => set({ mode, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false }),
   setCubeType: (cubeType) => set({ cubeType, pipeVariant: null }),
-  setPipeVariant: (variant) => {
-    // Store canonical X-open form as cubeType for fallback usage
-    const canonical: Record<PipeVariant, BlockType> = { ZX: "OZX", XZ: "OXZ", ZXH: "OZXH", XZH: "OXZH" };
-    set({ pipeVariant: variant, cubeType: canonical[variant] });
-  },
+  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant] }),
   setHoveredGridPos: (pos, blockType, invalid) => set({ hoveredGridPos: pos, hoveredBlockType: blockType ?? null, hoveredInvalid: invalid ?? false }),
 
   addBlock: (pos) =>
@@ -64,33 +128,75 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       // Validate position parity
       if (!isValidPos(pos, blockType)) return state;
+      if (hasBlockOverlap(pos, blockType, state.blocks, state.spatialIndex)) return state;
 
-      if (hasBlockOverlap(pos, blockType, state.blocks)) return state;
-      const newHistory = [...state.history, new Map(state.blocks)].slice(-MAX_HISTORY);
-      const next = new Map(state.blocks);
-      next.set(posKey(pos), { pos, type: blockType });
-      return { blocks: next, history: newHistory, future: [] };
+      const key = posKey(pos);
+      const block: Block = { pos, type: blockType };
+      const { blocks, hiddenFaces } = doAdd(state.blocks, state.spatialIndex, state.hiddenFaces, key, block);
+      const cmd: UndoCommand = { kind: "add", key, block };
+
+      return {
+        blocks,
+        hiddenFaces,
+        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+      };
     }),
 
   removeBlock: (pos) =>
     set((state) => {
       const key = posKey(pos);
-      if (!state.blocks.has(key)) return state;
-      const newHistory = [...state.history, new Map(state.blocks)].slice(-MAX_HISTORY);
-      const next = new Map(state.blocks);
-      next.delete(key);
-      return { blocks: next, history: newHistory, future: [], hoveredGridPos: null };
+      const block = state.blocks.get(key);
+      if (!block) return state;
+
+      const { blocks, hiddenFaces } = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, key, block);
+      const cmd: UndoCommand = { kind: "remove", key, block };
+
+      return {
+        blocks,
+        hiddenFaces,
+        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+        hoveredGridPos: null,
+      };
     }),
 
   undo: () =>
     set((state) => {
       if (state.history.length === 0) return state;
       const newHistory = [...state.history];
-      const previous = newHistory.pop()!;
+      const cmd = newHistory.pop()!;
+
+      if (cmd.kind === "add") {
+        const { blocks, hiddenFaces } = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, cmd.key, cmd.block);
+        return {
+          blocks,
+          hiddenFaces,
+          history: newHistory,
+          future: [cmd, ...state.future].slice(0, MAX_HISTORY),
+          hoveredGridPos: null,
+        };
+      }
+
+      if (cmd.kind === "remove") {
+        const { blocks, hiddenFaces } = doAdd(state.blocks, state.spatialIndex, state.hiddenFaces, cmd.key, cmd.block);
+        return {
+          blocks,
+          hiddenFaces,
+          history: newHistory,
+          future: [cmd, ...state.future].slice(0, MAX_HISTORY),
+          hoveredGridPos: null,
+        };
+      }
+
+      // cmd.kind === "clear" — restore saved state, rebuild spatial index
+      const newIndex = buildSpatialIndex(cmd.savedBlocks);
       return {
-        blocks: previous,
+        blocks: cmd.savedBlocks,
+        spatialIndex: newIndex,
+        hiddenFaces: cmd.savedHiddenFaces,
         history: newHistory,
-        future: [new Map(state.blocks), ...state.future].slice(0, MAX_HISTORY),
+        future: [cmd, ...state.future].slice(0, MAX_HISTORY),
         hoveredGridPos: null,
       };
     }),
@@ -99,10 +205,41 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     set((state) => {
       if (state.future.length === 0) return state;
       const newFuture = [...state.future];
-      const next = newFuture.shift()!;
+      const cmd = newFuture.shift()!;
+
+      if (cmd.kind === "add") {
+        const { blocks, hiddenFaces } = doAdd(state.blocks, state.spatialIndex, state.hiddenFaces, cmd.key, cmd.block);
+        return {
+          blocks,
+          hiddenFaces,
+          history: [...state.history, cmd],
+          future: newFuture,
+          hoveredGridPos: null,
+        };
+      }
+
+      if (cmd.kind === "remove") {
+        const { blocks, hiddenFaces } = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, cmd.key, cmd.block);
+        return {
+          blocks,
+          hiddenFaces,
+          history: [...state.history, cmd],
+          future: newFuture,
+          hoveredGridPos: null,
+        };
+      }
+
+      // cmd.kind === "clear" — save current state, then clear
+      const savedCmd: UndoCommand = {
+        kind: "clear",
+        savedBlocks: state.blocks,
+        savedHiddenFaces: state.hiddenFaces,
+      };
       return {
-        blocks: next,
-        history: [...state.history, new Map(state.blocks)],
+        blocks: new Map(),
+        spatialIndex: new Map(),
+        hiddenFaces: new Map(),
+        history: [...state.history, savedCmd],
         future: newFuture,
         hoveredGridPos: null,
       };
@@ -111,8 +248,19 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   clearAll: () =>
     set((state) => {
       if (state.blocks.size === 0) return state;
-      const newHistory = [...state.history, new Map(state.blocks)].slice(-MAX_HISTORY);
-      return { blocks: new Map(), history: newHistory, future: [], hoveredGridPos: null };
+      const cmd: UndoCommand = {
+        kind: "clear",
+        savedBlocks: state.blocks,
+        savedHiddenFaces: state.hiddenFaces,
+      };
+      return {
+        blocks: new Map(),
+        spatialIndex: new Map(),
+        hiddenFaces: new Map(),
+        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+        hoveredGridPos: null,
+      };
     }),
 
   canUndo: () => get().history.length > 0,

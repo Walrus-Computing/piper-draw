@@ -4,6 +4,8 @@ import { useBlockStore } from "./blockStore";
 function reset() {
   useBlockStore.setState({
     blocks: new Map(),
+    spatialIndex: new Map(),
+    hiddenFaces: new Map(),
     history: [],
     future: [],
     mode: "place",

@@ -13,10 +13,11 @@ export function GhostBlock() {
   const hoveredBlockType = useBlockStore((s) => s.hoveredBlockType);
   const hoveredInvalid = useBlockStore((s) => s.hoveredInvalid);
   const blocks = useBlockStore((s) => s.blocks);
+  const spatialIndex = useBlockStore((s) => s.spatialIndex);
 
   const activeType = hoveredBlockType ?? cubeType;
 
-  const previewHiddenFaces = hoveredGridPos ? getHiddenFaceMaskForPos(hoveredGridPos, activeType, blocks) : 0;
+  const previewHiddenFaces = hoveredGridPos ? getHiddenFaceMaskForPos(hoveredGridPos, activeType, blocks, spatialIndex) : 0;
   const ghostGeometry = getCachedGeometry(activeType, previewHiddenFaces);
   const ghostEdges = getCachedEdges(activeType, previewHiddenFaces);
   const ghostMaterial = useMemo(
@@ -52,6 +53,14 @@ export function GhostBlock() {
       }),
     [],
   );
+  const validLineMaterial = useMemo(
+    () => new THREE.LineBasicMaterial({ color: "#000000", transparent: true, opacity: 0.4, depthWrite: false }),
+    [],
+  );
+  const invalidLineMaterial = useMemo(
+    () => new THREE.LineBasicMaterial({ color: "#ff0000", transparent: true, opacity: 0.4, depthWrite: false }),
+    [],
+  );
 
   if (!hoveredGridPos) return null;
 
@@ -74,7 +83,7 @@ export function GhostBlock() {
           </mesh>
           <lineSegments>
             <primitive object={ghostEdges} attach="geometry" />
-            <lineBasicMaterial color={isInvalid ? "#ff0000" : "#000000"} transparent opacity={0.4} depthWrite={false} />
+            <primitive object={isInvalid ? invalidLineMaterial : validLineMaterial} attach="material" />
           </lineSegments>
         </group>
       )}

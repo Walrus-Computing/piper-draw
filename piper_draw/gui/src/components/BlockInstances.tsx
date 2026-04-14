@@ -9,18 +9,20 @@ import {
   blockThreeSize,
   hasBlockOverlap,
   isValidPos,
+  isPipeType,
   resolvePipeType,
   getAdjacentPos,
-  getHiddenFaceMaskForPos,
-  buildSpatialIndex,
+  posKey,
   VARIANT_AXIS_MAP,
-  PIPE_TYPES,
 } from "../types";
 import type { BlockType, Block, FaceMask, Position3D, PipeVariant } from "../types";
 
 const MIN_CAPACITY = 64;
 
-/** Module-level geometry caches — each block type and hidden-face mask pair's geometry never changes. */
+/**
+ * Module-level geometry caches — each (block type, hidden-face mask) pair's
+ * geometry never changes. Bounded at ~19 types × 64 masks = ~1216 entries max.
+ */
 const geometryCache = new Map<string, THREE.BufferGeometry>();
 const fullBoxCache = new Map<BlockType, THREE.BoxGeometry>();
 const edgesCache = new Map<string, THREE.BufferGeometry>();
@@ -90,9 +92,9 @@ function TypedInstances({
   }
   const maxCount = capacityRef.current;
 
-  const isPipe = (PIPE_TYPES as readonly string[]).includes(cubeType);
+  const pipe = isPipeType(cubeType);
   const geometry = getCachedGeometry(cubeType, hiddenFaces);
-  const fullBoxGeometry = isPipe ? getCachedFullBox(cubeType) : null;
+  const fullBoxGeometry = pipe ? getCachedFullBox(cubeType) : null;
   const material = useMemo(
     () => new THREE.MeshLambertMaterial({
       vertexColors: true,
@@ -136,7 +138,7 @@ function TypedInstances({
     if (!mesh) return;
 
     // For pipes, override raycast to use the full box geometry (including open faces)
-    if (isPipe && fullBoxGeometry) {
+    if (pipe && fullBoxGeometry) {
       const realGeo = mesh.geometry;
       mesh.raycast = function (raycaster, intersects) {
         this.geometry = fullBoxGeometry;
@@ -156,11 +158,11 @@ function TypedInstances({
 
     return () => {
       // Remove instance override, falls back to prototype — safe under Strict Mode double-mount
-      if (isPipe) {
-        delete (mesh as any).raycast;
+      if (pipe) {
+        delete (mesh as any).raycast; // eslint-disable-line @typescript-eslint/no-explicit-any
       }
     };
-  }, [blocks, dummy, isPipe, fullBoxGeometry, cubeType]);
+  }, [blocks, dummy, pipe, fullBoxGeometry, cubeType]);
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
@@ -168,14 +170,15 @@ function TypedInstances({
     if (e.instanceId == null || e.instanceId >= b.length) return;
     const store = useBlockStore.getState();
     if (store.mode === "delete") {
-      store.setHoveredGridPos(b[e.instanceId].pos, cubeType);
+      // Read the actual block type from the instance, not the group prop
+      store.setHoveredGridPos(b[e.instanceId].pos, b[e.instanceId].type);
     } else {
       if (!e.face) return;
 
       // Determine the destination block type
       let dstType: BlockType = store.cubeType;
       if (store.pipeVariant) {
-        const resolved = resolvePipeTypeFromFace(b[e.instanceId].pos, cubeType, e.face.normal, store.pipeVariant);
+        const resolved = resolvePipeTypeFromFace(b[e.instanceId].pos, b[e.instanceId].type, e.face.normal, store.pipeVariant);
         if (!resolved) {
           store.setHoveredGridPos(b[e.instanceId].pos, undefined, true);
           return;
@@ -183,9 +186,9 @@ function TypedInstances({
         dstType = resolved;
       }
 
-      const adj = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, dstType);
+      const adj = getAdjacentPos(b[e.instanceId].pos, b[e.instanceId].type, e.face.normal, dstType);
 
-      if (!isValidPos(adj, dstType) || hasBlockOverlap(adj, dstType, store.blocks)) {
+      if (!isValidPos(adj, dstType) || hasBlockOverlap(adj, dstType, store.blocks, store.spatialIndex)) {
         store.setHoveredGridPos(adj, dstType, true);
       } else {
         store.setHoveredGridPos(adj, dstType);
@@ -206,12 +209,12 @@ function TypedInstances({
 
       let dstType: BlockType = store.cubeType;
       if (store.pipeVariant) {
-        const resolved = resolvePipeTypeFromFace(b[e.instanceId].pos, cubeType, e.face.normal, store.pipeVariant);
+        const resolved = resolvePipeTypeFromFace(b[e.instanceId].pos, b[e.instanceId].type, e.face.normal, store.pipeVariant);
         if (!resolved) return;
         dstType = resolved;
       }
 
-      const adj = getAdjacentPos(b[e.instanceId].pos, cubeType, e.face.normal, dstType);
+      const adj = getAdjacentPos(b[e.instanceId].pos, b[e.instanceId].type, e.face.normal, dstType);
       store.addBlock(adj);
     }
   };
@@ -239,31 +242,32 @@ function TypedInstances({
 
 export function BlockInstances() {
   const blocks = useBlockStore((s) => s.blocks);
+  const hiddenFaces = useBlockStore((s) => s.hiddenFaces);
 
   const grouped = useMemo(() => {
     type Group = {
-        type: BlockType;
+      type: BlockType;
       hiddenFaces: FaceMask;
       blocks: Block[];
     };
-    const index = buildSpatialIndex(blocks);
+    // Hidden faces are pre-computed in the store — just group by (type, mask)
     const map = new Map<string, Group>();
     for (const block of blocks.values()) {
-      const hiddenFaces = getHiddenFaceMaskForPos(block.pos, block.type, blocks, index);
-      const key = `${block.type}:${hiddenFaces}`;
+      const hf = hiddenFaces.get(posKey(block.pos)) ?? 0;
+      const key = `${block.type}:${hf}`;
       const existing = map.get(key);
       if (existing) {
         existing.blocks.push(block);
       } else {
         map.set(key, {
           type: block.type,
-          hiddenFaces,
+          hiddenFaces: hf,
           blocks: [block],
         });
       }
     }
     return map;
-  }, [blocks]);
+  }, [blocks, hiddenFaces]);
 
   return (
     <>
