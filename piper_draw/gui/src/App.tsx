@@ -20,6 +20,7 @@ import { ValidationToast } from "./components/ValidationToast";
 import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { SelectionHighlights } from "./components/SelectionHighlights";
 import { BuildCursor } from "./components/BuildCursor";
+import { MarqueeSelect, type ThreeState } from "./components/MarqueeSelect";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { useBlockStore } from "./stores/blockStore";
 import { wasdToBuildDirection, tqecToThree } from "./types";
@@ -133,6 +134,8 @@ function SelectModeHints() {
 
   const hints = [
     ["Click", "Select"],
+    ["Drag", "Box select"],
+    ["Alt+Drag", "Orbit"],
     ["Shift+Click", "Add/remove"],
     [`${modKey}A`, "Select all"],
     ["Delete", "Delete selected"],
@@ -239,6 +242,15 @@ function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> })
   return null;
 }
 
+/** Exposes Three.js camera + viewport size to HTML components via a shared ref. Must be inside <Canvas>. */
+function ThreeStateBridge({ stateRef }: { stateRef: React.MutableRefObject<ThreeState | null> }) {
+  const { camera, size } = useThree();
+  useEffect(() => {
+    stateRef.current = { camera, size };
+  }, [stateRef, camera, size]);
+  return null;
+}
+
 function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivElement | null> }) {
   const reason = useBlockStore((s) => s.hoveredInvalidReason);
   const [topOffset, setTopOffset] = useState(0);
@@ -281,6 +293,7 @@ export default function App() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const threeStateRef = useRef<ThreeState | null>(null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -404,8 +417,10 @@ export default function App() {
         <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
           <OrientationGizmo />
         </GizmoHelper>
+        <ThreeStateBridge stateRef={threeStateRef} />
         <OrbitControls ref={controlsRef} makeDefault />
       </Canvas>
+      <MarqueeSelect threeStateRef={threeStateRef} controlsRef={controlsRef} />
     </>
   );
 }
