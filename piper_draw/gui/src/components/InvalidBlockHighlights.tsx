@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
 import { useValidationStore } from "../stores/validationStore";
 import { useBlockStore } from "../stores/blockStore";
-import { tqecToThree, blockThreeSize, posKey } from "../types";
+import { tqecToThree, yBlockZOffset, blockThreeSize, posKey } from "../types";
 import type { BlockType, Position3D } from "../types";
 
 const highlightMaterial = new THREE.MeshBasicMaterial({
@@ -105,7 +105,8 @@ export function InvalidBlockHighlights() {
   return (
     <>
       {withBlock.map(({ key, blockType, pos }) => {
-        const [tx, ty, tz] = tqecToThree(pos, blockType);
+        const zo = blockType === "Y" ? yBlockZOffset(pos, blocks) : 0;
+        const [tx, ty, tz] = tqecToThree(pos, blockType, zo);
 
         if (key === selectedErrorKey) {
           return (

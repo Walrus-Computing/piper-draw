@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
-import { tqecToThree, blockThreeSize, posKey } from "../types";
+import { tqecToThree, yBlockZOffset, blockThreeSize, posKey } from "../types";
 import type { BlockType } from "../types";
 
 const highlightMaterial = new THREE.MeshBasicMaterial({
@@ -58,7 +58,8 @@ export function SelectionHighlights() {
   return (
     <>
       {selectedBlocks.map((block) => {
-        const [tx, ty, tz] = tqecToThree(block.pos, block.type);
+        const zo = block.type === "Y" ? yBlockZOffset(block.pos, blocks) : 0;
+        const [tx, ty, tz] = tqecToThree(block.pos, block.type, zo);
         const { box, edges } = getHighlightGeo(block.type);
         return (
           <group key={posKey(block.pos)} position={[tx, ty, tz]}>
