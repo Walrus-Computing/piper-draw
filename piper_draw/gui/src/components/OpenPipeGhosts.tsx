@@ -5,7 +5,7 @@ import { tqecToThree, posKey, isPipeType } from "../types";
 import type { Position3D, Block } from "../types";
 
 const ghostMaterial = new THREE.MeshBasicMaterial({
-  color: 0xffffff,
+  color: 0xdddddd,
   transparent: true,
   opacity: 0.35,
   depthWrite: false,
@@ -13,7 +13,7 @@ const ghostMaterial = new THREE.MeshBasicMaterial({
 });
 
 const ghostLineMaterial = new THREE.LineBasicMaterial({
-  color: 0x999999,
+  color: 0x000000,
   linewidth: 1,
 });
 
@@ -55,19 +55,46 @@ function getOpenPipeEndpoints(blocks: Map<string, Block>): Position3D[] {
 }
 
 /**
- * Renders white semi-transparent ghost cubes at open pipe endpoints.
- * These are visualization-only — not interactive, not exported.
+ * Renders white semi-transparent ghost cubes at open pipe endpoints
+ * and at undetermined cube positions. These are visualization-only —
+ * not interactive, not exported.
  */
 export function OpenPipeGhosts() {
   const blocks = useBlockStore((s) => s.blocks);
+  const undeterminedCubes = useBlockStore((s) => s.undeterminedCubes);
+  const mode = useBlockStore((s) => s.mode);
+  const buildCursor = useBlockStore((s) => s.buildCursor);
 
   const positions = useMemo(() => {
-    const endpoints = getOpenPipeEndpoints(blocks);
-    return endpoints.map((pos) => ({
-      key: posKey(pos),
-      threePos: tqecToThree(pos, "XZZ") as [number, number, number],
-    }));
-  }, [blocks]);
+    const result: Array<{ key: string; threePos: [number, number, number] }> = [];
+    const seen = new Set<string>();
+
+    // Ghost cubes at open pipe endpoints (positions with no block)
+    for (const pos of getOpenPipeEndpoints(blocks)) {
+      const key = posKey(pos);
+      seen.add(key);
+      result.push({
+        key,
+        threePos: tqecToThree(pos, "XZZ") as [number, number, number],
+      });
+    }
+
+    // Ghost cubes at undetermined cube positions (always visible).
+    // In build mode, skip the cursor position — BuildCursor renders it with a pulse.
+    const cursorKey = buildCursor ? posKey(buildCursor) : null;
+    for (const [key] of undeterminedCubes) {
+      if (seen.has(key)) continue;
+      if (mode === "build" && key === cursorKey) continue;
+      const block = blocks.get(key);
+      if (!block) continue;
+      result.push({
+        key,
+        threePos: tqecToThree(block.pos, block.type) as [number, number, number],
+      });
+    }
+
+    return result;
+  }, [blocks, undeterminedCubes, mode, buildCursor]);
 
   if (positions.length === 0) return null;
 
