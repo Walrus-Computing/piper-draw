@@ -20,6 +20,7 @@ import { ValidationToast } from "./components/ValidationToast";
 import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { SelectionHighlights } from "./components/SelectionHighlights";
 import { BuildCursor } from "./components/BuildCursor";
+import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { useBlockStore } from "./stores/blockStore";
 import { wasdToBuildDirection, tqecToThree } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
@@ -387,6 +388,7 @@ export default function App() {
         <InvalidBlockHighlights />
         <SelectionHighlights />
         <BuildCursor />
+        <OpenPipeGhosts />
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
         <GhostBlock />
