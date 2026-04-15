@@ -55,6 +55,7 @@ export const useValidationStore = create<ValidationStore>((set, get) => ({
       const globalErrors: ValidationError[] = result.errors
         .filter((e) => e.position === null)
         .map((e) => ({ position: { x: NaN, y: NaN, z: NaN }, message: e.message }));
+      errors.sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y || a.position.z - b.position.z);
       const allErrors = [...errors, ...globalErrors];
       const keys = new Set(errors.map((e) => posKey(e.position)));
       set({ status: "invalid", errors: allErrors, invalidKeys: keys });
@@ -154,17 +155,9 @@ useBlockStore.subscribe((s) => {
     }
   }
 
-  // Remove only errors whose positions are in the affected set
-  const remainingErrors = store.errors.filter(
-    (e) => isNaN(e.position.x) || !affectedKeys.has(posKey(e.position)),
-  );
-  const remainingKeys = new Set(
-    remainingErrors.filter((e) => !isNaN(e.position.x)).map((e) => posKey(e.position)),
-  );
-
-  if (remainingKeys.size === 0 && remainingErrors.every((e) => isNaN(e.position.x))) {
-    useValidationStore.setState({ status: "idle", errors: [], invalidKeys: new Set() });
-  } else {
-    useValidationStore.setState({ errors: remainingErrors, invalidKeys: remainingKeys });
+  // If any change overlaps with an error position, re-run verification
+  const touchesError = [...store.invalidKeys].some((k) => affectedKeys.has(k));
+  if (touchesError) {
+    useValidationStore.getState().validate();
   }
 });

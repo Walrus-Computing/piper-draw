@@ -178,10 +178,10 @@ describe("validationStore", () => {
       await useValidationStore.getState().validate();
       expect(useValidationStore.getState().status).toBe("invalid");
 
-      // Add a block — should auto-dismiss
+      // Add a block near an error — should auto-revalidate
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
 
-      expect(useValidationStore.getState().status).toBe("idle");
+      expect(useValidationStore.getState().status).toBe("loading");
     });
 
     it("dismisses when a block is removed", async () => {
