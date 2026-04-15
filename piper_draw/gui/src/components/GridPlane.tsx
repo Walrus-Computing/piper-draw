@@ -48,7 +48,7 @@ export function GridPlane() {
     if (!isValidPos(pos, blockType) || hasBlockOverlap(pos, blockType, store.blocks, store.spatialIndex, existingKey)) {
       setHoveredGridPos(pos, blockType, true, undefined, isReplace);
     } else if (existing && existing.type === blockType) {
-      setHoveredGridPos(pos, blockType, true, undefined, true);
+      setHoveredGridPos(null);
     } else if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, store.blocks)) {
       setHoveredGridPos(pos, blockType, true, "Pipe colors don't match the adjacent cube", isReplace);
     } else if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, store.blocks)) {

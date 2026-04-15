@@ -243,8 +243,8 @@ function TypedInstances({
       if (hasBlockOverlap(adj, dstType, store.blocks, store.spatialIndex, existingKey)) {
         store.setHoveredGridPos(adj, dstType, true, undefined, adjReplace);
       } else if (existingKey && store.blocks.get(existingKey)!.type === dstType) {
-        // Same type — no replacement needed, show as invalid
-        store.setHoveredGridPos(adj, dstType, true, undefined, true);
+        // Same type — no replacement needed, hide ghost
+        store.setHoveredGridPos(null);
       } else if (isPipeType(dstType) && hasPipeColorConflict(dstType, adj, store.blocks)) {
         store.setHoveredGridPos(adj, dstType, true, "Pipe colors don't match the adjacent cube", adjReplace);
       } else if (!isPipeType(dstType) && dstType !== "Y" && hasCubeColorConflict(dstType as CubeType, adj, store.blocks)) {
