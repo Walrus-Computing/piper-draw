@@ -216,11 +216,11 @@ function TypedInstances({
       }
       if (hasBlockOverlap(adj, dstType, store.blocks, store.spatialIndex)) {
         store.setHoveredGridPos(adj, dstType, true);
-      } else if (isPipeType(dstType) && hasPipeColorConflict(dstType, adj, store.blocks)) {
+      } else if (!store.freeBuild && isPipeType(dstType) && hasPipeColorConflict(dstType, adj, store.blocks)) {
         store.setHoveredGridPos(adj, dstType, true, "Pipe colors don't match the adjacent cube");
-      } else if (!isPipeType(dstType) && dstType !== "Y" && hasCubeColorConflict(dstType as CubeType, adj, store.blocks)) {
+      } else if (!store.freeBuild && !isPipeType(dstType) && dstType !== "Y" && hasCubeColorConflict(dstType as CubeType, adj, store.blocks)) {
         store.setHoveredGridPos(adj, dstType, true, "Cube colors don't match the adjacent pipe");
-      } else if (hasYCubePipeAxisConflict(dstType, adj, store.blocks)) {
+      } else if (!store.freeBuild && hasYCubePipeAxisConflict(dstType, adj, store.blocks)) {
         store.setHoveredGridPos(adj, dstType, true, "Y cube cannot be next to an X-open or Y-open pipe");
       } else {
         store.setHoveredGridPos(adj, dstType);
