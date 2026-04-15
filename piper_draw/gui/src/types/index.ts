@@ -251,6 +251,7 @@ function createPipeGeometry(
   wallColors: [THREE.Color, THREE.Color],
   hadamard: boolean,
   hiddenFaces: FaceMask = 0,
+  hBandHalfHeight?: number,
 ): THREE.BufferGeometry {
   const closedAxes = [0, 1, 2].filter(a => a !== openAxis) as [number, number];
 
@@ -303,7 +304,7 @@ function createPipeGeometry(
 
   const halfExt: [number, number, number] = [0.5, 0.5, 0.5];
   for (const ca of closedAxes) halfExt[ca] -= WALL_EPS;
-  const bh = H_BAND_HALF_HEIGHT;
+  const bh = hBandHalfHeight ?? H_BAND_HALF_HEIGHT;
   // Above the band, the two closed-axis colors swap per TQEC convention
   const wallColorsAbove: [THREE.Color, THREE.Color] = [wallColors[1], wallColors[0]];
 
@@ -384,7 +385,7 @@ function createPipeGeometry(
  * Pipe types are parsed from the type name: each character gives the basis
  * for that TQEC axis ('X', 'Z', or 'O' for open). Hadamard variants end in 'H'.
  */
-export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask = 0): THREE.BufferGeometry {
+export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask = 0, hBandHalfHeight?: number): THREE.BufferGeometry {
   if (isPipeType(blockType)) {
     const base = blockType.replace("H", "");
     const hadamard = blockType.length > 3;
@@ -398,7 +399,7 @@ export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask 
     if (hadamard && tqecOpenAxis === 1) {
       wallColors = [wallColors[1], wallColors[0]];
     }
-    return createPipeGeometry(threeOpenAxis, wallColors, hadamard, hiddenFaces);
+    return createPipeGeometry(threeOpenAxis, wallColors, hadamard, hiddenFaces, hBandHalfHeight);
   }
 
   if (blockType === "Y") {
@@ -459,7 +460,7 @@ export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask 
 }
 
 /** Edge line segments for a block type, including Hadamard band edges for H pipes. */
-export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0): THREE.BufferGeometry {
+export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0, hBandHalfHeight?: number): THREE.BufferGeometry {
   const [bx, by, bz] = blockThreeSize(blockType);
   const pipe = isPipeType(blockType);
   const e2 = pipe ? 2 * WALL_EPS : 0;
@@ -515,7 +516,8 @@ export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0
     const halfExts = [hx, hy, hz];
     const bandEdges: number[] = [];
 
-    for (const bp of [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT]) {
+    const bandHH = hBandHalfHeight ?? H_BAND_HALF_HEIGHT;
+    for (const bp of [bandHH, -bandHH]) {
       const faceBit = FACE_BIT_BY_INDEX[threeOpen * 2 + (bp > 0 ? 0 : 1)];
       if (hiddenFaces & faceBit) continue;
 
@@ -930,6 +932,18 @@ export function computePipePos(cursorPos: Position3D, dir: BuildDirection): Posi
 }
 
 /**
+ * Swap the two closed-axis characters of a pipe base type.
+ * E.g. "OXZ" → "OZX", "ZOX" → "XOZ", "XZO" → "ZXO".
+ */
+export function swapPipeVariant(pipeBase: string): string {
+  const openAxis = pipeBase.indexOf("O");
+  const chars = pipeBase.split("");
+  const closedAxes = [0, 1, 2].filter(a => a !== openAxis);
+  [chars[closedAxes[0]], chars[closedAxes[1]]] = [chars[closedAxes[1]], chars[closedAxes[0]]];
+  return chars.join("");
+}
+
+/**
  * Infer the non-Hadamard PipeType to place from a source cube along the given axis.
  * The pipe's closed-axis characters come from the source cube's type characters.
  * Returns null if the closed-axis characters are both the same (e.g. "OZZ"),
@@ -968,9 +982,9 @@ export function determineCubeOptions(
       if (openAxis !== axis) continue;
 
       // Cube at pipeOffset +1 from cube = pipe's -1 end; pipeOffset -2 = pipe's +2 end.
-      // Y-open: swapped at -1 end. X/Z-open: swapped at +2 end.
+      // Hadamard pipes swap their closed-axis colors at the +2 (tail) end.
       const cubeAtPipeEnd = pipeOffset === 1 ? -1 : 2;
-      const swapped = openAxis === 1 ? cubeAtPipeEnd === -1 : cubeAtPipeEnd === 2;
+      const swapped = cubeAtPipeEnd === 2;
 
       for (let ca = 0; ca < 3; ca++) {
         if (ca === openAxis) continue;

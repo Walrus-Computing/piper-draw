@@ -1,7 +1,7 @@
 import { useBlockStore } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
-import { CUBE_TYPES, PIPE_VARIANTS } from "../types";
-import type { BlockType } from "../types";
+import { CUBE_TYPES, PIPE_VARIANTS, isPipeType, pipeAxisFromPos } from "../types";
+import type { BlockType, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
 import * as THREE from "three";
@@ -75,6 +75,9 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
     return count;
   });
   const deleteSelected = useBlockStore((s) => s.deleteSelected);
+
+  const buildCursor = useBlockStore((s) => s.buildCursor);
+  const hoveredGridPos = useBlockStore((s) => s.hoveredGridPos);
 
   const previewImages = usePreviewImages(controlsRef);
 
@@ -270,6 +273,32 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Position display */}
+      <div style={{ width: 1, background: "#ddd" }} />
+      <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", fontFamily: "monospace", fontSize: "12px", color: "#555", lineHeight: "1.6", minWidth: 90 }}>
+        <span style={groupLabelStyle}>Position</span>
+        {(() => {
+          const pos: Position3D | null = mode === "build" ? buildCursor : hoveredGridPos;
+          const bt: BlockType | null = mode === "build" ? null : useBlockStore.getState().hoveredBlockType;
+          if (!pos) return <><span>X: —</span><span>Y: —</span><span>Z: —</span></>;
+          const isPipe = bt ? isPipeType(bt) : pipeAxisFromPos(pos) !== null;
+          if (isPipe) {
+            const axis = pipeAxisFromPos(pos);
+            const coords = [pos.x, pos.y, pos.z];
+            const labels = ["X", "Y", "Z"];
+            return labels.map((l, i) => {
+              if (i === axis) {
+                const c1 = (coords[i] - 1) / 3;
+                const c2 = (coords[i] + 2) / 3;
+                return <span key={i}>{l}: {c1} → {c2}</span>;
+              }
+              return <span key={i}>{l}: {coords[i] / 3}</span>;
+            });
+          }
+          return <><span>X: {pos.x / 3}</span><span>Y: {pos.y / 3}</span><span>Z: {pos.z / 3}</span></>;
+        })()}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 
@@ -21,6 +21,7 @@ import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { SelectionHighlights } from "./components/SelectionHighlights";
 import { BuildCursor } from "./components/BuildCursor";
 import { MarqueeSelect, type ThreeState } from "./components/MarqueeSelect";
+import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { useBlockStore } from "./stores/blockStore";
 import { wasdToBuildDirection, tqecToThree } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
@@ -189,9 +190,11 @@ function SelectModeHints() {
  */
 function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> }) {
   const cameraSnapTarget = useBlockStore((s) => s.cameraSnapTarget);
+  const lastBuildAxis = useBlockStore((s) => s.lastBuildAxis);
   const clearCameraSnap = useBlockStore((s) => s.clearCameraSnap);
   const { camera } = useThree();
   const prevTarget = useRef<{ azimuth: number | null; targetPos: { x: number; y: number; z: number } } | null>(null);
+  const prevBuildAxis = useRef<number | null>(null);
 
   useFrame(() => {
     if (!cameraSnapTarget || !controlsRef.current) return;
@@ -201,31 +204,35 @@ function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> })
     const controls = controlsRef.current;
     const [tx, ty, tz] = tqecToThree(cameraSnapTarget.targetPos, "XZZ");
 
-    if (cameraSnapTarget.azimuth !== null) {
-      // Compute distance BEFORE moving target so it stays constant
-      const currentDistance = camera.position.distanceTo(controls.target);
-      const dist = Math.max(currentDistance, 15);
-      // Update orbit target to follow cursor
-      controls.target.set(tx, ty, tz);
-      // Clamp polar angle to at most ~55° from horizontal (1.2 rad from vertical)
-      // so the camera looks slightly down rather than from above
-      const polar = Math.min(controls.getPolarAngle(), 1.2);
-      const az = cameraSnapTarget.azimuth;
+    // Check if axis changed compared to previous build move
+    const axisChanged = prevBuildAxis.current !== lastBuildAxis;
+    prevBuildAxis.current = lastBuildAxis;
 
-      camera.position.set(
-        tx + dist * Math.sin(polar) * Math.sin(az),
-        ty + dist * Math.cos(polar),
-        tz + dist * Math.sin(polar) * Math.cos(az),
-      );
+    if (cameraSnapTarget.azimuth !== null) {
+      if (axisChanged) {
+        // First move into this axis — reposition camera behind build direction with slight offset
+        const currentDistance = camera.position.distanceTo(controls.target);
+        const dist = Math.max(currentDistance, 15);
+        controls.target.set(tx, ty, tz);
+        const polar = Math.min(controls.getPolarAngle(), 1.2);
+        const az = cameraSnapTarget.azimuth + 0.12;
+
+        camera.position.set(
+          tx + dist * Math.sin(polar) * Math.sin(az),
+          ty + dist * Math.cos(polar),
+          tz + dist * Math.sin(polar) * Math.cos(az),
+        );
+      } else {
+        // Same axis — translate camera to follow cursor, keep current viewing angle
+        const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+        controls.target.set(tx, ty, tz);
+        camera.position.set(tx + offset.x, ty + offset.y, tz + offset.z);
+      }
     } else {
-      // Z movement — translate camera + slight rotation to reveal vertical build
+      // Z movement — translate camera, preserve current viewing angle
       const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
-      const nudge = 0.08; // ~5° rotation around Y axis
-      const cos = Math.cos(nudge), sin = Math.sin(nudge);
-      const rx = offset.x * cos - offset.z * sin;
-      const rz = offset.x * sin + offset.z * cos;
       controls.target.set(tx, ty, tz);
-      camera.position.set(tx + rx, ty + offset.y, tz + rz);
+      camera.position.set(tx + offset.x, ty + offset.y, tz + offset.z);
     }
 
     controls.update();
@@ -244,25 +251,36 @@ function ThreeStateBridge({ stateRef }: { stateRef: React.MutableRefObject<Three
   return null;
 }
 
-function PlacementWarning() {
+function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivElement | null> }) {
   const reason = useBlockStore((s) => s.hoveredInvalidReason);
+  const [topOffset, setTopOffset] = useState(0);
+
+  useEffect(() => {
+    if (!reason || !toolbarRef.current) return;
+    const rect = toolbarRef.current.getBoundingClientRect();
+    setTopOffset(rect.bottom + 8);
+  }, [reason, toolbarRef]);
+
   if (!reason) return null;
   return (
     <div
       style={{
         position: "fixed",
-        bottom: 24,
+        top: topOffset,
         left: "50%",
         transform: "translateX(-50%)",
-        zIndex: 1,
-        background: "rgba(180, 40, 40, 0.92)",
-        color: "#fff",
-        padding: "8px 18px",
-        borderRadius: "8px",
-        fontSize: "14px",
-        fontWeight: 500,
+        zIndex: 2,
+        background: "#f8d7da",
+        color: "#721c24",
+        border: "1px solid #f5c6cb",
+        padding: "8px 16px",
+        borderRadius: "6px",
+        fontFamily: "sans-serif",
+        fontSize: "13px",
         pointerEvents: "none",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+        maxWidth: "500px",
+        textAlign: "center" as const,
       }}
     >
       {reason}
@@ -376,9 +394,9 @@ export default function App() {
         <FpsDisplay spanRef={fpsRef} />
       </div>
       <SelectModeHints />
-      <PlacementWarning />
+      <PlacementWarning toolbarRef={toolbarRef} />
       <Canvas
-        camera={{ position: [10, 10, -10], fov: 35 }}
+        camera={{ position: [14, 14, -14], fov: 35 }}
         gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }}
         onContextMenu={(e) => e.preventDefault()}
       >
@@ -389,6 +407,7 @@ export default function App() {
         <InvalidBlockHighlights />
         <SelectionHighlights />
         <BuildCursor />
+        <OpenPipeGhosts />
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
         <GhostBlock />
