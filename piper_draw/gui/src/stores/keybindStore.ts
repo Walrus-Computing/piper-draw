@@ -10,7 +10,7 @@ export type BuildAction =
   | "moveDown"
   | "undo"
   | "cycleBlock"
-  | "toggleHadamard"
+  | "cyclePipe"
   | "exitBuild";
 
 export type KeyBinding = {
@@ -27,7 +27,7 @@ export const BUILD_ACTIONS: BuildAction[] = [
   "moveDown",
   "undo",
   "cycleBlock",
-  "toggleHadamard",
+  "cyclePipe",
   "exitBuild",
 ];
 
@@ -40,7 +40,7 @@ export const ACTION_LABELS: Record<BuildAction, string> = {
   moveDown: "Move down",
   undo: "Undo step",
   cycleBlock: "Cycle block",
-  toggleHadamard: "Hadamard",
+  cyclePipe: "Cycle pipe",
   exitBuild: "Exit build",
 };
 
@@ -69,7 +69,7 @@ export const DEFAULT_BINDINGS: Record<BuildAction, KeyBinding> = {
   moveDown: { key: "arrowdown", displayLabel: "↓" },
   undo: { key: "q", displayLabel: "Q" },
   cycleBlock: { key: "c", displayLabel: "C" },
-  toggleHadamard: { key: "r", displayLabel: "R" },
+  cyclePipe: { key: "r", displayLabel: "R" },
   exitBuild: { key: "escape", displayLabel: "Esc" },
 };
 

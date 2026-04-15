@@ -1,6 +1,6 @@
 import { useBlockStore } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
-import { CUBE_TYPES, PIPE_VARIANTS, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, PIPE_TYPE_TO_VARIANT, pipeVariantPair } from "../types";
+import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, PIPE_TYPE_TO_VARIANT } from "../types";
 import type { BlockType, CubeType, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
@@ -132,9 +132,28 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
     if (!lastStep.pipe) return null;
     const pipeBlock = s.blocks.get(lastStep.pipe.key);
     if (!pipeBlock || !isPipeType(pipeBlock.type)) return null;
-    const variant = PIPE_TYPE_TO_VARIANT[pipeBlock.type as PipeType];
-    const [a, b] = pipeVariantPair(variant);
-    return `${a},${b}`;
+    const base = (pipeBlock.type as string).replace("H", "");
+    const openAxis = base.indexOf("O") as 0 | 1 | 2;
+    const pipeCoords: [number, number, number] = [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z];
+    // Check each variant's pipe type against neighbor cube constraints
+    const valid: string[] = [];
+    for (const v of PIPE_VARIANTS) {
+      const candidate = VARIANT_AXIS_MAP[v][openAxis];
+      const tmp = new Map(s.blocks);
+      tmp.set(lastStep.pipe.key, { pos: pipeBlock.pos, type: candidate });
+      let ok = true;
+      for (const offset of [-1, 2]) {
+        const nc: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
+        nc[openAxis] += offset;
+        const nKey = posKey({ x: nc[0], y: nc[1], z: nc[2] });
+        const neighbor = tmp.get(nKey);
+        if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
+        const opts = determineCubeOptions(neighbor.pos, tmp);
+        if (!opts.determined && opts.options.length === 0) { ok = false; break; }
+      }
+      if (ok) valid.push(v);
+    }
+    return valid.join(",");
   });
   const buildValidPipeVariants = buildValidPipeVariantsStr != null ? new Set(buildValidPipeVariantsStr.split(",")) : null;
   const hoveredGridPos = useBlockStore((s) => s.hoveredGridPos);

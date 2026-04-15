@@ -14,7 +14,7 @@ export function BuildModeHints({ onCustomize }: { onCustomize: () => void }) {
     [`${bindings.moveUp.displayLabel}/${bindings.moveDown.displayLabel}`, "Move Z"],
     [bindings.undo.displayLabel, "Undo step"],
     [bindings.cycleBlock.displayLabel, "Cycle block"],
-    [bindings.toggleHadamard.displayLabel, "Hadamard"],
+    [bindings.cyclePipe.displayLabel, "Cycle pipe"],
     [bindings.exitBuild.displayLabel, "Exit build"],
   ];
 

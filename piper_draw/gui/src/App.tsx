@@ -332,8 +332,8 @@ export default function App() {
             case "cycleBlock":
               store.cycleBlock();
               return;
-            case "toggleHadamard":
-              store.toggleHadamard();
+            case "cyclePipe":
+              store.cyclePipe();
               return;
             case "exitBuild":
               store.setMode("place");
