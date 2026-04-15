@@ -34,10 +34,38 @@ describe("blockStore", () => {
       expect(useBlockStore.getState().blocks.size).toBe(0);
     });
 
-    it("rejects placement that overlaps an existing block", () => {
+    it("skips placement of the same block type at an occupied position", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       expect(useBlockStore.getState().blocks.size).toBe(1);
+      expect(useBlockStore.getState().history.length).toBe(1);
+    });
+
+    it("replaces an existing block with a different valid type", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZZ");
+      useBlockStore.setState({ cubeType: "ZXZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(1);
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXZ");
+    });
+
+    it("undo after replace restores the original block", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ cubeType: "ZXZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXZ");
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZZ");
+    });
+
+    it("redo after undone replace re-applies the replacement", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ cubeType: "ZXZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().undo();
+      useBlockStore.getState().redo();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXZ");
     });
 
     it("resolves pipe variant to correct PipeType based on position", () => {

@@ -734,13 +734,15 @@ export function recomputeAffectedHiddenFaces(
 // Overlap detection
 // ---------------------------------------------------------------------------
 
-/** Check if placing a block at pos with the given type overlaps any existing block. */
-export function hasBlockOverlap(pos: Position3D, type: BlockType, blocks: Map<string, Block>, index?: SpatialIndex): boolean {
+/** Check if placing a block at pos with the given type overlaps any existing block.
+ *  When `excludeKey` is provided, the block with that key is skipped (used for replacement). */
+export function hasBlockOverlap(pos: Position3D, type: BlockType, blocks: Map<string, Block>, index?: SpatialIndex, excludeKey?: string): boolean {
   const sz = blockTqecSize(type);
   const candidates = index
     ? getNearbyBlocks(index, pos, sz, 0)
     : Array.from(blocks.values());
   for (const block of candidates) {
+    if (excludeKey !== undefined && posKey(block.pos) === excludeKey) continue;
     const bs = blockTqecSize(block.type);
     if (
       pos.x < block.pos.x + bs[0] && pos.x + sz[0] > block.pos.x &&
