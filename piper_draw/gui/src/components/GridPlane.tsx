@@ -3,7 +3,7 @@ import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useFrame } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
-import { snapGroundPos, hasBlockOverlap, hasCubeColorConflict, hasPipeColorConflict, hasYCubePipeAxisConflict, isValidPos, isPipeType, resolvePipeType } from "../types";
+import { snapGroundPos, hasBlockOverlap, hasCubeColorConflict, hasPipeColorConflict, hasYCubePipeAxisConflict, isValidPos, isPipeType, resolvePipeType, posKey } from "../types";
 import type { CubeType } from "../types";
 import { cameraGroundPoint } from "../utils/groundPlane";
 
@@ -42,16 +42,21 @@ export function GridPlane() {
       blockType = resolved;
     }
 
-    if (!isValidPos(pos, blockType) || hasBlockOverlap(pos, blockType, store.blocks, store.spatialIndex)) {
-      setHoveredGridPos(pos, blockType, true);
+    const existing = store.blocks.get(posKey(pos));
+    const existingKey = existing ? posKey(pos) : undefined;
+    const isReplace = !!(existing && existing.type !== blockType);
+    if (!isValidPos(pos, blockType) || hasBlockOverlap(pos, blockType, store.blocks, store.spatialIndex, existingKey)) {
+      setHoveredGridPos(pos, blockType, true, undefined, isReplace);
+    } else if (existing && existing.type === blockType) {
+      setHoveredGridPos(null);
     } else if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, store.blocks)) {
-      setHoveredGridPos(pos, blockType, true, "Pipe colors don't match the adjacent cube");
+      setHoveredGridPos(pos, blockType, true, "Pipe colors don't match the adjacent cube", isReplace);
     } else if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, store.blocks)) {
-      setHoveredGridPos(pos, blockType, true, "Cube colors don't match the adjacent pipe");
+      setHoveredGridPos(pos, blockType, true, "Cube colors don't match the adjacent pipe", isReplace);
     } else if (hasYCubePipeAxisConflict(blockType, pos, store.blocks)) {
-      setHoveredGridPos(pos, blockType, true, "Y cube cannot be next to an X-open or Y-open pipe");
+      setHoveredGridPos(pos, blockType, true, "Y cube cannot be next to an X-open or Y-open pipe", isReplace);
     } else {
-      setHoveredGridPos(pos, blockType);
+      setHoveredGridPos(pos, blockType, false, undefined, isReplace);
     }
   };
 

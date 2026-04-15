@@ -1,8 +1,19 @@
-import { useMemo } from "react";
+import { useMemo, useCallback } from "react";
 import * as THREE from "three";
+import type { ThreeEvent } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
-import { tqecToThree, posKey, isPipeType } from "../types";
-import type { Position3D, Block } from "../types";
+import {
+  tqecToThree,
+  posKey,
+  isPipeType,
+  isValidPos,
+  hasBlockOverlap,
+  hasPipeColorConflict,
+  hasCubeColorConflict,
+  hasYCubePipeAxisConflict,
+  resolvePipeType,
+} from "../types";
+import type { Position3D, Block, BlockType, CubeType } from "../types";
 
 const ghostMaterial = new THREE.MeshBasicMaterial({
   color: 0xdddddd,
@@ -55,9 +66,90 @@ function getOpenPipeEndpoints(blocks: Map<string, Block>): Position3D[] {
 }
 
 /**
+ * Interactive ghost cube at an open pipe endpoint.
+ * In place mode, hovering shows the placement preview and clicking places the block.
+ */
+function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [number, number, number] }) {
+  const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
+    e.stopPropagation();
+    const store = useBlockStore.getState();
+    if (store.mode !== "place") return;
+
+    let blockType: BlockType = store.cubeType;
+    if (store.pipeVariant) {
+      const resolved = resolvePipeType(store.pipeVariant, pos);
+      if (!resolved) { store.setHoveredGridPos(pos, undefined, true); return; }
+      blockType = resolved;
+    }
+
+    if (!isValidPos(pos, blockType) || hasBlockOverlap(pos, blockType, store.blocks, store.spatialIndex)) {
+      store.setHoveredGridPos(pos, blockType, true);
+    } else if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, store.blocks)) {
+      store.setHoveredGridPos(pos, blockType, true, "Pipe colors don't match the adjacent cube");
+    } else if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, store.blocks)) {
+      store.setHoveredGridPos(pos, blockType, true, "Cube colors don't match the adjacent pipe");
+    } else if (hasYCubePipeAxisConflict(blockType, pos, store.blocks)) {
+      store.setHoveredGridPos(pos, blockType, true, "Y cube cannot be next to an X-open or Y-open pipe");
+    } else {
+      store.setHoveredGridPos(pos, blockType);
+    }
+  }, [pos]);
+
+  const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
+    e.stopPropagation();
+    if (e.delta > 2) return;
+    const store = useBlockStore.getState();
+    if (store.mode !== "place") return;
+    store.addBlock(pos);
+  }, [pos]);
+
+  const handlePointerLeave = useCallback(() => {
+    useBlockStore.getState().setHoveredGridPos(null);
+  }, []);
+
+  return (
+    <group position={threePos}>
+      <mesh
+        geometry={defaultBox}
+        material={ghostMaterial}
+        onPointerMove={handlePointerMove}
+        onClick={handleClick}
+        onPointerLeave={handlePointerLeave}
+      />
+      <lineSegments
+        geometry={defaultEdges}
+        material={ghostLineMaterial}
+        raycast={noRaycast}
+      />
+    </group>
+  );
+}
+
+/**
+ * Non-interactive ghost cube (for delete/select/build modes).
+ */
+function StaticGhost({ threePos }: { threePos: [number, number, number] }) {
+  return (
+    <group position={threePos}>
+      <mesh
+        geometry={defaultBox}
+        material={ghostMaterial}
+        raycast={noRaycast}
+      />
+      <lineSegments
+        geometry={defaultEdges}
+        material={ghostLineMaterial}
+        raycast={noRaycast}
+      />
+    </group>
+  );
+}
+
+/**
  * Renders white semi-transparent ghost cubes at open pipe endpoints
- * and at undetermined cube positions. These are visualization-only —
- * not interactive, not exported.
+ * and at undetermined cube positions. In place mode, ghosts at open
+ * pipe endpoints are interactive — hovering shows the placement preview
+ * and clicking places the block.
  */
 export function OpenPipeGhosts() {
   const blocks = useBlockStore((s) => s.blocks);
@@ -65,8 +157,11 @@ export function OpenPipeGhosts() {
   const mode = useBlockStore((s) => s.mode);
   const buildCursor = useBlockStore((s) => s.buildCursor);
 
-  const positions = useMemo(() => {
-    const result: Array<{ key: string; threePos: [number, number, number] }> = [];
+  const isPlaceMode = mode === "place";
+
+  const { pipeEndpoints, undetermined } = useMemo(() => {
+    const pipeEndpoints: Array<{ key: string; pos: Position3D; threePos: [number, number, number] }> = [];
+    const undetermined: Array<{ key: string; threePos: [number, number, number] }> = [];
     const seen = new Set<string>();
 
     // Ghost cubes at open pipe endpoints (positions with no block)
@@ -76,8 +171,9 @@ export function OpenPipeGhosts() {
       const key = posKey(pos);
       if (mode === "build" && key === cursorKey) continue;
       seen.add(key);
-      result.push({
+      pipeEndpoints.push({
         key,
+        pos,
         threePos: tqecToThree(pos, "XZZ") as [number, number, number],
       });
     }
@@ -89,32 +185,28 @@ export function OpenPipeGhosts() {
       if (mode === "build" && key === cursorKey) continue;
       const block = blocks.get(key);
       if (!block) continue;
-      result.push({
+      undetermined.push({
         key,
         threePos: tqecToThree(block.pos, block.type) as [number, number, number],
       });
     }
 
-    return result;
+    return { pipeEndpoints, undetermined };
   }, [blocks, undeterminedCubes, mode, buildCursor]);
 
-  if (positions.length === 0) return null;
+  if (pipeEndpoints.length === 0 && undetermined.length === 0) return null;
 
   return (
     <>
-      {positions.map(({ key, threePos }) => (
-        <group key={key} position={threePos}>
-          <mesh
-            geometry={defaultBox}
-            material={ghostMaterial}
-            raycast={noRaycast}
-          />
-          <lineSegments
-            geometry={defaultEdges}
-            material={ghostLineMaterial}
-            raycast={noRaycast}
-          />
-        </group>
+      {pipeEndpoints.map(({ key, pos, threePos }) =>
+        isPlaceMode ? (
+          <InteractiveGhost key={key} pos={pos} threePos={threePos} />
+        ) : (
+          <StaticGhost key={key} threePos={threePos} />
+        )
+      )}
+      {undetermined.map(({ key, threePos }) => (
+        <StaticGhost key={key} threePos={threePos} />
       ))}
     </>
   );

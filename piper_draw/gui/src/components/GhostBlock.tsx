@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
-import { tqecToThree, getHiddenFaceMaskForPos } from "../types";
+import { tqecToThree, yBlockZOffset, getHiddenFaceMaskForPos } from "../types";
 import { getCachedGeometry, getCachedEdges, getCachedFullBox } from "./BlockInstances";
 
 const noRaycast = () => {};
@@ -39,6 +39,19 @@ const invalidLineMaterial = new THREE.LineBasicMaterial({
   opacity: 0.4,
   depthWrite: false,
 });
+const replaceMaterial = new THREE.MeshLambertMaterial({
+  vertexColors: true,
+  transparent: true,
+  opacity: 0.85,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
+const replaceLineMaterial = new THREE.LineBasicMaterial({
+  color: "#000000",
+  transparent: true,
+  opacity: 0.85,
+  depthWrite: false,
+});
 
 /**
  * Inner component — only mounts when hoveredGridPos is non-null.
@@ -50,6 +63,7 @@ function GhostBlockInner() {
   const cubeType = useBlockStore((s) => s.cubeType);
   const hoveredBlockType = useBlockStore((s) => s.hoveredBlockType);
   const hoveredInvalid = useBlockStore((s) => s.hoveredInvalid);
+  const hoveredReplace = useBlockStore((s) => s.hoveredReplace);
   const blocks = useBlockStore((s) => s.blocks);
   const spatialIndex = useBlockStore((s) => s.spatialIndex);
 
@@ -59,9 +73,20 @@ function GhostBlockInner() {
   const ghostGeometry = getCachedGeometry(activeType, previewHiddenFaces);
   const ghostEdges = getCachedEdges(activeType, previewHiddenFaces);
 
-  const [x, y, z] = tqecToThree(hoveredGridPos, activeType);
+  const zo = activeType === "Y" ? yBlockZOffset(hoveredGridPos, blocks) : 0;
+  const [x, y, z] = tqecToThree(hoveredGridPos, activeType, zo);
   const isDelete = mode === "delete";
   const isInvalid = !isDelete && hoveredInvalid;
+  const isReplace = !isDelete && hoveredReplace;
+
+  let meshMat = isInvalid ? invalidMaterial : ghostMaterial;
+  let lineMat = isInvalid ? invalidLineMaterial : validLineMaterial;
+  let scale = isInvalid ? 1.005 : 1;
+  if (isReplace && !isInvalid) {
+    meshMat = replaceMaterial;
+    lineMat = replaceLineMaterial;
+    scale = 1.01;
+  }
 
   return (
     <group position={[x, y, z]}>
@@ -71,14 +96,14 @@ function GhostBlockInner() {
           <primitive object={deleteMaterial} attach="material" />
         </mesh>
       ) : (
-        <group scale={isInvalid ? 1.005 : 1}>
+        <group scale={scale}>
           <mesh>
             <primitive object={ghostGeometry} attach="geometry" />
-            <primitive object={isInvalid ? invalidMaterial : ghostMaterial} attach="material" />
+            <primitive object={meshMat} attach="material" />
           </mesh>
           <lineSegments>
             <primitive object={ghostEdges} attach="geometry" />
-            <primitive object={isInvalid ? invalidLineMaterial : validLineMaterial} attach="material" />
+            <primitive object={lineMat} attach="material" />
           </lineSegments>
         </group>
       )}
