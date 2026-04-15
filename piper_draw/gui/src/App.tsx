@@ -186,9 +186,11 @@ function SelectModeHints() {
  */
 function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> }) {
   const cameraSnapTarget = useBlockStore((s) => s.cameraSnapTarget);
+  const lastBuildAxis = useBlockStore((s) => s.lastBuildAxis);
   const clearCameraSnap = useBlockStore((s) => s.clearCameraSnap);
   const { camera } = useThree();
   const prevTarget = useRef<{ azimuth: number | null; targetPos: { x: number; y: number; z: number } } | null>(null);
+  const prevBuildAxis = useRef<number | null>(null);
 
   useFrame(() => {
     if (!cameraSnapTarget || !controlsRef.current) return;
@@ -198,31 +200,35 @@ function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> })
     const controls = controlsRef.current;
     const [tx, ty, tz] = tqecToThree(cameraSnapTarget.targetPos, "XZZ");
 
-    if (cameraSnapTarget.azimuth !== null) {
-      // Compute distance BEFORE moving target so it stays constant
-      const currentDistance = camera.position.distanceTo(controls.target);
-      const dist = Math.max(currentDistance, 15);
-      // Update orbit target to follow cursor
-      controls.target.set(tx, ty, tz);
-      // Clamp polar angle to at most ~55° from horizontal (1.2 rad from vertical)
-      // so the camera looks slightly down rather than from above
-      const polar = Math.min(controls.getPolarAngle(), 1.2);
-      const az = cameraSnapTarget.azimuth;
+    // Check if axis changed compared to previous build move
+    const axisChanged = prevBuildAxis.current !== lastBuildAxis;
+    prevBuildAxis.current = lastBuildAxis;
 
-      camera.position.set(
-        tx + dist * Math.sin(polar) * Math.sin(az),
-        ty + dist * Math.cos(polar),
-        tz + dist * Math.sin(polar) * Math.cos(az),
-      );
+    if (cameraSnapTarget.azimuth !== null) {
+      if (axisChanged) {
+        // First move into this axis — reposition camera behind build direction with slight offset
+        const currentDistance = camera.position.distanceTo(controls.target);
+        const dist = Math.max(currentDistance, 15);
+        controls.target.set(tx, ty, tz);
+        const polar = Math.min(controls.getPolarAngle(), 1.2);
+        const az = cameraSnapTarget.azimuth + 0.12;
+
+        camera.position.set(
+          tx + dist * Math.sin(polar) * Math.sin(az),
+          ty + dist * Math.cos(polar),
+          tz + dist * Math.sin(polar) * Math.cos(az),
+        );
+      } else {
+        // Same axis — translate camera to follow cursor, keep current viewing angle
+        const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+        controls.target.set(tx, ty, tz);
+        camera.position.set(tx + offset.x, ty + offset.y, tz + offset.z);
+      }
     } else {
-      // Z movement — translate camera + slight rotation to reveal vertical build
+      // Z movement — translate camera, preserve current viewing angle
       const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
-      const nudge = 0.08; // ~5° rotation around Y axis
-      const cos = Math.cos(nudge), sin = Math.sin(nudge);
-      const rx = offset.x * cos - offset.z * sin;
-      const rz = offset.x * sin + offset.z * cos;
       controls.target.set(tx, ty, tz);
-      camera.position.set(tx + rx, ty + offset.y, tz + rz);
+      camera.position.set(tx + offset.x, ty + offset.y, tz + offset.z);
     }
 
     controls.update();
@@ -365,7 +371,7 @@ export default function App() {
       <SelectModeHints />
       <PlacementWarning />
       <Canvas
-        camera={{ position: [10, 10, -10], fov: 35 }}
+        camera={{ position: [14, 14, -14], fov: 35 }}
         gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }}
         onContextMenu={(e) => e.preventDefault()}
       >
