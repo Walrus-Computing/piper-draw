@@ -69,7 +69,7 @@ export const DEFAULT_BINDINGS: Record<BuildAction, KeyBinding> = {
   moveDown: { key: "arrowdown", displayLabel: "↓" },
   undo: { key: "q", displayLabel: "Q" },
   cycleBlock: { key: "c", displayLabel: "C" },
-  toggleHadamard: { key: "h", displayLabel: "H" },
+  toggleHadamard: { key: "r", displayLabel: "R" },
   exitBuild: { key: "escape", displayLabel: "Esc" },
 };
 
@@ -129,7 +129,7 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: "piper-draw-keybinds",
-      version: 3,
+      version: 4,
       migrate: () => {
         // Always reset on version change to pick up renamed/added actions
         return { bindings: { ...DEFAULT_BINDINGS } };

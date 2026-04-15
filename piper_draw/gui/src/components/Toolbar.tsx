@@ -1,7 +1,7 @@
 import { useBlockStore } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
-import { CUBE_TYPES, PIPE_VARIANTS, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions } from "../types";
-import type { BlockType, CubeType, Position3D } from "../types";
+import { CUBE_TYPES, PIPE_VARIANTS, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, PIPE_TYPE_TO_VARIANT, pipeVariantPair } from "../types";
+import type { BlockType, CubeType, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
 import * as THREE from "three";
@@ -118,6 +118,25 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
     return opts.join(",");
   });
   const buildValidTypes = buildValidTypesStr != null ? new Set(buildValidTypesStr.split(",").filter(Boolean)) : null;
+  const buildActivePipeVariant = useBlockStore((s): PipeVariant | null => {
+    if (s.mode !== "build" || s.buildHistory.length === 0) return null;
+    const lastStep = s.buildHistory[s.buildHistory.length - 1];
+    if (!lastStep.pipe) return null;
+    const pipeBlock = s.blocks.get(lastStep.pipe.key);
+    if (!pipeBlock || !isPipeType(pipeBlock.type)) return null;
+    return PIPE_TYPE_TO_VARIANT[pipeBlock.type as PipeType];
+  });
+  const buildValidPipeVariantsStr = useBlockStore((s): string | null => {
+    if (s.mode !== "build" || s.buildHistory.length === 0) return null;
+    const lastStep = s.buildHistory[s.buildHistory.length - 1];
+    if (!lastStep.pipe) return null;
+    const pipeBlock = s.blocks.get(lastStep.pipe.key);
+    if (!pipeBlock || !isPipeType(pipeBlock.type)) return null;
+    const variant = PIPE_TYPE_TO_VARIANT[pipeBlock.type as PipeType];
+    const [a, b] = pipeVariantPair(variant);
+    return `${a},${b}`;
+  });
+  const buildValidPipeVariants = buildValidPipeVariantsStr != null ? new Set(buildValidPipeVariantsStr.split(",")) : null;
   const hoveredGridPos = useBlockStore((s) => s.hoveredGridPos);
 
   const previewImages = usePreviewImages(controlsRef);
@@ -305,7 +324,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
       <div style={{ width: 1, background: "#ddd" }} />
 
       {/* Pipes group */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px", opacity: mode === "build" ? 0.4 : 1, pointerEvents: mode === "build" ? "none" : "auto" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px", pointerEvents: mode === "build" ? "none" : "auto" }}>
         <span style={groupLabelStyle}>Pipes</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           {PIPE_VARIANTS.map((v) => (
@@ -315,7 +334,11 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
                 setPipeVariant(v);
                 setMode("place");
               }}
-              style={blockBtnStyle(pipeVariant === v && mode === "place")}
+              style={blockBtnStyle(
+                (pipeVariant === v && mode === "place") ||
+                (mode === "build" && buildActivePipeVariant === v),
+                mode === "build" && (buildValidPipeVariants == null || !buildValidPipeVariants.has(v)),
+              )}
             >
               {v}
               <div style={previewWrapStyle}>{previewImg(v)}</div>
