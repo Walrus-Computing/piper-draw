@@ -930,6 +930,18 @@ export function computePipePos(cursorPos: Position3D, dir: BuildDirection): Posi
 }
 
 /**
+ * Swap the two closed-axis characters of a pipe base type.
+ * E.g. "OXZ" → "OZX", "ZOX" → "XOZ", "XZO" → "ZXO".
+ */
+export function swapPipeVariant(pipeBase: string): string {
+  const openAxis = pipeBase.indexOf("O");
+  const chars = pipeBase.split("");
+  const closedAxes = [0, 1, 2].filter(a => a !== openAxis);
+  [chars[closedAxes[0]], chars[closedAxes[1]]] = [chars[closedAxes[1]], chars[closedAxes[0]]];
+  return chars.join("");
+}
+
+/**
  * Infer the non-Hadamard PipeType to place from a source cube along the given axis.
  * The pipe's closed-axis characters come from the source cube's type characters.
  * Returns null if the closed-axis characters are both the same (e.g. "OZZ"),
@@ -968,9 +980,9 @@ export function determineCubeOptions(
       if (openAxis !== axis) continue;
 
       // Cube at pipeOffset +1 from cube = pipe's -1 end; pipeOffset -2 = pipe's +2 end.
-      // Y-open: swapped at -1 end. X/Z-open: swapped at +2 end.
+      // Hadamard pipes swap their closed-axis colors at the +2 (tail) end.
       const cubeAtPipeEnd = pipeOffset === 1 ? -1 : 2;
-      const swapped = openAxis === 1 ? cubeAtPipeEnd === -1 : cubeAtPipeEnd === 2;
+      const swapped = cubeAtPipeEnd === 2;
 
       for (let ca = 0; ca < 3; ca++) {
         if (ca === openAxis) continue;

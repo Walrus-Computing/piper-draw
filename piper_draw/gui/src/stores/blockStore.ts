@@ -20,6 +20,7 @@ import {
   computeDestCubePos,
   computePipePos,
   inferPipeType,
+  swapPipeVariant,
   determineCubeOptions,
   cameraAzimuthForDirection,
   CUBE_TYPES,
@@ -1123,7 +1124,26 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
     const oldPipeType = pipeBlock.type as PipeType;
     const isHadamard = oldPipeType.length > 3;
-    const newPipeType = (isHadamard ? oldPipeType.slice(0, 3) : oldPipeType + "H") as PipeType;
+
+    // When building in a negative direction, the source cube is at the pipe's
+    // +2 end (swapped end for Hadamard). We need to swap the pipe variant so
+    // that the swapped end's constraints match the source cube.
+    const oldBase = oldPipeType.replace("H", "");
+    const oldOpenAxis = oldBase.indexOf("O");
+    const srcAtSwappedEnd =
+      [lastStep.prevCursorPos.x, lastStep.prevCursorPos.y, lastStep.prevCursorPos.z][oldOpenAxis] ===
+      [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z][oldOpenAxis] + 2;
+
+    let newPipeType: PipeType;
+    if (isHadamard) {
+      // Removing Hadamard — if variant was swapped when toggling on, swap back
+      const reverted = srcAtSwappedEnd ? swapPipeVariant(oldBase) : oldBase;
+      newPipeType = reverted as PipeType;
+    } else {
+      // Adding Hadamard — swap variant if source is at the +2 (swapped) end
+      const swapped = srcAtSwappedEnd ? swapPipeVariant(oldBase) : oldBase;
+      newPipeType = (swapped + "H") as PipeType;
+    }
 
     if (!(PIPE_TYPES as readonly string[]).includes(newPipeType)) return;
 
