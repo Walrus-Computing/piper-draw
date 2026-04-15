@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 
@@ -232,25 +232,36 @@ function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> })
   return null;
 }
 
-function PlacementWarning() {
+function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivElement | null> }) {
   const reason = useBlockStore((s) => s.hoveredInvalidReason);
+  const [topOffset, setTopOffset] = useState(0);
+
+  useEffect(() => {
+    if (!reason || !toolbarRef.current) return;
+    const rect = toolbarRef.current.getBoundingClientRect();
+    setTopOffset(rect.bottom + 8);
+  }, [reason, toolbarRef]);
+
   if (!reason) return null;
   return (
     <div
       style={{
         position: "fixed",
-        bottom: 24,
+        top: topOffset,
         left: "50%",
         transform: "translateX(-50%)",
-        zIndex: 1,
-        background: "rgba(180, 40, 40, 0.92)",
-        color: "#fff",
-        padding: "8px 18px",
-        borderRadius: "8px",
-        fontSize: "14px",
-        fontWeight: 500,
+        zIndex: 2,
+        background: "#f8d7da",
+        color: "#721c24",
+        border: "1px solid #f5c6cb",
+        padding: "8px 16px",
+        borderRadius: "6px",
+        fontFamily: "sans-serif",
+        fontSize: "13px",
         pointerEvents: "none",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+        maxWidth: "500px",
+        textAlign: "center" as const,
       }}
     >
       {reason}
@@ -363,7 +374,7 @@ export default function App() {
         <FpsDisplay spanRef={fpsRef} />
       </div>
       <SelectModeHints />
-      <PlacementWarning />
+      <PlacementWarning toolbarRef={toolbarRef} />
       <Canvas
         camera={{ position: [10, 10, -10], fov: 35 }}
         gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }}
