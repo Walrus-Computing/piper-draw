@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useRef, useMemo } from "react";
 import * as THREE from "three";
+import { useFrame } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
 import { tqecToThree, yBlockZOffset, blockThreeSize, posKey } from "../types";
-import type { BlockType } from "../types";
+import type { Block, BlockType } from "../types";
 
 const highlightMaterial = new THREE.MeshBasicMaterial({
   color: 0x4a9eff,
@@ -37,6 +38,31 @@ function getHighlightGeo(blockType: BlockType) {
 
 const noRaycast = () => {};
 
+function PulsingHighlight({
+  block,
+  zo,
+}: {
+  block: Block;
+  zo: number;
+}) {
+  const groupRef = useRef<THREE.Group>(null!);
+  const [tx, ty, tz] = tqecToThree(block.pos, block.type, zo);
+  const { box, edges } = getHighlightGeo(block.type);
+
+  useFrame(({ clock }) => {
+    if (!groupRef.current) return;
+    const pulse = 1.0 + 0.02 * Math.sin(clock.getElapsedTime() * 4);
+    groupRef.current.scale.setScalar(pulse);
+  });
+
+  return (
+    <group ref={groupRef} position={[tx, ty, tz]}>
+      <mesh geometry={box} material={highlightMaterial} raycast={noRaycast} />
+      <lineSegments geometry={edges} material={outlineMaterial} raycast={noRaycast} />
+    </group>
+  );
+}
+
 export function SelectionHighlights() {
   const selectedKeys = useBlockStore((s) => s.selectedKeys);
   const blocks = useBlockStore((s) => s.blocks);
@@ -59,13 +85,12 @@ export function SelectionHighlights() {
     <>
       {selectedBlocks.map((block) => {
         const zo = block.type === "Y" ? yBlockZOffset(block.pos, blocks) : 0;
-        const [tx, ty, tz] = tqecToThree(block.pos, block.type, zo);
-        const { box, edges } = getHighlightGeo(block.type);
         return (
-          <group key={posKey(block.pos)} position={[tx, ty, tz]}>
-            <mesh geometry={box} material={highlightMaterial} raycast={noRaycast} />
-            <lineSegments geometry={edges} material={outlineMaterial} raycast={noRaycast} />
-          </group>
+          <PulsingHighlight
+            key={posKey(block.pos)}
+            block={block}
+            zo={zo}
+          />
         );
       })}
     </>
