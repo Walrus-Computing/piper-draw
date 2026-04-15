@@ -9,7 +9,7 @@ export type BuildAction =
   | "moveUp"
   | "moveDown"
   | "undo"
-  | "cycleCubeType"
+  | "cycleBlock"
   | "toggleHadamard"
   | "exitBuild";
 
@@ -26,7 +26,7 @@ export const BUILD_ACTIONS: BuildAction[] = [
   "moveUp",
   "moveDown",
   "undo",
-  "cycleCubeType",
+  "cycleBlock",
   "toggleHadamard",
   "exitBuild",
 ];
@@ -39,7 +39,7 @@ export const ACTION_LABELS: Record<BuildAction, string> = {
   moveUp: "Move up",
   moveDown: "Move down",
   undo: "Undo step",
-  cycleCubeType: "Cycle type",
+  cycleBlock: "Cycle block",
   toggleHadamard: "Hadamard",
   exitBuild: "Exit build",
 };
@@ -68,7 +68,7 @@ export const DEFAULT_BINDINGS: Record<BuildAction, KeyBinding> = {
   moveUp: { key: "arrowup", displayLabel: "↑" },
   moveDown: { key: "arrowdown", displayLabel: "↓" },
   undo: { key: "q", displayLabel: "Q" },
-  cycleCubeType: { key: "r", displayLabel: "R" },
+  cycleBlock: { key: "c", displayLabel: "C" },
   toggleHadamard: { key: "h", displayLabel: "H" },
   exitBuild: { key: "escape", displayLabel: "Esc" },
 };
@@ -129,7 +129,25 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: "piper-draw-keybinds",
-      version: 1,
+      version: 3,
+      migrate: () => {
+        // Always reset on version change to pick up renamed/added actions
+        return { bindings: { ...DEFAULT_BINDINGS } };
+      },
+      merge: (persisted, current) => {
+        // Only restore persisted bindings for actions that still exist,
+        // ensuring new/renamed actions always get their defaults.
+        const p = persisted as Partial<KeybindState>;
+        const merged = { ...(current as KeybindState).bindings };
+        if (p.bindings) {
+          for (const action of BUILD_ACTIONS) {
+            if (action in p.bindings) {
+              merged[action] = (p.bindings as Record<string, KeyBinding>)[action];
+            }
+          }
+        }
+        return { ...(current as KeybindState), bindings: merged };
+      },
     },
   ),
 );

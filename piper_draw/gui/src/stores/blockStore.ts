@@ -77,8 +77,10 @@ type UndoCommand =
   | { kind: "hadamard-toggle"; pipeKey: string; oldType: PipeType; newType: PipeType;
       retyped?: Array<{ cubeKey: string; oldType: CubeType; newType: CubeType;
         oldUndetermined?: UndeterminedCubeInfo; newUndetermined?: UndeterminedCubeInfo }> }
-  | { kind: "cube-cycle"; cubeKey: string; oldType: CubeType; newType: CubeType;
-      oldPipes?: Array<{ key: string; oldType: PipeType; newType: PipeType }> };
+  | { kind: "cube-cycle"; cubeKey: string; cubePos: Position3D;
+      oldPlacedType: CubeType | "Y" | null; newPlacedType: CubeType | "Y";
+      oldPipes?: Array<{ key: string; oldType: PipeType; newType: PipeType }>;
+      oldUndetermined?: UndeterminedCubeInfo; newUndetermined?: UndeterminedCubeInfo };
 
 interface BlockStore {
   blocks: Map<string, Block>;
@@ -125,7 +127,7 @@ interface BlockStore {
   // Build mode actions
   buildMove: (direction: BuildDirection) => boolean;
   undoBuildStep: () => void;
-  cycleCubeType: () => void;
+  cycleBlock: () => void;
   toggleHadamard: () => void;
   moveBuildCursor: (pos: Position3D) => void;
   clearCameraSnap: () => void;
@@ -467,10 +469,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
         const newUndetermined = new Map(state.undeterminedCubes);
 
+        // Remove current cube
         const cubeBlock = blocks.get(cmd.cubeKey);
         if (cubeBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, cubeBlock));
-          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, { pos: cubeBlock.pos, type: cmd.oldType }));
+        }
+        // Re-add old cube
+        if (cmd.oldPlacedType) {
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, { pos: cmd.cubePos, type: cmd.oldPlacedType }));
         }
         // Revert pipe updates
         if (cmd.oldPipes) {
@@ -482,12 +488,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
             }
           }
         }
-        // Restore undetermined index
-        const info = newUndetermined.get(cmd.cubeKey);
-        if (info) {
-          const idx = info.options.indexOf(cmd.oldType);
-          if (idx >= 0) newUndetermined.set(cmd.cubeKey, { ...info, currentIndex: idx });
-        }
+        // Restore undetermined state
+        if (cmd.oldUndetermined) newUndetermined.set(cmd.cubeKey, cmd.oldUndetermined);
+        else newUndetermined.delete(cmd.cubeKey);
         return { blocks, hiddenFaces, history: newHistory, future: [cmd, ...state.future].slice(0, MAX_HISTORY), undeterminedCubes: newUndetermined, hoveredGridPos: null };
       }
 
@@ -652,11 +655,13 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
         const newUndetermined = new Map(state.undeterminedCubes);
 
+        // Remove current cube
         const cubeBlock = blocks.get(cmd.cubeKey);
         if (cubeBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, cubeBlock));
-          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, { pos: cubeBlock.pos, type: cmd.newType }));
         }
+        // Re-add new cube
+        ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, { pos: cmd.cubePos, type: cmd.newPlacedType }));
         if (cmd.oldPipes) {
           for (const pu of cmd.oldPipes) {
             const pb = blocks.get(pu.key);
@@ -666,11 +671,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
             }
           }
         }
-        const info = newUndetermined.get(cmd.cubeKey);
-        if (info) {
-          const idx = info.options.indexOf(cmd.newType);
-          if (idx >= 0) newUndetermined.set(cmd.cubeKey, { ...info, currentIndex: idx });
-        }
+        // Restore undetermined state
+        if (cmd.newUndetermined) newUndetermined.set(cmd.cubeKey, cmd.newUndetermined);
+        else newUndetermined.delete(cmd.cubeKey);
         return { blocks, hiddenFaces, history: [...state.history, cmd], future: newFuture, undeterminedCubes: newUndetermined, hoveredGridPos: null };
       }
 
@@ -1127,80 +1130,158 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     });
   },
 
-  cycleCubeType: () =>
+  cycleBlock: () =>
     set((state) => {
       if (state.mode !== "build" || !state.buildCursor) return state;
-      const cursorKey = posKey(state.buildCursor);
-      const info = state.undeterminedCubes.get(cursorKey);
-      if (!info || info.options.length <= 1) return state;
+      const cursor = state.buildCursor;
+      const cursorKey = posKey(cursor);
+      const coords: [number, number, number] = [cursor.x, cursor.y, cursor.z];
 
-      const block = state.blocks.get(cursorKey);
-      if (!block) return state;
-
-      const oldType = block.type as CubeType;
-      const newIndex = (info.currentIndex + 1) % info.options.length;
-      const newType = info.options[newIndex];
-
-      // Replace cube block with new type
-      let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
-      ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cursorKey, block));
-      const newBlock: Block = { pos: state.buildCursor, type: newType };
-      ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock));
-
-      // Update adjacent pipes to match new cube type, validating far-end compatibility
-      const pipeUpdates: Array<{ key: string; oldType: PipeType; newType: PipeType }> = [];
-      const coords: [number, number, number] = [state.buildCursor.x, state.buildCursor.y, state.buildCursor.z];
-
-      // First pass: check all pipe updates are valid before mutating
+      // Count adjacent pipes and check if Y is valid (only Z-open pipes)
+      let pipeCount = 0;
+      let yValid = true;
       for (let axis = 0; axis < 3; axis++) {
         for (const pipeOffset of [1, -2]) {
           const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
           nCoords[axis] += pipeOffset;
-          const nKey = posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
-          const neighbor = blocks.get(nKey);
-          if (!neighbor || !isPipeType(neighbor.type)) continue;
-
-          const base = neighbor.type.replace("H", "");
-          const hadamard = neighbor.type.length > 3;
-          const openAxis = base.indexOf("O");
-          if (openAxis !== axis) continue;
-
-          const newPipe = inferPipeType(newType, axis as 0 | 1 | 2);
-          if (!newPipe) {
-            // Can't create valid pipe on this axis with new type — reject cycle
-            // Revert the cube change
-            ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock));
-            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, block));
-            return state;
+          const n = state.blocks.get(posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] }));
+          if (n && isPipeType(n.type)) {
+            const openAxis = n.type.replace("H", "").indexOf("O");
+            if (openAxis === axis) {
+              pipeCount++;
+              if (openAxis !== 2) yValid = false;
+            }
           }
-          const newPipeType = hadamard ? (newPipe + "H") as PipeType : newPipe;
-          if (newPipeType === neighbor.type) continue;
+        }
+      }
+      if (pipeCount > 1) return state;
 
-          // Validate new pipe against the far-end cube
-          const tmpBlocks = new Map(blocks);
-          tmpBlocks.set(nKey, { pos: neighbor.pos, type: newPipeType });
-          if (hasPipeColorConflict(newPipeType, neighbor.pos, tmpBlocks)) {
-            // Conflict with far-end cube — reject cycle
-            ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock));
-            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, block));
-            return state;
+      // Determine valid cube type options
+      const cubeOptions: (CubeType | "Y")[] = pipeCount === 0
+        ? [...CUBE_TYPES]
+        : (() => {
+            const result = determineCubeOptions(cursor, state.blocks);
+            return result.determined ? [result.type] : result.options;
+          })();
+      if (yValid) cubeOptions.push("Y");
+      if (cubeOptions.length === 0) return state;
+
+      // Cycle: undetermined → type1 → type2 → ... → Y (if valid) → undetermined
+      // "undetermined" is represented by null in the cycle list.
+      // When at undetermined, the block stays as-is but is in undeterminedCubes.
+      const cycle: (CubeType | "Y" | null)[] = [null, ...cubeOptions];
+
+      // Find current position in cycle
+      const existingBlock = state.blocks.get(cursorKey);
+      const isUndetermined = state.undeterminedCubes.has(cursorKey);
+      const existingType = existingBlock && !isPipeType(existingBlock.type)
+        ? existingBlock.type as CubeType | "Y" : null;
+
+      let currentIdx: number;
+      if (!existingBlock || isUndetermined) {
+        // No block or undetermined → position 0 (undetermined)
+        currentIdx = 0;
+      } else {
+        // Determined block → find in cycle
+        currentIdx = cycle.indexOf(existingType);
+        if (currentIdx < 0) currentIdx = 0;
+      }
+
+      const nextIdx = (currentIdx + 1) % cycle.length;
+      const nextType = cycle[nextIdx];
+      const isNextUndetermined = nextIdx === 0;
+
+      let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+      const oldUndetermined = state.undeterminedCubes.get(cursorKey);
+      const pipeUpdates: Array<{ key: string; oldType: PipeType; newType: PipeType }> = [];
+
+      // Remove existing cube if present
+      if (existingBlock) {
+        ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cursorKey, existingBlock));
+      }
+
+      // Determine what block to place
+      let placeType: CubeType | "Y";
+      if (isNextUndetermined) {
+        // Cycling back to undetermined — place first valid CubeType as placeholder
+        const firstCube = cubeOptions.find((t): t is CubeType => t !== "Y");
+        if (!firstCube) return state; // only Y is valid, can't be undetermined
+        placeType = firstCube;
+      } else {
+        placeType = nextType!;
+      }
+
+      const newBlock: Block = { pos: cursor, type: placeType };
+      ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock));
+
+      // Update adjacent pipes to match new cube type (skip for Y — Y doesn't change pipes)
+      if (placeType !== "Y") {
+        for (let axis = 0; axis < 3; axis++) {
+          for (const pipeOffset of [1, -2]) {
+            const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
+            nCoords[axis] += pipeOffset;
+            const nKey = posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
+            const neighbor = blocks.get(nKey);
+            if (!neighbor || !isPipeType(neighbor.type)) continue;
+
+            const base = neighbor.type.replace("H", "");
+            const hadamard = neighbor.type.length > 3;
+            const openAxis = base.indexOf("O");
+            if (openAxis !== axis) continue;
+
+            const newPipe = inferPipeType(placeType, axis as 0 | 1 | 2);
+            if (!newPipe) {
+              // Can't create valid pipe — reject cycle, revert
+              ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock));
+              if (existingBlock) {
+                ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, existingBlock));
+              }
+              return state;
+            }
+            const newPipeType = hadamard ? (newPipe + "H") as PipeType : newPipe;
+            if (newPipeType === neighbor.type) continue;
+
+            // Validate against far-end cube
+            const tmpBlocks = new Map(blocks);
+            tmpBlocks.set(nKey, { pos: neighbor.pos, type: newPipeType });
+            if (hasPipeColorConflict(newPipeType, neighbor.pos, tmpBlocks)) {
+              // Conflict — reject cycle, revert
+              ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock));
+              if (existingBlock) {
+                ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, existingBlock));
+              }
+              return state;
+            }
+            pipeUpdates.push({ key: nKey, oldType: neighbor.type as PipeType, newType: newPipeType });
           }
+        }
 
-          pipeUpdates.push({ key: nKey, oldType: neighbor.type as PipeType, newType: newPipeType });
+        // Apply pipe mutations
+        for (const pu of pipeUpdates) {
+          const pipeBlock = blocks.get(pu.key)!;
+          ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, pu.key, pipeBlock));
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, pu.key, { pos: pipeBlock.pos, type: pu.newType }));
         }
       }
 
-      // All valid — apply pipe mutations
-      for (const pu of pipeUpdates) {
-        const pipeBlock = blocks.get(pu.key)!;
-        ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, pu.key, pipeBlock));
-        ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, pu.key, { pos: pipeBlock.pos, type: pu.newType }));
+      // Update undetermined state
+      const newUndetermined = new Map(state.undeterminedCubes);
+      let newUndeterminedInfo: UndeterminedCubeInfo | undefined;
+      if (isNextUndetermined && cubeOptions.filter((t): t is CubeType => t !== "Y").length > 1) {
+        // Restore undetermined with all valid CubeType options
+        const opts = cubeOptions.filter((t): t is CubeType => t !== "Y");
+        newUndeterminedInfo = { options: opts, currentIndex: 0 };
+        newUndetermined.set(cursorKey, newUndeterminedInfo);
+      } else {
+        newUndetermined.delete(cursorKey);
       }
 
-      const newUndetermined = new Map(state.undeterminedCubes);
-      newUndetermined.set(cursorKey, { ...info, currentIndex: newIndex });
-
-      const cmd: UndoCommand = { kind: "cube-cycle", cubeKey: cursorKey, oldType, newType, oldPipes: pipeUpdates };
+      const cmd: UndoCommand = {
+        kind: "cube-cycle", cubeKey: cursorKey, cubePos: cursor,
+        oldPlacedType: existingType, newPlacedType: placeType,
+        oldPipes: pipeUpdates.length > 0 ? pipeUpdates : undefined,
+        oldUndetermined, newUndetermined: newUndeterminedInfo,
+      };
       return {
         blocks,
         hiddenFaces,

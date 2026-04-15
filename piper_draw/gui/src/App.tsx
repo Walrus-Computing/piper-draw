@@ -329,8 +329,8 @@ export default function App() {
             case "undo":
               store.undoBuildStep();
               return;
-            case "cycleCubeType":
-              store.cycleCubeType();
+            case "cycleBlock":
+              store.cycleBlock();
               return;
             case "toggleHadamard":
               store.toggleHadamard();
