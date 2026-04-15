@@ -113,6 +113,11 @@ export function ValidationToast({
     }
   }, [status, dismiss]);
 
+  // Collapse back when errors shrink to fit
+  useEffect(() => {
+    if (expanded && errors.length <= 5) setExpanded(false);
+  }, [expanded, errors.length]);
+
   if (status === "idle") return null;
 
   const variantKey = status === "invalid" && errors.some((e) => e.message.includes("not available")) ? "error" : status;
@@ -134,11 +139,6 @@ export function ValidationToast({
       </div>
     );
   }
-
-  // Collapse back when errors shrink to fit
-  useEffect(() => {
-    if (expanded && errors.length <= 5) setExpanded(false);
-  }, [expanded, errors.length]);
 
   // Invalid / error status
   const MAX_VISIBLE = 5;
