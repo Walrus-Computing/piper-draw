@@ -135,10 +135,12 @@ function SelectModeHints() {
   const mode = useBlockStore((s) => s.mode);
   if (mode !== "select") return null;
 
+  const altKey = isMac ? "⌥ Option+" : "Alt+";
   const hints = [
     ["Click", "Select"],
     ["Drag", "Box select"],
-    ["Alt+Drag", "Orbit"],
+    [`${altKey}Drag`, "Orbit"],
+    ["Right Drag", "Pan"],
     ["Shift+Click", "Add/remove"],
     [`${modKey}A`, "Select all"],
     ["Delete", "Delete selected"],
