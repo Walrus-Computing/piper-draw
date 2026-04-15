@@ -195,12 +195,35 @@ function TypedInstances({
       // Read the actual block type from the instance, not the group prop
       store.setHoveredGridPos(b[e.instanceId].pos, b[e.instanceId].type);
     } else {
+      // Place mode: check if we can replace the hovered block itself
+      const hovered = b[e.instanceId];
+      let replaceType: BlockType = store.cubeType;
+      if (store.pipeVariant) {
+        const resolved = resolvePipeType(store.pipeVariant, hovered.pos);
+        if (resolved) replaceType = resolved;
+      }
+      if (isValidPos(hovered.pos, replaceType) && replaceType !== hovered.type) {
+        const hovKey = posKey(hovered.pos);
+        if (hasBlockOverlap(hovered.pos, replaceType, store.blocks, store.spatialIndex, hovKey)) {
+          store.setHoveredGridPos(hovered.pos, replaceType, true, undefined, true);
+        } else if (isPipeType(replaceType) && hasPipeColorConflict(replaceType, hovered.pos, store.blocks)) {
+          store.setHoveredGridPos(hovered.pos, replaceType, true, "Pipe colors don't match the adjacent cube", true);
+        } else if (!isPipeType(replaceType) && replaceType !== "Y" && hasCubeColorConflict(replaceType as CubeType, hovered.pos, store.blocks)) {
+          store.setHoveredGridPos(hovered.pos, replaceType, true, "Cube colors don't match the adjacent pipe", true);
+        } else if (hasYCubePipeAxisConflict(replaceType, hovered.pos, store.blocks)) {
+          store.setHoveredGridPos(hovered.pos, replaceType, true, "Y cube cannot be next to an X-open or Y-open pipe", true);
+        } else {
+          store.setHoveredGridPos(hovered.pos, replaceType, false, undefined, true);
+        }
+        return;
+      }
+
       if (!e.face) return;
 
-      // Determine the destination block type
+      // Determine the destination block type for adjacent placement
       let dstType: BlockType = store.cubeType;
       if (store.pipeVariant) {
-        const resolved = resolvePipeTypeFromFace(b[e.instanceId].pos, b[e.instanceId].type, e.face.normal, store.pipeVariant);
+        const resolved = resolvePipeTypeFromFace(hovered.pos, hovered.type, e.face.normal, store.pipeVariant);
         if (!resolved) {
           store.setHoveredGridPos(null);
           return;
@@ -208,22 +231,28 @@ function TypedInstances({
         dstType = resolved;
       }
 
-      const adj = getAdjacentPos(b[e.instanceId].pos, b[e.instanceId].type, e.face.normal, dstType);
+      const adj = getAdjacentPos(hovered.pos, hovered.type, e.face.normal, dstType);
 
       if (!isValidPos(adj, dstType)) {
         store.setHoveredGridPos(null);
         return;
       }
-      if (hasBlockOverlap(adj, dstType, store.blocks, store.spatialIndex)) {
-        store.setHoveredGridPos(adj, dstType, true);
+      const adjKey = posKey(adj);
+      const existingKey = store.blocks.has(adjKey) ? adjKey : undefined;
+      const adjReplace = !!(existingKey && store.blocks.get(existingKey)!.type !== dstType);
+      if (hasBlockOverlap(adj, dstType, store.blocks, store.spatialIndex, existingKey)) {
+        store.setHoveredGridPos(adj, dstType, true, undefined, adjReplace);
+      } else if (existingKey && store.blocks.get(existingKey)!.type === dstType) {
+        // Same type — no replacement needed, hide ghost
+        store.setHoveredGridPos(null);
       } else if (isPipeType(dstType) && hasPipeColorConflict(dstType, adj, store.blocks)) {
-        store.setHoveredGridPos(adj, dstType, true, "Pipe colors don't match the adjacent cube");
+        store.setHoveredGridPos(adj, dstType, true, "Pipe colors don't match the adjacent cube", adjReplace);
       } else if (!isPipeType(dstType) && dstType !== "Y" && hasCubeColorConflict(dstType as CubeType, adj, store.blocks)) {
-        store.setHoveredGridPos(adj, dstType, true, "Cube colors don't match the adjacent pipe");
+        store.setHoveredGridPos(adj, dstType, true, "Cube colors don't match the adjacent pipe", adjReplace);
       } else if (hasYCubePipeAxisConflict(dstType, adj, store.blocks)) {
-        store.setHoveredGridPos(adj, dstType, true, "Y cube cannot be next to an X-open or Y-open pipe");
+        store.setHoveredGridPos(adj, dstType, true, "Y cube cannot be next to an X-open or Y-open pipe", adjReplace);
       } else {
-        store.setHoveredGridPos(adj, dstType);
+        store.setHoveredGridPos(adj, dstType, false, undefined, adjReplace);
       }
     }
   };
@@ -249,16 +278,29 @@ function TypedInstances({
     if (store.mode === "delete") {
       store.removeBlock(b[e.instanceId].pos);
     } else {
+      // Place mode: try replacing the clicked block if the selected type
+      // is valid at the clicked block's position
+      const clicked = b[e.instanceId];
+      let replaceType: BlockType = store.cubeType;
+      if (store.pipeVariant) {
+        const resolved = resolvePipeType(store.pipeVariant, clicked.pos);
+        if (resolved) replaceType = resolved;
+      }
+      if (isValidPos(clicked.pos, replaceType) && replaceType !== clicked.type) {
+        store.addBlock(clicked.pos);
+        return;
+      }
+
       if (!e.face) return;
 
       let dstType: BlockType = store.cubeType;
       if (store.pipeVariant) {
-        const resolved = resolvePipeTypeFromFace(b[e.instanceId].pos, b[e.instanceId].type, e.face.normal, store.pipeVariant);
+        const resolved = resolvePipeTypeFromFace(clicked.pos, clicked.type, e.face.normal, store.pipeVariant);
         if (!resolved) return;
         dstType = resolved;
       }
 
-      const adj = getAdjacentPos(b[e.instanceId].pos, b[e.instanceId].type, e.face.normal, dstType);
+      const adj = getAdjacentPos(clicked.pos, clicked.type, e.face.normal, dstType);
       store.addBlock(adj);
     }
   };

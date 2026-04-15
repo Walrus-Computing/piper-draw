@@ -78,7 +78,8 @@ type UndoCommand =
       retyped?: Array<{ cubeKey: string; oldType: CubeType; newType: CubeType;
         oldUndetermined?: UndeterminedCubeInfo; newUndetermined?: UndeterminedCubeInfo }> }
   | { kind: "cube-cycle"; cubeKey: string; oldType: CubeType; newType: CubeType;
-      oldPipes?: Array<{ key: string; oldType: PipeType; newType: PipeType }> };
+      oldPipes?: Array<{ key: string; oldType: PipeType; newType: PipeType }> }
+  | { kind: "replace"; key: string; oldBlock: Block; newBlock: Block };
 
 interface BlockStore {
   blocks: Map<string, Block>;
@@ -93,6 +94,7 @@ interface BlockStore {
   hoveredBlockType: BlockType | null;
   hoveredInvalid: boolean;
   hoveredInvalidReason: string | null;
+  hoveredReplace: boolean;
   selectedKeys: Set<string>;
 
   // Build mode state
@@ -107,7 +109,7 @@ interface BlockStore {
   setMode: (mode: Mode) => void;
   setCubeType: (cubeType: BlockType) => void;
   setPipeVariant: (variant: PipeVariant) => void;
-  setHoveredGridPos: (pos: Position3D | null, blockType?: BlockType, invalid?: boolean, reason?: string) => void;
+  setHoveredGridPos: (pos: Position3D | null, blockType?: BlockType, invalid?: boolean, reason?: string, replace?: boolean) => void;
   addBlock: (pos: Position3D) => void;
   removeBlock: (pos: Position3D) => void;
   undo: () => void;
@@ -183,6 +185,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   hoveredBlockType: null,
   hoveredInvalid: false,
   hoveredInvalidReason: null,
+  hoveredReplace: false,
   selectedKeys: new Set(),
 
   // Build mode state
@@ -223,6 +226,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           cursorPos = cmd.block.pos;
           break;
         }
+        if (cmd.kind === "replace" && !isPipeType(cmd.newBlock.type) && cmd.newBlock.type !== "Y") {
+          cursorPos = cmd.newBlock.pos;
+          break;
+        }
         if (cmd.kind === "build-step") {
           if (cmd.step.cube) { cursorPos = cmd.step.cube.block.pos; break; }
           if (cmd.step.originCube) { cursorPos = cmd.step.originCube.block.pos; break; }
@@ -252,12 +259,13 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       ...(mode === "place" ? { selectedKeys: new Set<string>() } : {}),
     });
   },
-  setCubeType: (cubeType) => set({ cubeType, pipeVariant: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null }),
-  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null }),
-  setHoveredGridPos: (pos, blockType, invalid, reason) => set((state) => {
+  setCubeType: (cubeType) => set({ cubeType, pipeVariant: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
+  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
+  setHoveredGridPos: (pos, blockType, invalid, reason, replace) => set((state) => {
     const bt = blockType ?? null;
     const inv = invalid ?? false;
     const rsn = reason ?? null;
+    const rep = replace ?? false;
     // Skip no-op updates to avoid unnecessary re-renders
     if (
       state.hoveredGridPos?.x === pos?.x &&
@@ -265,9 +273,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       state.hoveredGridPos?.z === pos?.z &&
       state.hoveredBlockType === bt &&
       state.hoveredInvalid === inv &&
-      state.hoveredInvalidReason === rsn
+      state.hoveredInvalidReason === rsn &&
+      state.hoveredReplace === rep
     ) return state;
-    return { hoveredGridPos: pos, hoveredBlockType: bt, hoveredInvalid: inv, hoveredInvalidReason: rsn };
+    return { hoveredGridPos: pos, hoveredBlockType: bt, hoveredInvalid: inv, hoveredInvalidReason: rsn, hoveredReplace: rep };
   }),
 
   addBlock: (pos) =>
@@ -282,15 +291,35 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         blockType = resolved;
       }
 
+      const key = posKey(pos);
+      const existing = state.blocks.get(key);
+
       // Validate position parity
       if (!isValidPos(pos, blockType)) return state;
-      if (hasBlockOverlap(pos, blockType, state.blocks, state.spatialIndex)) return state;
+      if (hasBlockOverlap(pos, blockType, state.blocks, state.spatialIndex, existing ? key : undefined)) return state;
       if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, state.blocks)) return state;
       if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
       if (hasYCubePipeAxisConflict(blockType, pos, state.blocks)) return state;
 
-      const key = posKey(pos);
       const block: Block = { pos, type: blockType };
+
+      if (existing) {
+        // Skip if same type — nothing to replace
+        if (existing.type === blockType) return state;
+        const removed = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, key, existing);
+        const { blocks, hiddenFaces } = doAdd(removed.blocks, state.spatialIndex, removed.hiddenFaces, key, block);
+        const cmd: UndoCommand = { kind: "replace", key, oldBlock: existing, newBlock: block };
+        const newUndetermined = new Map(state.undeterminedCubes);
+        newUndetermined.delete(key);
+        return {
+          blocks,
+          hiddenFaces,
+          history: [...state.history, cmd].slice(-MAX_HISTORY),
+          future: [],
+          undeterminedCubes: newUndetermined,
+        };
+      }
+
       const { blocks, hiddenFaces } = doAdd(state.blocks, state.spatialIndex, state.hiddenFaces, key, block);
       const cmd: UndoCommand = { kind: "add", key, block };
 
@@ -491,6 +520,18 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         return { blocks, hiddenFaces, history: newHistory, future: [cmd, ...state.future].slice(0, MAX_HISTORY), undeterminedCubes: newUndetermined, hoveredGridPos: null };
       }
 
+      if (cmd.kind === "replace") {
+        const removed = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, cmd.key, cmd.newBlock);
+        const { blocks, hiddenFaces } = doAdd(removed.blocks, state.spatialIndex, removed.hiddenFaces, cmd.key, cmd.oldBlock);
+        return {
+          blocks,
+          hiddenFaces,
+          history: newHistory,
+          future: [cmd, ...state.future].slice(0, MAX_HISTORY),
+          hoveredGridPos: null,
+        };
+      }
+
       // cmd.kind === "clear" — restore saved state, rebuild spatial index
       const newIndex = buildSpatialIndex(cmd.savedBlocks);
       return {
@@ -672,6 +713,18 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           if (idx >= 0) newUndetermined.set(cmd.cubeKey, { ...info, currentIndex: idx });
         }
         return { blocks, hiddenFaces, history: [...state.history, cmd], future: newFuture, undeterminedCubes: newUndetermined, hoveredGridPos: null };
+      }
+
+      if (cmd.kind === "replace") {
+        const removed = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, cmd.key, cmd.oldBlock);
+        const { blocks, hiddenFaces } = doAdd(removed.blocks, state.spatialIndex, removed.hiddenFaces, cmd.key, cmd.newBlock);
+        return {
+          blocks,
+          hiddenFaces,
+          history: [...state.history, cmd],
+          future: newFuture,
+          hoveredGridPos: null,
+        };
       }
 
       // cmd.kind === "clear" — save current state, then clear
