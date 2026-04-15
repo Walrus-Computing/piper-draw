@@ -21,7 +21,10 @@ import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { SelectionHighlights } from "./components/SelectionHighlights";
 import { BuildCursor } from "./components/BuildCursor";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
+import { BuildModeHints } from "./components/BuildModeHints";
+import { KeybindEditor } from "./components/KeybindEditor";
 import { useBlockStore } from "./stores/blockStore";
+import { useKeybindStore, buildActionForKey, actionToWasdKey } from "./stores/keybindStore";
 import { wasdToBuildDirection, tqecToThree } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 
@@ -281,6 +284,7 @@ export default function App() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const [keybindEditorOpen, setKeybindEditorOpen] = useState(false);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -290,35 +294,38 @@ export default function App() {
 
       // Build mode keys (no modifier)
       if (!ctrl && store.mode === "build") {
-        if (["w", "a", "s", "d"].includes(key) || key === "arrowup" || key === "arrowdown") {
+        const bindings = useKeybindStore.getState().bindings;
+        const action = buildActionForKey(bindings, key);
+        if (action) {
           e.preventDefault();
-          const controls = controlsRef.current;
-          if (!controls) return;
-          const azimuth = controls.getAzimuthalAngle();
-          const dirKey = key as "w" | "a" | "s" | "d" | "arrowup" | "arrowdown";
-          const direction = wasdToBuildDirection(dirKey, azimuth);
-          store.buildMove(direction);
-          return;
-        }
-        if (key === "q") {
-          e.preventDefault();
-          store.undoBuildStep();
-          return;
-        }
-        if (key === "r") {
-          e.preventDefault();
-          store.cycleCubeType();
-          return;
-        }
-        if (key === "h") {
-          e.preventDefault();
-          store.toggleHadamard();
-          return;
-        }
-        if (key === "escape") {
-          e.preventDefault();
-          store.setMode("place");
-          return;
+          switch (action) {
+            case "moveForward":
+            case "moveBack":
+            case "moveLeft":
+            case "moveRight":
+            case "moveUp":
+            case "moveDown": {
+              const controls = controlsRef.current;
+              if (!controls) return;
+              const azimuth = controls.getAzimuthalAngle();
+              const dirKey = actionToWasdKey(action);
+              const direction = wasdToBuildDirection(dirKey, azimuth);
+              store.buildMove(direction);
+              return;
+            }
+            case "undo":
+              store.undoBuildStep();
+              return;
+            case "cycleCubeType":
+              store.cycleCubeType();
+              return;
+            case "toggleHadamard":
+              store.toggleHadamard();
+              return;
+            case "exitBuild":
+              store.setMode("place");
+              return;
+          }
         }
       }
 
@@ -381,6 +388,8 @@ export default function App() {
         <FpsDisplay spanRef={fpsRef} />
       </div>
       <SelectModeHints />
+      <BuildModeHints onCustomize={() => setKeybindEditorOpen(true)} />
+      {keybindEditorOpen && <KeybindEditor onClose={() => setKeybindEditorOpen(false)} />}
       <PlacementWarning toolbarRef={toolbarRef} />
       <Canvas
         camera={{ position: [14, 14, -14], fov: 35 }}
