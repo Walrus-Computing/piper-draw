@@ -197,9 +197,19 @@ export function blockThreeSize(blockType: BlockType): [number, number, number] {
  * Blocks fill grid cells: TQEC position (x,y,z) occupies from
  * (x,y,z) to (x+sx,y+sy,z+sz). Three.js center is offset by +half-size.
  */
-export function tqecToThree(pos: Position3D, blockType?: BlockType): [number, number, number] {
+export function tqecToThree(pos: Position3D, blockType?: BlockType, zOffset = 0): [number, number, number] {
   const [sx, sy, sz] = blockType ? blockTqecSize(blockType) : [1, 1, 1];
-  return [pos.x + sx / 2, pos.z + sz / 2, -(pos.y + sy / 2)];
+  return [pos.x + sx / 2, pos.z + sz / 2 + zOffset, -(pos.y + sy / 2)];
+}
+
+/**
+ * Visual Z offset for Y blocks: +0.5 when a pipe sits directly above (z+1),
+ * so the half-cube renders flush against the pipe's open face.
+ */
+export function yBlockZOffset(pos: Position3D, blocks: Map<string, Block>): number {
+  const aboveKey = posKey({ x: pos.x, y: pos.y, z: pos.z + 1 });
+  const above = blocks.get(aboveKey);
+  return above != null && isPipeType(above.type) ? 0.5 : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1074,6 +1084,12 @@ export function cameraAzimuthForDirection(dir: BuildDirection): number | null {
  *   (0, ±1, 0) → TQEC Z ± srcSizeZ / dstSizeZ
  *   (0, 0, ±1) → TQEC Y ∓ srcSizeY / dstSizeY
  */
+/** Grid-snapping size: Y blocks occupy the same grid cell as regular cubes. */
+function blockGridSize(blockType: BlockType): [number, number, number] {
+  if (blockType === "Y") return [1, 1, 1];
+  return blockTqecSize(blockType);
+}
+
 export function getAdjacentPos(
   srcPos: Position3D,
   srcType: BlockType,
@@ -1084,8 +1100,8 @@ export function getAdjacentPos(
   const ny = Math.round(normal.y);
   const nz = Math.round(normal.z);
 
-  const srcSize = blockTqecSize(srcType);
-  const dstSize = blockTqecSize(dstType);
+  const srcSize = blockGridSize(srcType);
+  const dstSize = blockGridSize(dstType);
 
   const x = srcPos.x + (nx > 0 ? srcSize[0] : nx < 0 ? -dstSize[0] : 0);
   const y = srcPos.y + (nz < 0 ? srcSize[1] : nz > 0 ? -dstSize[1] : 0);

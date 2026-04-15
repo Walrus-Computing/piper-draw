@@ -4,6 +4,7 @@ import type { ThreeEvent } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
 import {
   tqecToThree,
+  yBlockZOffset,
   createBlockGeometry,
   createBlockEdges,
   blockThreeSize,
@@ -80,10 +81,12 @@ function TypedInstances({
   cubeType,
   blocks,
   hiddenFaces,
+  allBlocks,
 }: {
   cubeType: BlockType;
   blocks: Block[];
   hiddenFaces: FaceMask;
+  allBlocks: Map<string, Block>;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const blocksRef = useRef(blocks);
@@ -115,12 +118,15 @@ function TypedInstances({
   const templatePositions = edgeTemplate.getAttribute("position").array as Float32Array;
   const vertCount = templatePositions.length / 3;
 
+  const isY = cubeType === "Y";
+
   const batchedEdgesGeo = useMemo(() => {
     if (blocks.length === 0) return null;
     const totalVerts = blocks.length * vertCount;
     const positions = new Float32Array(totalVerts * 3);
     for (let i = 0; i < blocks.length; i++) {
-      const [tx, ty, tz] = tqecToThree(blocks[i].pos, cubeType);
+      const zo = isY ? yBlockZOffset(blocks[i].pos, allBlocks) : 0;
+      const [tx, ty, tz] = tqecToThree(blocks[i].pos, cubeType, zo);
       const offset = i * vertCount * 3;
       for (let v = 0; v < vertCount; v++) {
         const vi = v * 3;
@@ -132,7 +138,7 @@ function TypedInstances({
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     return geo;
-  }, [blocks, cubeType, templatePositions, vertCount]);
+  }, [blocks, cubeType, templatePositions, vertCount, isY, allBlocks]);
 
   // Dispose old batched edge geometry
   useEffect(() => {
@@ -158,7 +164,8 @@ function TypedInstances({
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
     for (let i = 0; i < blocks.length; i++) {
-      const [tx, ty, tz] = tqecToThree(blocks[i].pos, cubeType);
+      const zo = isY ? yBlockZOffset(blocks[i].pos, allBlocks) : 0;
+      const [tx, ty, tz] = tqecToThree(blocks[i].pos, cubeType, zo);
       dummy.makeTranslation(tx, ty, tz);
       mesh.setMatrixAt(i, dummy);
       if (tx < minX) minX = tx; if (tx > maxX) maxX = tx;
@@ -322,6 +329,7 @@ export function BlockInstances() {
           cubeType={group.type}
           hiddenFaces={group.hiddenFaces}
           blocks={group.blocks}
+          allBlocks={blocks}
         />
       ))}
     </>
