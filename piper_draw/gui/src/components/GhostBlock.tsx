@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
-import { tqecToThree, getHiddenFaceMaskForPos } from "../types";
+import { tqecToThree, yBlockZOffset, getHiddenFaceMaskForPos } from "../types";
 import { getCachedGeometry, getCachedEdges, getCachedFullBox } from "./BlockInstances";
 
 const noRaycast = () => {};
@@ -73,7 +73,8 @@ function GhostBlockInner() {
   const ghostGeometry = getCachedGeometry(activeType, previewHiddenFaces);
   const ghostEdges = getCachedEdges(activeType, previewHiddenFaces);
 
-  const [x, y, z] = tqecToThree(hoveredGridPos, activeType);
+  const zo = activeType === "Y" ? yBlockZOffset(hoveredGridPos, blocks) : 0;
+  const [x, y, z] = tqecToThree(hoveredGridPos, activeType, zo);
   const isDelete = mode === "delete";
   const isInvalid = !isDelete && hoveredInvalid;
   const isReplace = !isDelete && hoveredReplace;
