@@ -1,0 +1,15 @@
+Piper Draw
+Copyright 2025 Walrus Computing GmbH
+
+This product includes software developed at Walrus Computing GmbH.
+
+This product includes the following third-party software, licensed under
+the Apache License 2.0:
+
+- TQEC (https://github.com/tqec/tqec) - Copyright TQEC contributors
+- Stim (https://github.com/quantumlib/Stim) - Copyright Google LLC
+- Sinter (https://github.com/quantumlib/Stim) - Copyright Google LLC
+- PyMatching (https://github.com/oscarhiggott/PyMatching) - Copyright Oscar Higgott
+- draco3d (https://github.com/google/draco) - Copyright Google LLC
+- hls.js (https://github.com/video-dev/hls.js) - Copyright Dailymotion
+- @dimforge/rapier3d-compat (https://github.com/dimforge/rapier.js) - Copyright Dimforge

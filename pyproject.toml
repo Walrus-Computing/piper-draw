@@ -3,6 +3,7 @@ name = "piper-draw"
 version = "0.1.0"
 description = "Interactively draw pipe diagrams for lattice surgery."
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.14"
 dependencies = [
     "networkx>=3.2",
