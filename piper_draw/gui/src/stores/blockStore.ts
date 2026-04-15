@@ -131,6 +131,10 @@ interface BlockStore {
   toggleHadamard: () => void;
   moveBuildCursor: (pos: Position3D) => void;
   clearCameraSnap: () => void;
+
+  // Free build (disables color-matching validation)
+  freeBuild: boolean;
+  toggleFreeBuild: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +198,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   undeterminedCubes: new Map(),
   cameraSnapTarget: null,
   lastBuildAxis: null,
+
+  freeBuild: false,
+  toggleFreeBuild: () => set((s) => ({ freeBuild: !s.freeBuild })),
 
   setMode: (mode) => {
     const prev = get();
@@ -297,9 +304,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       // Validate position parity
       if (!isValidPos(pos, blockType)) return state;
       if (hasBlockOverlap(pos, blockType, state.blocks, state.spatialIndex, existing ? key : undefined)) return state;
-      if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, state.blocks)) return state;
-      if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
-      if (hasYCubePipeAxisConflict(blockType, pos, state.blocks)) return state;
+      if (!store.freeBuild) {
+        if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, state.blocks)) return state;
+        if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
+        if (hasYCubePipeAxisConflict(blockType, pos, state.blocks)) return state;
+      }
 
       const block: Block = { pos, type: blockType };
 

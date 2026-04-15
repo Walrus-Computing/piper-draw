@@ -49,11 +49,11 @@ export function GridPlane() {
       setHoveredGridPos(pos, blockType, true, undefined, isReplace);
     } else if (existing && existing.type === blockType) {
       setHoveredGridPos(null);
-    } else if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, store.blocks)) {
+    } else if (!store.freeBuild && isPipeType(blockType) && hasPipeColorConflict(blockType, pos, store.blocks)) {
       setHoveredGridPos(pos, blockType, true, "Pipe colors don't match the adjacent cube", isReplace);
-    } else if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, store.blocks)) {
+    } else if (!store.freeBuild && !isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, store.blocks)) {
       setHoveredGridPos(pos, blockType, true, "Cube colors don't match the adjacent pipe", isReplace);
-    } else if (hasYCubePipeAxisConflict(blockType, pos, store.blocks)) {
+    } else if (!store.freeBuild && hasYCubePipeAxisConflict(blockType, pos, store.blocks)) {
       setHoveredGridPos(pos, blockType, true, "Y cube cannot be next to an X-open or Y-open pipe", isReplace);
     } else {
       setHoveredGridPos(pos, blockType, false, undefined, isReplace);

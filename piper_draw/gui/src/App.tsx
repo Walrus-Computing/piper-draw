@@ -383,7 +383,7 @@ export default function App() {
   return (
     <>
       <Toolbar onResetCamera={() => controlsRef.current?.reset()} controlsRef={controlsRef} toolbarRef={toolbarRef} />
-      <ValidationToast toolbarRef={toolbarRef} />
+      <ValidationToast toolbarRef={toolbarRef} controlsRef={controlsRef} />
       <div
         onPointerDown={(e) => e.stopPropagation()}
         style={{
