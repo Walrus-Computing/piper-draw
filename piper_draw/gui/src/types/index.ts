@@ -251,6 +251,7 @@ function createPipeGeometry(
   wallColors: [THREE.Color, THREE.Color],
   hadamard: boolean,
   hiddenFaces: FaceMask = 0,
+  hBandHalfHeight?: number,
 ): THREE.BufferGeometry {
   const closedAxes = [0, 1, 2].filter(a => a !== openAxis) as [number, number];
 
@@ -303,7 +304,7 @@ function createPipeGeometry(
 
   const halfExt: [number, number, number] = [0.5, 0.5, 0.5];
   for (const ca of closedAxes) halfExt[ca] -= WALL_EPS;
-  const bh = H_BAND_HALF_HEIGHT;
+  const bh = hBandHalfHeight ?? H_BAND_HALF_HEIGHT;
   // Above the band, the two closed-axis colors swap per TQEC convention
   const wallColorsAbove: [THREE.Color, THREE.Color] = [wallColors[1], wallColors[0]];
 
@@ -384,7 +385,7 @@ function createPipeGeometry(
  * Pipe types are parsed from the type name: each character gives the basis
  * for that TQEC axis ('X', 'Z', or 'O' for open). Hadamard variants end in 'H'.
  */
-export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask = 0): THREE.BufferGeometry {
+export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask = 0, hBandHalfHeight?: number): THREE.BufferGeometry {
   if (isPipeType(blockType)) {
     const base = blockType.replace("H", "");
     const hadamard = blockType.length > 3;
@@ -398,7 +399,7 @@ export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask 
     if (hadamard && tqecOpenAxis === 1) {
       wallColors = [wallColors[1], wallColors[0]];
     }
-    return createPipeGeometry(threeOpenAxis, wallColors, hadamard, hiddenFaces);
+    return createPipeGeometry(threeOpenAxis, wallColors, hadamard, hiddenFaces, hBandHalfHeight);
   }
 
   if (blockType === "Y") {
@@ -459,7 +460,7 @@ export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask 
 }
 
 /** Edge line segments for a block type, including Hadamard band edges for H pipes. */
-export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0): THREE.BufferGeometry {
+export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0, hBandHalfHeight?: number): THREE.BufferGeometry {
   const [bx, by, bz] = blockThreeSize(blockType);
   const pipe = isPipeType(blockType);
   const e2 = pipe ? 2 * WALL_EPS : 0;
@@ -515,7 +516,8 @@ export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0
     const halfExts = [hx, hy, hz];
     const bandEdges: number[] = [];
 
-    for (const bp of [H_BAND_HALF_HEIGHT, -H_BAND_HALF_HEIGHT]) {
+    const bandHH = hBandHalfHeight ?? H_BAND_HALF_HEIGHT;
+    for (const bp of [bandHH, -bandHH]) {
       const faceBit = FACE_BIT_BY_INDEX[threeOpen * 2 + (bp > 0 ? 0 : 1)];
       if (hiddenFaces & faceBit) continue;
 

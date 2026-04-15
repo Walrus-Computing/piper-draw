@@ -62,10 +62,11 @@ export function usePreviewImages(controlsRef: React.RefObject<any>) {
 
     // Pre-build meshes
     for (const { key, blockType } of PREVIEW_TYPES) {
-      const geo = createBlockGeometry(blockType, 0);
+      const previewBandHH = blockType.toString().endsWith("H") ? 0.16 : undefined;
+      const geo = createBlockGeometry(blockType, 0, previewBandHH);
       const mesh = new THREE.Mesh(geo, vertexColorMaterial);
 
-      const edgeGeo = createBlockEdges(blockType, 0);
+      const edgeGeo = createBlockEdges(blockType, 0, previewBandHH);
       const edges = new THREE.LineSegments(edgeGeo, edgeMaterial);
 
       const [sx, sy, sz] = blockThreeSize(blockType);
