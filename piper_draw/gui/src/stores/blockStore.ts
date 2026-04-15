@@ -226,6 +226,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           cursorPos = cmd.block.pos;
           break;
         }
+        if (cmd.kind === "replace" && !isPipeType(cmd.newBlock.type) && cmd.newBlock.type !== "Y") {
+          cursorPos = cmd.newBlock.pos;
+          break;
+        }
         if (cmd.kind === "build-step") {
           if (cmd.step.cube) { cursorPos = cmd.step.cube.block.pos; break; }
           if (cmd.step.originCube) { cursorPos = cmd.step.originCube.block.pos; break; }
