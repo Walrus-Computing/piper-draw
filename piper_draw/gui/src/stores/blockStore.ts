@@ -259,8 +259,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       ...(mode === "place" ? { selectedKeys: new Set<string>() } : {}),
     });
   },
-  setCubeType: (cubeType) => set({ cubeType, pipeVariant: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null }),
-  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null }),
+  setCubeType: (cubeType) => set({ cubeType, pipeVariant: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
+  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
   setHoveredGridPos: (pos, blockType, invalid, reason, replace) => set((state) => {
     const bt = blockType ?? null;
     const inv = invalid ?? false;
@@ -309,11 +309,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const removed = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, key, existing);
         const { blocks, hiddenFaces } = doAdd(removed.blocks, state.spatialIndex, removed.hiddenFaces, key, block);
         const cmd: UndoCommand = { kind: "replace", key, oldBlock: existing, newBlock: block };
+        const newUndetermined = new Map(state.undeterminedCubes);
+        newUndetermined.delete(key);
         return {
           blocks,
           hiddenFaces,
           history: [...state.history, cmd].slice(-MAX_HISTORY),
           future: [],
+          undeterminedCubes: newUndetermined,
         };
       }
 
