@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { Block } from "../types";
-import { tqecToThree } from "../types";
+import { tqecToThree, yBlockZOffset } from "../types";
 
 const _vec3 = new THREE.Vector3();
 
@@ -22,7 +22,8 @@ export function getBlockKeysInScreenRect(
 
   const result: string[] = [];
   for (const [key, block] of blocks) {
-    const [tx, ty, tz] = tqecToThree(block.pos, block.type);
+    const zo = block.type === "Y" ? yBlockZOffset(block.pos, blocks) : 0;
+    const [tx, ty, tz] = tqecToThree(block.pos, block.type, zo);
     _vec3.set(tx, ty, tz);
     _vec3.project(camera);
     // Skip blocks behind camera
