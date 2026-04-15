@@ -42,8 +42,8 @@ function CursorBox({ position, isCursor }: { position: [number, number, number];
 
   useFrame(({ clock }) => {
     if (!isCursor || !groupRef.current) return;
-    // Subtle pulsing scale for cursor (1.0 to 1.06)
-    const pulse = 1.0 + 0.03 * Math.sin(clock.getElapsedTime() * 4);
+    // Pulsing scale for cursor (1.03 to 1.09) — never smaller than the block
+    const pulse = 1.06 + 0.03 * Math.sin(clock.getElapsedTime() * 4);
     groupRef.current.scale.setScalar(pulse);
   });
 

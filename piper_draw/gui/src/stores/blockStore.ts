@@ -20,6 +20,7 @@ import {
   computeDestCubePos,
   computePipePos,
   inferPipeType,
+  swapPipeVariant,
   determineCubeOptions,
   cameraAzimuthForDirection,
   CUBE_TYPES,
@@ -49,12 +50,16 @@ export type BuildStep = {
   cube: { key: string; block: Block } | null;
   /** Origin cube placed on empty canvas (first step only). */
   originCube?: { key: string; block: Block };
-  /** If the source cube was auto-determined during this step. */
+  /** If the source cube was auto-determined during this step (was undetermined). */
   sourceDetermination?: {
     key: string;
     prevType: CubeType;
     prevUndeterminedInfo: UndeterminedCubeInfo;
   };
+  /** If a determined source cube was retyped to accommodate a new pipe direction. */
+  sourceRetype?: { key: string; prevType: CubeType };
+  /** If the origin cube is undetermined after this step (first step only). */
+  originUndetermined?: UndeterminedCubeInfo;
   /** If the destination cube is undetermined after this step. */
   destUndetermined?: UndeterminedCubeInfo;
   /** If an existing destination cube was re-typed to accommodate the new pipe. */
@@ -65,8 +70,8 @@ type UndoCommand =
   | { kind: "add"; key: string; block: Block }
   | { kind: "remove"; key: string; block: Block }
   | { kind: "bulk-remove"; entries: Array<{ key: string; block: Block }> }
-  | { kind: "clear"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask> }
-  | { kind: "load"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask>;
+  | { kind: "clear"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask>; savedUndetermined: Map<string, UndeterminedCubeInfo> }
+  | { kind: "load"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask>; savedUndetermined: Map<string, UndeterminedCubeInfo>;
       newBlocks: Map<string, Block>; newIndex: SpatialIndex; newHiddenFaces: Map<string, FaceMask> }
   | { kind: "build-step"; step: BuildStep }
   | { kind: "hadamard-toggle"; pipeKey: string; oldType: PipeType; newType: PipeType;
@@ -96,6 +101,8 @@ interface BlockStore {
   undeterminedCubes: Map<string, UndeterminedCubeInfo>;
   /** Camera snap target set by build actions, consumed by CameraBuildSnap component. */
   cameraSnapTarget: { azimuth: number | null; targetPos: Position3D } | null;
+  /** Tracks the tqecAxis of the last build move (0/1/2) so camera only rotates on axis changes. */
+  lastBuildAxis: number | null;
 
   setMode: (mode: Mode) => void;
   setCubeType: (cubeType: BlockType) => void;
@@ -182,18 +189,19 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   buildHistory: [],
   undeterminedCubes: new Map(),
   cameraSnapTarget: null,
+  lastBuildAxis: null,
 
   setMode: (mode) => {
     const prev = get();
 
-    // Leaving build mode: commit undetermined cubes to their current type
+    // Leaving build mode: keep undetermined cubes as-is (only committed when building away)
     if (prev.mode === "build" && mode !== "build") {
       set({
         mode,
         buildCursor: null,
         buildHistory: [],
-        undeterminedCubes: new Map(),
         cameraSnapTarget: null,
+        lastBuildAxis: null,
         hoveredGridPos: null,
         hoveredBlockType: null,
         hoveredInvalid: false,
@@ -224,7 +232,6 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         mode,
         buildCursor: cursorPos,
         buildHistory: [],
-        undeterminedCubes: new Map(),
         cameraSnapTarget: null,
         hoveredGridPos: null,
         hoveredBlockType: null,
@@ -244,8 +251,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       ...(mode === "place" ? { selectedKeys: new Set<string>() } : {}),
     });
   },
-  setCubeType: (cubeType) => set({ cubeType, pipeVariant: null }),
-  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant] }),
+  setCubeType: (cubeType) => set({ cubeType, pipeVariant: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null }),
+  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null }),
   setHoveredGridPos: (pos, blockType, invalid, reason) => set((state) => {
     const bt = blockType ?? null;
     const inv = invalid ?? false;
@@ -302,6 +309,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       const { blocks, hiddenFaces } = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, key, block);
       const cmd: UndoCommand = { kind: "remove", key, block };
+      const newUndetermined = new Map(state.undeterminedCubes);
+      newUndetermined.delete(key);
 
       return {
         blocks,
@@ -309,6 +318,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         history: [...state.history, cmd].slice(-MAX_HISTORY),
         future: [],
         hoveredGridPos: null,
+        undeterminedCubes: newUndetermined,
       };
     }),
 
@@ -364,6 +374,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           history: newHistory,
           future: [cmd, ...state.future].slice(0, MAX_HISTORY),
           hoveredGridPos: null,
+          undeterminedCubes: cmd.savedUndetermined,
         };
       }
 
@@ -398,6 +409,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const reverted: Block = { pos: step.prevCursorPos, type: sd.prevType };
           ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, sd.key, reverted));
           newUndetermined.set(sd.key, { ...sd.prevUndeterminedInfo, options: [...sd.prevUndeterminedInfo.options] });
+        }
+        // Revert source retype
+        if (step.sourceRetype) {
+          const sr = step.sourceRetype;
+          const curSrc = blocks.get(sr.key);
+          if (curSrc) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, sr.key, curSrc));
+          const reverted: Block = { pos: step.prevCursorPos, type: sr.prevType };
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, sr.key, reverted));
         }
         // Remove origin cube
         if (step.originCube) {
@@ -480,6 +499,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         history: newHistory,
         future: [cmd, ...state.future].slice(0, MAX_HISTORY),
         hoveredGridPos: null,
+        undeterminedCubes: cmd.savedUndetermined,
       };
     }),
 
@@ -535,6 +555,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           history: [...state.history, cmd],
           future: newFuture,
           hoveredGridPos: null,
+          undeterminedCubes: new Map(),
         };
       }
 
@@ -552,11 +573,23 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const sd = step.sourceDetermination;
           const curSrc = blocks.get(sd.key);
           if (curSrc) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, sd.key, curSrc));
-          // Re-determine using constraints from adjacent pipes (pipe not yet re-placed)
           const newSrcOptions = determineCubeOptions(step.prevCursorPos, blocks);
           const srcType = newSrcOptions.determined ? newSrcOptions.type : (newSrcOptions.options[0] ?? sd.prevType);
           ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, sd.key, { pos: step.prevCursorPos, type: srcType }));
           newUndetermined.delete(sd.key);
+        }
+        // Re-retype source
+        if (step.sourceRetype) {
+          const sr = step.sourceRetype;
+          const curSrc = blocks.get(sr.key);
+          if (curSrc) {
+            ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, sr.key, curSrc));
+            const newSrcOptions = determineCubeOptions(step.prevCursorPos, blocks);
+            const candidates = newSrcOptions.determined ? [newSrcOptions.type] : newSrcOptions.options;
+            const validForPipe = candidates.filter(ct => step.pipe && inferPipeType(ct, step.pipe.block.type.replace("H", "").indexOf("O") as 0 | 1 | 2) !== null);
+            const srcType = validForPipe.length > 0 ? validForPipe[0] : sr.prevType;
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, sr.key, { pos: step.prevCursorPos, type: srcType }));
+          }
         }
         // Re-place pipe
         if (step.pipe) {
@@ -645,6 +678,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         kind: "clear",
         savedBlocks: state.blocks,
         savedHiddenFaces: state.hiddenFaces,
+        savedUndetermined: state.undeterminedCubes,
       };
       return {
         blocks: new Map(),
@@ -653,6 +687,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         history: [...state.history, savedCmd],
         future: newFuture,
         hoveredGridPos: null,
+        undeterminedCubes: new Map(),
       };
     }),
 
@@ -669,6 +704,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         kind: "load",
         savedBlocks: state.blocks,
         savedHiddenFaces: state.hiddenFaces,
+        savedUndetermined: state.undeterminedCubes,
         newBlocks: incoming,
         newIndex,
         newHiddenFaces: newHidden,
@@ -680,6 +716,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         history: [...state.history, cmd].slice(-MAX_HISTORY),
         future: [],
         hoveredGridPos: null,
+        undeterminedCubes: new Map(),
       };
     }),
 
@@ -690,6 +727,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         kind: "clear",
         savedBlocks: state.blocks,
         savedHiddenFaces: state.hiddenFaces,
+        savedUndetermined: state.undeterminedCubes,
       };
       return {
         blocks: new Map(),
@@ -699,6 +737,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         future: [],
         hoveredGridPos: null,
         selectedKeys: new Set<string>(),
+        undeterminedCubes: new Map(),
       };
     }),
 
@@ -737,6 +776,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
       if (entries.length === 0) return state;
       const cmd: UndoCommand = { kind: "bulk-remove", entries };
+      const newUndetermined = new Map(state.undeterminedCubes);
+      for (const { key } of entries) newUndetermined.delete(key);
       return {
         blocks,
         hiddenFaces,
@@ -744,6 +785,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         future: [],
         selectedKeys: new Set<string>(),
         hoveredGridPos: null,
+        undeterminedCubes: newUndetermined,
       };
     }),
 
@@ -777,6 +819,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         set({
           buildCursor: destPos,
           cameraSnapTarget: { azimuth, targetPos: destPos },
+          lastBuildAxis: direction.tqecAxis,
         });
         return true;
       }
@@ -790,6 +833,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     // Determine source cube type
     let srcType: CubeType;
     let sourceDetermination: BuildStep["sourceDetermination"];
+    let sourceRetype: BuildStep["sourceRetype"];
 
     if (isEmptyOrigin) {
       // First step on empty canvas — pick a valid cube type for this build axis
@@ -812,7 +856,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       // Prefer current type if it's valid for this direction
       const currentType = srcBlock!.type as CubeType;
       srcType = validForDir.includes(currentType) ? currentType : validForDir[0];
-      // Always determine source — commit to chosen type
+      // Always commit undetermined source
       sourceDetermination = {
         key: srcKey,
         prevType: currentType,
@@ -820,6 +864,18 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       };
     } else {
       srcType = srcBlock!.type as CubeType;
+
+      // If current type can't pipe in this direction, try retyping via open axis
+      if (!inferPipeType(srcType, direction.tqecAxis)) {
+        const options = determineCubeOptions(cursor, state.blocks);
+        const candidates = options.determined ? [options.type] : options.options;
+        const validForDir = candidates.filter(ct => inferPipeType(ct, direction.tqecAxis) !== null);
+        if (validForDir.length === 0) return false;
+        const pipeSet = new Set(validForDir.map(ct => inferPipeType(ct, direction.tqecAxis)));
+        if (pipeSet.size > 1) return false; // Ambiguous — user must cycle (R)
+        sourceRetype = { key: srcKey, prevType: srcType };
+        srcType = validForDir[0];
+      }
     }
 
     // Infer pipe type from source
@@ -885,9 +941,28 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         newUndetermined.delete(srcKey);
       }
 
+      // Apply source retype (determined cube retyped for new pipe direction)
+      if (sourceRetype) {
+        const oldSrc = blocks.get(srcKey)!;
+        ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, srcKey, oldSrc));
+        const newSrc: Block = { pos: cursor, type: srcType };
+        ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, srcKey, newSrc));
+      }
+
       // Place pipe
       const pipeBlock: Block = { pos: pipePos, type: pipeType };
       ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, pipeKey, pipeBlock));
+
+      // Check if origin cube should be undetermined (placed before the pipe was known)
+      let originUndetermined: UndeterminedCubeInfo | undefined;
+      if (isEmptyOrigin) {
+        const originOptions = determineCubeOptions(cursor, blocks);
+        if (!originOptions.determined && originOptions.options.length > 1) {
+          const idx = Math.max(0, originOptions.options.indexOf(srcType));
+          originUndetermined = { options: [...originOptions.options], currentIndex: idx };
+          newUndetermined.set(srcKey, originUndetermined);
+        }
+      }
 
       // Apply dest type change if existing cube needs re-typing
       if (destTypeChange) {
@@ -926,6 +1001,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         cube: cubeAdded,
         originCube: originCubeEntry,
         sourceDetermination,
+        sourceRetype,
+        originUndetermined,
         destUndetermined,
         destTypeChange,
       };
@@ -939,6 +1016,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         buildHistory: [...s.buildHistory, step],
         undeterminedCubes: newUndetermined,
         cameraSnapTarget: { azimuth, targetPos: destPos },
+        lastBuildAxis: direction.tqecAxis,
         history: [...s.history, { kind: "build-step" as const, step }].slice(-MAX_HISTORY),
         future: [],
       };
@@ -991,6 +1069,17 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         newUndetermined.set(sd.key, { ...sd.prevUndeterminedInfo, options: [...sd.prevUndeterminedInfo.options] });
       }
 
+      // Revert source retype (determined cube back to previous type)
+      if (step.sourceRetype) {
+        const sr = step.sourceRetype;
+        const curSrc = blocks.get(sr.key);
+        if (curSrc) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, sr.key, curSrc));
+          const reverted: Block = { pos: step.prevCursorPos, type: sr.prevType };
+          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, sr.key, reverted));
+        }
+      }
+
       // Remove origin cube if this was first step
       if (step.originCube) {
         ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, step.originCube.key, step.originCube.block));
@@ -1008,6 +1097,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           buildHistory: newBuildHistory,
           undeterminedCubes: newUndetermined,
           cameraSnapTarget: { azimuth: null, targetPos: step.prevCursorPos },
+          lastBuildAxis: null,
           history: newHistory,
           future: [cmd, ...s.future].slice(0, MAX_HISTORY),
           hoveredGridPos: null,
@@ -1021,6 +1111,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         buildHistory: newBuildHistory,
         undeterminedCubes: newUndetermined,
         cameraSnapTarget: { azimuth: null, targetPos: step.prevCursorPos },
+        lastBuildAxis: null,
         hoveredGridPos: null,
       };
     });
@@ -1123,7 +1214,26 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
     const oldPipeType = pipeBlock.type as PipeType;
     const isHadamard = oldPipeType.length > 3;
-    const newPipeType = (isHadamard ? oldPipeType.slice(0, 3) : oldPipeType + "H") as PipeType;
+
+    // When building in a negative direction, the source cube is at the pipe's
+    // +2 end (swapped end for Hadamard). We need to swap the pipe variant so
+    // that the swapped end's constraints match the source cube.
+    const oldBase = oldPipeType.replace("H", "");
+    const oldOpenAxis = oldBase.indexOf("O");
+    const srcAtSwappedEnd =
+      [lastStep.prevCursorPos.x, lastStep.prevCursorPos.y, lastStep.prevCursorPos.z][oldOpenAxis] ===
+      [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z][oldOpenAxis] + 2;
+
+    let newPipeType: PipeType;
+    if (isHadamard) {
+      // Removing Hadamard — if variant was swapped when toggling on, swap back
+      const reverted = srcAtSwappedEnd ? swapPipeVariant(oldBase) : oldBase;
+      newPipeType = reverted as PipeType;
+    } else {
+      // Adding Hadamard — swap variant if source is at the +2 (swapped) end
+      const swapped = srcAtSwappedEnd ? swapPipeVariant(oldBase) : oldBase;
+      newPipeType = (swapped + "H") as PipeType;
+    }
 
     if (!(PIPE_TYPES as readonly string[]).includes(newPipeType)) return;
 
@@ -1238,7 +1348,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       const key = posKey(pos);
       const block = state.blocks.get(key);
       if (!block || isPipeType(block.type)) return state;
-      return { buildCursor: pos };
+      return {
+        buildCursor: pos,
+        buildHistory: [],
+        lastBuildAxis: null,
+        cameraSnapTarget: { azimuth: null, targetPos: pos },
+      };
     }),
 
   clearCameraSnap: () => set({ cameraSnapTarget: null }),
