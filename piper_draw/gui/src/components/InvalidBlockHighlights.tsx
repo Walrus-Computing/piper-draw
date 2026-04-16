@@ -1,9 +1,10 @@
-import { useMemo } from "react";
+import { useRef, useMemo } from "react";
 import * as THREE from "three";
+import { useFrame } from "@react-three/fiber";
 import { useValidationStore } from "../stores/validationStore";
 import { useBlockStore } from "../stores/blockStore";
 import { tqecToThree, yBlockZOffset, blockThreeSize, posKey } from "../types";
-import type { BlockType } from "../types";
+import type { BlockType, Position3D } from "../types";
 
 const highlightMaterial = new THREE.MeshBasicMaterial({
   color: 0xff0000,
@@ -16,6 +17,14 @@ const highlightMaterial = new THREE.MeshBasicMaterial({
 const outlineMaterial = new THREE.LineBasicMaterial({
   color: 0xff0000,
   linewidth: 2,
+});
+
+const pulsingMaterial = new THREE.MeshBasicMaterial({
+  color: 0xff0000,
+  transparent: true,
+  opacity: 0.35,
+  depthWrite: false,
+  side: THREE.DoubleSide,
 });
 
 const boxCache = new Map<BlockType, THREE.BoxGeometry>();
@@ -36,34 +45,105 @@ function getHighlightGeo(blockType: BlockType) {
   return { box, edges };
 }
 
+const noRaycast = () => {};
+
+function parseKey(key: string): Position3D | null {
+  const parts = key.split(",");
+  if (parts.length !== 3) return null;
+  const [x, y, z] = parts.map(Number);
+  if (isNaN(x) || isNaN(y) || isNaN(z)) return null;
+  return { x, y, z };
+}
+
+/** Pulsing red ghost cube for the currently selected error */
+function PulsingErrorBlock({ position, blockType }: { position: [number, number, number]; blockType: BlockType }) {
+  const groupRef = useRef<THREE.Group>(null!);
+  const { box } = getHighlightGeo(blockType);
+
+  useFrame(({ clock }) => {
+    if (!groupRef.current) return;
+    const pulse = 1.06 + 0.03 * Math.sin(clock.getElapsedTime() * 4);
+    groupRef.current.scale.setScalar(pulse);
+  });
+
+  return (
+    <group ref={groupRef} position={position}>
+      <mesh geometry={box} material={pulsingMaterial} raycast={noRaycast} />
+    </group>
+  );
+}
+
 export function InvalidBlockHighlights() {
   const invalidKeys = useValidationStore((s) => s.invalidKeys);
+  const selectedErrorKey = useValidationStore((s) => s.selectedErrorKey);
   const blocks = useBlockStore((s) => s.blocks);
 
-  const invalidBlocks = useMemo(() => {
-    if (invalidKeys.size === 0) return [];
-    const result = [];
+  const { withBlock, withoutBlock } = useMemo(() => {
+    if (invalidKeys.size === 0) return { withBlock: [], withoutBlock: [] };
+    const matched: { key: string; blockType: BlockType; pos: Position3D }[] = [];
+    const matchedKeys = new Set<string>();
     for (const block of blocks.values()) {
       if (invalidKeys.has(posKey(block.pos))) {
-        result.push(block);
-        if (result.length >= 200) break;
+        matched.push({ key: posKey(block.pos), blockType: block.type, pos: block.pos });
+        matchedKeys.add(posKey(block.pos));
+        if (matched.length >= 200) break;
       }
     }
-    return result;
+    // Errors at positions with no block (e.g. missing pipes)
+    const unmatched: { key: string; pos: Position3D }[] = [];
+    for (const key of invalidKeys) {
+      if (!matchedKeys.has(key)) {
+        const parsed = parseKey(key);
+        if (parsed) unmatched.push({ key, pos: parsed });
+      }
+    }
+    return { withBlock: matched, withoutBlock: unmatched };
   }, [invalidKeys, blocks]);
 
-  if (invalidBlocks.length === 0) return null;
+  if (withBlock.length === 0 && withoutBlock.length === 0) return null;
 
   return (
     <>
-      {invalidBlocks.map((block) => {
-        const zo = block.type === "Y" ? yBlockZOffset(block.pos, blocks) : 0;
-        const [tx, ty, tz] = tqecToThree(block.pos, block.type, zo);
-        const { box, edges } = getHighlightGeo(block.type);
+      {withBlock.map(({ key, blockType, pos }) => {
+        const zo = blockType === "Y" ? yBlockZOffset(pos, blocks) : 0;
+        const [tx, ty, tz] = tqecToThree(pos, blockType, zo);
+
+        if (key === selectedErrorKey) {
+          return (
+            <PulsingErrorBlock
+              key={key}
+              position={[tx, ty, tz]}
+              blockType={blockType}
+            />
+          );
+        }
+
+        const { box, edges } = getHighlightGeo(blockType);
         return (
-          <group key={posKey(block.pos)} position={[tx, ty, tz]}>
-            <mesh geometry={box} material={highlightMaterial} />
-            <lineSegments geometry={edges} material={outlineMaterial} />
+          <group key={key} position={[tx, ty, tz]}>
+            <mesh geometry={box} material={highlightMaterial} raycast={noRaycast} />
+            <lineSegments geometry={edges} material={outlineMaterial} raycast={noRaycast} />
+          </group>
+        );
+      })}
+      {withoutBlock.map(({ key, pos }) => {
+        const [tx, ty, tz] = tqecToThree(pos, "XZZ");
+
+        if (key === selectedErrorKey) {
+          return (
+            <PulsingErrorBlock
+              key={key}
+              position={[tx, ty, tz]}
+              blockType="XZZ"
+            />
+          );
+        }
+
+        const { box, edges } = getHighlightGeo("XZZ");
+        return (
+          <group key={key} position={[tx, ty, tz]}>
+            <mesh geometry={box} material={highlightMaterial} raycast={noRaycast} />
+            <lineSegments geometry={edges} material={outlineMaterial} raycast={noRaycast} />
           </group>
         );
       })}

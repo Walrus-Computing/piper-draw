@@ -1,5 +1,31 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import * as THREE from "three";
 import { useValidationStore } from "../stores/validationStore";
+import type { ValidationError } from "../stores/validationStore";
+import { tqecToThree, posKey } from "../types";
+
+function navigateToError(error: ValidationError, controlsRef: React.RefObject<any>) {
+  const controls = controlsRef.current;
+  if (!controls || isNaN(error.position.x)) return;
+  const [tx, ty, tz] = tqecToThree(error.position, "XZZ");
+  const camera = controls.object as THREE.PerspectiveCamera;
+  const startTarget = controls.target.clone();
+  const endTarget = new THREE.Vector3(tx, ty, tz);
+  const startPos = camera.position.clone();
+  const offset = new THREE.Vector3().subVectors(startPos, startTarget);
+  const endPos = endTarget.clone().add(offset);
+  const duration = 400;
+  const start = performance.now();
+  function animate() {
+    const t = Math.min((performance.now() - start) / duration, 1);
+    const ease = t * (2 - t); // ease-out quad
+    controls.target.lerpVectors(startTarget, endTarget, ease);
+    camera.position.lerpVectors(startPos, endPos, ease);
+    controls.update();
+    if (t < 1) requestAnimationFrame(animate);
+  }
+  animate();
+}
 
 const baseStyle: React.CSSProperties = {
   position: "fixed",
@@ -11,23 +37,68 @@ const baseStyle: React.CSSProperties = {
   fontFamily: "sans-serif",
   fontSize: "13px",
   boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-  cursor: "pointer",
   maxWidth: "500px",
   textAlign: "center" as const,
 };
 
 const styleVariants: Record<string, React.CSSProperties> = {
   loading: { background: "#e8f0fe", color: "#1a56db", cursor: "default" },
-  valid: { background: "#d4edda", color: "#155724", border: "1px solid #c3e6cb" },
+  valid: { background: "#d4edda", color: "#155724", border: "1px solid #c3e6cb", cursor: "pointer" },
   invalid: { background: "#f8d7da", color: "#721c24", border: "1px solid #f5c6cb" },
   error: { background: "#fff3cd", color: "#856404", border: "1px solid #ffeeba" },
 };
 
-export function ValidationToast({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivElement | null> }) {
+const errorRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "6px",
+  padding: "2px 0",
+};
+
+const errorTextStyle: React.CSSProperties = {
+  cursor: "pointer",
+  flex: 1,
+  textAlign: "left",
+};
+
+const rowCloseStyle: React.CSSProperties = {
+  background: "none",
+  border: "none",
+  cursor: "pointer",
+  fontSize: "13px",
+  lineHeight: 1,
+  padding: "0 2px",
+  opacity: 0.5,
+  color: "inherit",
+  flexShrink: 0,
+};
+
+const dismissAllStyle: React.CSSProperties = {
+  marginTop: "6px",
+  background: "none",
+  border: "1px solid rgba(114, 28, 36, 0.3)",
+  color: "#721c24",
+  padding: "3px 10px",
+  borderRadius: "4px",
+  cursor: "pointer",
+  fontSize: "11px",
+};
+
+export function ValidationToast({
+  toolbarRef,
+  controlsRef,
+}: {
+  toolbarRef: React.RefObject<HTMLDivElement | null>;
+  controlsRef: React.RefObject<any>;
+}) {
   const status = useValidationStore((s) => s.status);
   const errors = useValidationStore((s) => s.errors);
   const dismiss = useValidationStore((s) => s.dismiss);
+  const dismissError = useValidationStore((s) => s.dismissError);
+  const selectError = useValidationStore((s) => s.selectError);
   const [topOffset, setTopOffset] = useState(0);
+  const [expanded, setExpanded] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (status === "idle" || !toolbarRef.current) return;
@@ -42,10 +113,20 @@ export function ValidationToast({ toolbarRef }: { toolbarRef: React.RefObject<HT
     }
   }, [status, dismiss]);
 
+  // Collapse back when errors shrink to fit
+  useEffect(() => {
+    if (expanded && errors.length <= 5) setExpanded(false);
+  }, [expanded, errors.length]);
+
   if (status === "idle") return null;
 
   const variantKey = status === "invalid" && errors.some((e) => e.message.includes("not available")) ? "error" : status;
-  const style = { ...baseStyle, ...styleVariants[variantKey], top: topOffset };
+  const style: React.CSSProperties = {
+    ...baseStyle,
+    ...styleVariants[variantKey],
+    position: "fixed",
+    top: topOffset,
+  };
 
   if (status === "loading") {
     return <div style={style}>Verifying with tqec...</div>;
@@ -59,21 +140,68 @@ export function ValidationToast({ toolbarRef }: { toolbarRef: React.RefObject<HT
     );
   }
 
-  const summary =
-    errors.length === 1
-      ? errors[0].message
-      : `${errors.length} validation errors found. Click to dismiss.`;
+  // Invalid / error status
+  const MAX_VISIBLE = 5;
+  const hasOverflow = errors.length > MAX_VISIBLE;
+  const visibleErrors = expanded ? errors : errors.slice(0, MAX_VISIBLE);
+
+  const renderErrorRow = (e: ValidationError, i: number) => {
+    const hasPosition = !isNaN(e.position.x);
+    return (
+      <div key={i} style={errorRowStyle}>
+        <span
+          style={{
+            ...errorTextStyle,
+            cursor: hasPosition ? "pointer" : "default",
+          }}
+          onClick={() => {
+            if (hasPosition) {
+              selectError(posKey(e.position));
+              navigateToError(e, controlsRef);
+            }
+          }}
+          onMouseEnter={(ev) => { if (hasPosition) (ev.currentTarget as HTMLElement).style.textDecoration = "underline"; }}
+          onMouseLeave={(ev) => { (ev.currentTarget as HTMLElement).style.textDecoration = "none"; }}
+        >
+          {e.message}
+        </span>
+        <button
+          style={rowCloseStyle}
+          onClick={(ev) => { ev.stopPropagation(); dismissError(i); }}
+          title="Dismiss this error"
+        >
+          &times;
+        </button>
+      </div>
+    );
+  };
 
   return (
-    <div style={style} onClick={dismiss}>
-      {summary}
+    <div style={style}>
       {errors.length > 1 && (
-        <ul style={{ margin: "4px 0 0", padding: "0 0 0 16px", textAlign: "left", fontSize: "12px" }}>
-          {errors.slice(0, 5).map((e, i) => (
-            <li key={i}>{e.message}</li>
-          ))}
-          {errors.length > 5 && <li>...and {errors.length - 5} more</li>}
-        </ul>
+        <div style={{ marginBottom: "4px" }}>{errors.length} validation errors found</div>
+      )}
+      <div
+        ref={scrollRef}
+        style={{
+          fontSize: "12px",
+          ...(expanded && hasOverflow ? { maxHeight: "200px", overflowY: "auto" } : {}),
+        }}
+      >
+        {visibleErrors.map((e, i) => renderErrorRow(e, i))}
+      </div>
+      {hasOverflow && !expanded && (
+        <button
+          style={{ ...dismissAllStyle, borderColor: "rgba(114, 28, 36, 0.2)" }}
+          onClick={() => setExpanded(true)}
+        >
+          Show all {errors.length} errors
+        </button>
+      )}
+      {errors.length > 1 && (
+        <button style={dismissAllStyle} onClick={dismiss}>
+          Dismiss all
+        </button>
       )}
     </div>
   );
