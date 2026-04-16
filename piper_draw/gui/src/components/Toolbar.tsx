@@ -69,6 +69,8 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
   const clearAll = useBlockStore((s) => s.clearAll);
   const loadBlocks = useBlockStore((s) => s.loadBlocks);
   const blocksEmpty = useBlockStore((s) => s.blocks.size === 0);
+  const freeBuild = useBlockStore((s) => s.freeBuild);
+  const toggleFreeBuild = useBlockStore((s) => s.toggleFreeBuild);
   const selectedCount = useBlockStore((s) => {
     if (s.selectedKeys.size === 0) return 0;
     let count = 0;
@@ -305,6 +307,20 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
           }}
         >
           {validationStatus === "loading" ? "Verifying..." : "Verify"}
+        </button>
+        <button
+          onClick={toggleFreeBuild}
+          title="Disable color-matching checks when placing blocks"
+          style={{
+            ...btnStyle(false),
+            fontSize: "10px",
+            padding: "2px 6px",
+            borderColor: freeBuild ? "#e67e22" : "#ccc",
+            background: freeBuild ? "#fdebd0" : "#fff",
+            color: freeBuild ? "#a04000" : "#333",
+          }}
+        >
+          Free Build {freeBuild ? "ON" : "OFF"}
         </button>
       </div>
 
