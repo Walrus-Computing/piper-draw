@@ -1,7 +1,7 @@
 import { useBlockStore } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
-import { CUBE_TYPES, PIPE_VARIANTS, isPipeType, pipeAxisFromPos } from "../types";
-import type { BlockType, Position3D } from "../types";
+import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, PIPE_TYPE_TO_VARIANT } from "../types";
+import type { BlockType, CubeType, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
 import * as THREE from "three";
@@ -40,13 +40,14 @@ const btnStyle = (active: boolean) => ({
   fontWeight: "normal" as const,
 });
 
-const blockBtnStyle = (active: boolean) => ({
+const blockBtnStyle = (active: boolean, disabled?: boolean) => ({
   ...btnStyle(active),
   display: "flex" as const,
   flexDirection: "column" as const,
   alignItems: "center" as const,
   justifyContent: "flex-start" as const,
   padding: "4px 8px",
+  ...(disabled ? { opacity: 0.3, pointerEvents: "none" as const } : {}),
 });
 
 // ---------------------------------------------------------------------------
@@ -79,6 +80,84 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
   const deleteSelected = useBlockStore((s) => s.deleteSelected);
 
   const buildCursor = useBlockStore((s) => s.buildCursor);
+  const buildCursorBlockType = useBlockStore((s) => {
+    if (s.mode !== "build" || !s.buildCursor) return null;
+    // Undetermined cubes should not highlight any button
+    if (s.undeterminedCubes.has(posKey(s.buildCursor))) return null;
+    const block = s.blocks.get(posKey(s.buildCursor));
+    return block && !isPipeType(block.type) ? block.type : null;
+  });
+  // Returns a stable string of valid cube types (comma-separated) to avoid
+  // infinite re-renders from creating new Set objects in the selector.
+  const buildValidTypesStr = useBlockStore((s): string | null => {
+    if (s.mode !== "build" || !s.buildCursor) return null;
+    const cursor = s.buildCursor;
+    const coords: [number, number, number] = [cursor.x, cursor.y, cursor.z];
+    let pipeCount = 0;
+    let yValid = true;
+    for (let axis = 0; axis < 3; axis++) {
+      for (const offset of [1, -2]) {
+        const nc: [number, number, number] = [coords[0], coords[1], coords[2]];
+        nc[axis] += offset;
+        const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
+        if (n && isPipeType(n.type)) {
+          const openAxis = n.type.replace("H", "").indexOf("O");
+          if (openAxis === axis) {
+            pipeCount++;
+            if (openAxis !== 2) yValid = false;
+          }
+        }
+      }
+    }
+    if (pipeCount > 1) return "";
+    const opts: string[] = pipeCount === 0
+      ? [...CUBE_TYPES]
+      : (() => {
+          const result = determineCubeOptions(cursor, s.blocks);
+          return result.determined ? [result.type] : [...result.options];
+        })();
+    if (yValid) opts.push("Y");
+    return opts.join(",");
+  });
+  const buildValidTypes = buildValidTypesStr != null ? new Set(buildValidTypesStr.split(",").filter(Boolean)) : null;
+  const buildActivePipeVariant = useBlockStore((s): PipeVariant | null => {
+    if (s.mode !== "build" || s.buildHistory.length === 0) return null;
+    const lastStep = s.buildHistory[s.buildHistory.length - 1];
+    if (!lastStep.pipe) return null;
+    const pipeBlock = s.blocks.get(lastStep.pipe.key);
+    if (!pipeBlock || !isPipeType(pipeBlock.type)) return null;
+    return PIPE_TYPE_TO_VARIANT[pipeBlock.type as PipeType];
+  });
+  const buildValidPipeVariantsStr = useBlockStore((s): string | null => {
+    if (s.mode !== "build" || s.buildHistory.length === 0) return null;
+    const lastStep = s.buildHistory[s.buildHistory.length - 1];
+    if (!lastStep.pipe) return null;
+    const pipeBlock = s.blocks.get(lastStep.pipe.key);
+    if (!pipeBlock || !isPipeType(pipeBlock.type)) return null;
+    const base = (pipeBlock.type as string).replace("H", "");
+    const openAxis = base.indexOf("O") as 0 | 1 | 2;
+    const pipeCoords: [number, number, number] = [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z];
+    // Check each variant's pipe type against neighbor cube constraints
+    const valid: string[] = [];
+    for (const v of PIPE_VARIANTS) {
+      const candidate = VARIANT_AXIS_MAP[v][openAxis];
+      const tmp = new Map(s.blocks);
+      tmp.set(lastStep.pipe.key, { pos: pipeBlock.pos, type: candidate });
+      let ok = true;
+      for (const offset of [-1, 2]) {
+        const nc: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
+        nc[openAxis] += offset;
+        const nKey = posKey({ x: nc[0], y: nc[1], z: nc[2] });
+        const neighbor = tmp.get(nKey);
+        if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
+        const opts = determineCubeOptions(neighbor.pos, tmp);
+        if (!opts.determined && opts.options.length === 0) { ok = false; break; }
+      }
+      if (ok) valid.push(v);
+    }
+    return valid.join(",");
+  });
+  const buildValidPipeVariants = buildValidPipeVariantsStr != null ? new Set(buildValidPipeVariantsStr.split(",")) : null;
   const hoveredGridPos = useBlockStore((s) => s.hoveredGridPos);
 
   const previewImages = usePreviewImages(controlsRef);
@@ -239,7 +318,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
       <div style={{ width: 1, background: "#ddd" }} />
 
       {/* Blocks group (ZXCubes + Y) */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px", opacity: mode === "build" ? 0.4 : 1, pointerEvents: mode === "build" ? "none" : "auto" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px", pointerEvents: mode === "build" ? "none" : "auto" }}>
         <span style={groupLabelStyle}>Blocks</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           {CUBE_TYPES.map((ct) => (
@@ -249,7 +328,11 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
                 setCubeType(ct as BlockType);
                 setMode("place");
               }}
-              style={blockBtnStyle(cubeType === ct && mode === "place")}
+              style={blockBtnStyle(
+                (cubeType === ct && mode === "place") ||
+                (mode === "build" && buildCursorBlockType === ct),
+                mode === "build" && buildValidTypes != null && !buildValidTypes.has(ct),
+              )}
             >
               {ct}
               <div style={previewWrapStyle}>{previewImg(ct)}</div>
@@ -260,7 +343,11 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
               setCubeType("Y");
               setMode("place");
             }}
-            style={blockBtnStyle(cubeType === "Y" && mode === "place")}
+            style={blockBtnStyle(
+              (cubeType === "Y" && mode === "place") ||
+              (mode === "build" && buildCursorBlockType === "Y"),
+              mode === "build" && buildValidTypes != null && !buildValidTypes.has("Y" as CubeType),
+            )}
           >
             Y
             <div style={previewWrapStyle}>{previewImg("Y")}</div>
@@ -272,7 +359,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
       <div style={{ width: 1, background: "#ddd" }} />
 
       {/* Pipes group */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px", opacity: mode === "build" ? 0.4 : 1, pointerEvents: mode === "build" ? "none" : "auto" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px", pointerEvents: mode === "build" ? "none" : "auto" }}>
         <span style={groupLabelStyle}>Pipes</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           {PIPE_VARIANTS.map((v) => (
@@ -282,7 +369,11 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
                 setPipeVariant(v);
                 setMode("place");
               }}
-              style={blockBtnStyle(pipeVariant === v && mode === "place")}
+              style={blockBtnStyle(
+                (pipeVariant === v && mode === "place") ||
+                (mode === "build" && buildActivePipeVariant === v),
+                mode === "build" && (buildValidPipeVariants == null || !buildValidPipeVariants.has(v)),
+              )}
             >
               {v}
               <div style={previewWrapStyle}>{previewImg(v)}</div>

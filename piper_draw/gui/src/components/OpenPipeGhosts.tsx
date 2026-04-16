@@ -164,9 +164,12 @@ export function OpenPipeGhosts() {
     const undetermined: Array<{ key: string; threePos: [number, number, number] }> = [];
     const seen = new Set<string>();
 
-    // Ghost cubes at open pipe endpoints
+    // Ghost cubes at open pipe endpoints (positions with no block)
+    // In build mode, skip the cursor position — BuildCursor renders it with a pulse.
+    const cursorKey = buildCursor ? posKey(buildCursor) : null;
     for (const pos of getOpenPipeEndpoints(blocks)) {
       const key = posKey(pos);
+      if (mode === "build" && key === cursorKey) continue;
       seen.add(key);
       pipeEndpoints.push({
         key,
@@ -175,8 +178,8 @@ export function OpenPipeGhosts() {
       });
     }
 
-    // Ghost cubes at undetermined cube positions
-    const cursorKey = buildCursor ? posKey(buildCursor) : null;
+    // Ghost cubes at undetermined cube positions (always visible).
+    // In build mode, skip the cursor position — BuildCursor renders it with a pulse.
     for (const [key] of undeterminedCubes) {
       if (seen.has(key)) continue;
       if (mode === "build" && key === cursorKey) continue;
