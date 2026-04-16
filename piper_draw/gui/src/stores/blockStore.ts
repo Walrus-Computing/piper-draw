@@ -23,7 +23,6 @@ import {
   determineCubeOptions,
   cameraAzimuthForDirection,
   CUBE_TYPES,
-  PIPE_TYPES,
   PIPE_VARIANTS,
   VARIANT_AXIS_MAP,
 } from "../types";
