@@ -938,7 +938,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       return false;
     };
 
-    // If pipe already exists, just move cursor to destination if it has a cube
+    // If pipe already exists, move cursor to destination (traverse) or
+    // fill in a missing cube (e.g. cube was deleted leaving an open pipe end).
     const existingPipe = state.blocks.get(pipeKey);
     if (existingPipe) {
       const existingDest = state.blocks.get(destKey);
@@ -949,6 +950,49 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           cameraSnapTarget: { azimuth, targetPos: destPos },
           lastBuildAxis: direction.tqecAxis,
           hoveredInvalidReason: null,
+        });
+        return true;
+      }
+      if (!existingDest) {
+        // Pipe exists but destination cube is missing — place a cube to fill the gap.
+        if (!isValidPos(destPos, "XZZ")) return reject("Invalid destination position");
+        if (hasBlockOverlap(destPos, "XZZ", state.blocks, state.spatialIndex)) return reject("Destination would overlap existing blocks");
+        set((s) => {
+          let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
+          const newUndetermined = new Map(s.undeterminedCubes);
+          const destOptions = determineCubeOptions(destPos, blocks);
+          let destType: CubeType;
+          let destUndetermined: UndeterminedCubeInfo | undefined;
+          if (destOptions.determined) {
+            destType = destOptions.type;
+          } else if (destOptions.options.length > 0) {
+            destType = destOptions.options[0];
+          } else {
+            // Fallback — pick type from source if available
+            const src = blocks.get(srcKey);
+            destType = (src && !isPipeType(src.type) && src.type !== "Y" ? src.type : "XZZ") as CubeType;
+          }
+          const destBlock: Block = { pos: destPos, type: destType };
+          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, destKey, destBlock));
+          const step: BuildStep = {
+            prevCursorPos: cursor,
+            pipe: null,
+            cube: { key: destKey, block: destBlock },
+            destUndetermined,
+          };
+          const azimuth = cameraAzimuthForDirection(direction);
+          return {
+            blocks,
+            hiddenFaces,
+            buildCursor: destPos,
+            buildHistory: [...s.buildHistory, step],
+            undeterminedCubes: newUndetermined,
+            cameraSnapTarget: { azimuth, targetPos: destPos },
+            lastBuildAxis: direction.tqecAxis,
+            history: [...s.history, { kind: "build-step" as const, step }].slice(-MAX_HISTORY),
+            future: [],
+            hoveredInvalidReason: null,
+          };
         });
         return true;
       }
@@ -1069,6 +1113,25 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       // Validate destination position and check for overlap with non-cube blocks
       if (!isValidPos(destPos, "XZZ")) return reject("Invalid destination position");
       if (hasBlockOverlap(destPos, "XZZ", state.blocks, state.spatialIndex)) return reject("Destination would overlap existing blocks");
+
+      // Pre-check: if existing pipes at destPos conflict with the inferred pipe,
+      // try the Hadamard variant (mirrors the existing-dest logic above).
+      const tmpBlocks = new Map(state.blocks);
+      if (sourceDetermination || isEmptyOrigin) {
+        tmpBlocks.set(srcKey, { pos: cursor, type: srcType });
+      }
+      tmpBlocks.set(pipeKey, { pos: pipePos, type: pipeType });
+      const preDestOptions = determineCubeOptions(destPos, tmpBlocks);
+      if (!preDestOptions.determined && preDestOptions.options.length === 0) {
+        const hPipeType: PipeType = direction.sign > 0
+          ? toggleHadamard(pipeType)
+          : (swapPipeVariant(pipeType) + "H") as PipeType;
+        tmpBlocks.set(pipeKey, { pos: pipePos, type: hPipeType });
+        const preDestOptions2 = determineCubeOptions(destPos, tmpBlocks);
+        if (preDestOptions2.determined || preDestOptions2.options.length > 0) {
+          pipeType = hPipeType;
+        }
+      }
     }
 
     // All validation passed — apply mutations
@@ -1124,18 +1187,13 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, destTypeChange.key, newDest));
       }
 
-      // Clean up undetermined state for existing destination that's now determined
+      // Clean up undetermined state for existing destination.
+      // A new pipe was explicitly built to this cube, so commit it even
+      // when multiple options remain (the user can still cycle with R).
       let destDetermination: BuildStep["destDetermination"];
       if (existingDest && newUndetermined.has(destKey)) {
-        const destOptions = determineCubeOptions(destPos, blocks);
-        if (destOptions.determined) {
-          destDetermination = { key: destKey, prevUndeterminedInfo: newUndetermined.get(destKey)! };
-          newUndetermined.delete(destKey);
-        } else if (destOptions.options.length > 0) {
-          const curType = (destTypeChange ? destTypeChange.newType : existingDest.type) as CubeType;
-          const idx = Math.max(0, destOptions.options.indexOf(curType));
-          newUndetermined.set(destKey, { options: [...destOptions.options], currentIndex: idx });
-        }
+        destDetermination = { key: destKey, prevUndeterminedInfo: newUndetermined.get(destKey)! };
+        newUndetermined.delete(destKey);
       }
 
       // Handle destination
@@ -1218,6 +1276,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, dtc.key, curDest));
           ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, dtc.key, { pos: curDest.pos, type: dtc.prevType }));
         }
+      }
+
+      // Revert dest determination (restore undetermined state)
+      if (step.destDetermination) {
+        newUndetermined.set(step.destDetermination.key, {
+          ...step.destDetermination.prevUndeterminedInfo,
+          options: [...step.destDetermination.prevUndeterminedInfo.options],
+        });
       }
 
       // Remove pipe
