@@ -198,7 +198,7 @@ function TypedInstances({
     const b = blocksRef.current;
     if (e.instanceId == null || e.instanceId >= b.length) return;
     const store = useBlockStore.getState();
-    if (store.mode === "delete" || store.mode === "select") {
+    if (store.mode === "delete" || store.mode === "select" || store.mode === "build") {
       // Read the actual block type from the instance, not the group prop
       store.setHoveredGridPos(b[e.instanceId].pos, b[e.instanceId].type);
     } else {
