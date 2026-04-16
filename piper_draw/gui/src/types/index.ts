@@ -145,6 +145,11 @@ export function pipeVariantPair(v: PipeVariant): [PipeVariant, PipeVariant] {
   return v.endsWith("H") ? [v.slice(0, -1) as PipeVariant, v] : [v, (v + "H") as PipeVariant];
 }
 
+/** Toggle the Hadamard flag on a pipe type: OZX ↔ OZXH, etc. */
+export function toggleHadamard(pt: PipeType): PipeType {
+  return (pt.endsWith("H") ? pt.slice(0, -1) : pt + "H") as PipeType;
+}
+
 export function resolvePipeType(variant: PipeVariant, pos: Position3D): PipeType | null {
   const axis = pipeAxisFromPos(pos);
   if (axis === null) return null;

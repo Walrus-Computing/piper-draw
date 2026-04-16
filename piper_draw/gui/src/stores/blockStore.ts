@@ -25,6 +25,8 @@ import {
   CUBE_TYPES,
   PIPE_VARIANTS,
   VARIANT_AXIS_MAP,
+  toggleHadamard,
+  swapPipeVariant,
 } from "../types";
 
 export type Mode = "place" | "delete" | "select" | "build";
@@ -1006,7 +1008,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     }
 
     // Infer pipe type from source
-    const pipeType = inferPipeType(srcType, direction.tqecAxis);
+    let pipeType = inferPipeType(srcType, direction.tqecAxis);
     if (!pipeType) return false;
 
     // Validate pipe position and overlap
@@ -1038,7 +1040,30 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       } else if (destOptions.options.length > 0) {
         destTypeChange = { key: destKey, prevType: currentDestType, newType: destOptions.options[0] };
       } else {
-        return reject("Cube colors don't match the adjacent pipe"); // No valid type exists for dest with this pipe
+        // No valid dest type with current pipe — try Hadamard variant.
+        // For positive direction, source is at the head (not swapped by H) so
+        // a simple H toggle preserves the source match.
+        // For negative direction, source is at the tail (swapped by H) so we
+        // need the swapped-base + H variant to keep source colours intact.
+        const hPipeType: PipeType = direction.sign > 0
+          ? toggleHadamard(pipeType)
+          : (swapPipeVariant(pipeType) + "H") as PipeType;
+
+        tmpBlocks.set(pipeKey, { pos: pipePos, type: hPipeType });
+        const destOpts2 = determineCubeOptions(destPos, tmpBlocks);
+        if (destOpts2.determined) {
+          pipeType = hPipeType;
+          if (destOpts2.type !== currentDestType) {
+            destTypeChange = { key: destKey, prevType: currentDestType, newType: destOpts2.type };
+          }
+        } else if (destOpts2.options.includes(currentDestType)) {
+          pipeType = hPipeType;
+        } else if (destOpts2.options.length > 0) {
+          pipeType = hPipeType;
+          destTypeChange = { key: destKey, prevType: currentDestType, newType: destOpts2.options[0] };
+        } else {
+          return reject("Cube colors don't match the adjacent pipe");
+        }
       }
     } else {
       // Validate destination position and check for overlap with non-cube blocks
