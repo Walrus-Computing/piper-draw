@@ -1008,128 +1008,151 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     let sourceDetermination: BuildStep["sourceDetermination"];
     let sourceRetype: BuildStep["sourceRetype"];
 
-    if (isEmptyOrigin) {
-      // First step on empty canvas — pick a valid cube type for this build axis
-      const validOrigin = CUBE_TYPES.filter(ct => inferPipeType(ct, direction.tqecAxis) !== null);
-      if (validOrigin.length === 0) return false;
-      srcType = validOrigin[0];
-    } else if (srcBlock!.type === "Y" || isPipeType(srcBlock!.type)) {
-      return false;
-    } else if (isUndetermined) {
-      // Source is undetermined — always commit when building away.
-      // Filter to options that can pipe on this axis.
-      const info = state.undeterminedCubes.get(srcKey)!;
-      const validForDir = info.options.filter(opt => inferPipeType(opt, direction.tqecAxis) !== null);
-      if (validForDir.length === 0) return reject("Cannot build in this direction from undetermined cube");
-
-      // Check if all valid options produce the same pipe type
-      const pipeSet = new Set(validForDir.map(opt => inferPipeType(opt, direction.tqecAxis)));
-      if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first"); // Truly ambiguous — different pipe types, must cycle (R)
-
-      // Prefer current type if it's valid for this direction
-      const currentType = srcBlock!.type as CubeType;
-      srcType = validForDir.includes(currentType) ? currentType : validForDir[0];
-      // Always commit undetermined source
-      sourceDetermination = {
-        key: srcKey,
-        prevType: currentType,
-        prevUndeterminedInfo: { ...info, options: [...info.options] },
-      };
+    if (state.freeBuild) {
+      // --- Free build: never change existing block/pipe types ---
+      if (isEmptyOrigin) {
+        const validOrigin = CUBE_TYPES.filter(ct => inferPipeType(ct, direction.tqecAxis) !== null);
+        srcType = validOrigin.length > 0 ? validOrigin[0] : CUBE_TYPES[0];
+      } else if (srcBlock!.type === "Y" || isPipeType(srcBlock!.type)) {
+        return false;
+      } else {
+        srcType = srcBlock!.type as CubeType;
+      }
     } else {
-      srcType = srcBlock!.type as CubeType;
+      if (isEmptyOrigin) {
+        // First step on empty canvas — pick a valid cube type for this build axis
+        const validOrigin = CUBE_TYPES.filter(ct => inferPipeType(ct, direction.tqecAxis) !== null);
+        if (validOrigin.length === 0) return false;
+        srcType = validOrigin[0];
+      } else if (srcBlock!.type === "Y" || isPipeType(srcBlock!.type)) {
+        return false;
+      } else if (isUndetermined) {
+        // Source is undetermined — always commit when building away.
+        // Filter to options that can pipe on this axis.
+        const info = state.undeterminedCubes.get(srcKey)!;
+        const validForDir = info.options.filter(opt => inferPipeType(opt, direction.tqecAxis) !== null);
+        if (validForDir.length === 0) return reject("Cannot build in this direction from undetermined cube");
 
-      // If current type can't pipe in this direction, try retyping via open axis
-      if (!inferPipeType(srcType, direction.tqecAxis)) {
-        const options = determineCubeOptions(cursor, state.blocks);
-        const candidates = options.determined ? [options.type] : options.options;
-        const validForDir = candidates.filter(ct => inferPipeType(ct, direction.tqecAxis) !== null);
-        if (validForDir.length === 0) return reject("Cube colors don't match — cannot build in this direction");
-        const pipeSet = new Set(validForDir.map(ct => inferPipeType(ct, direction.tqecAxis)));
-        if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first"); // Ambiguous — user must cycle (R)
-        sourceRetype = { key: srcKey, prevType: srcType };
-        srcType = validForDir[0];
+        // Check if all valid options produce the same pipe type
+        const pipeSet = new Set(validForDir.map(opt => inferPipeType(opt, direction.tqecAxis)));
+        if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first"); // Truly ambiguous — different pipe types, must cycle (R)
+
+        // Prefer current type if it's valid for this direction
+        const currentType = srcBlock!.type as CubeType;
+        srcType = validForDir.includes(currentType) ? currentType : validForDir[0];
+        // Always commit undetermined source
+        sourceDetermination = {
+          key: srcKey,
+          prevType: currentType,
+          prevUndeterminedInfo: { ...info, options: [...info.options] },
+        };
+      } else {
+        srcType = srcBlock!.type as CubeType;
+
+        // If current type can't pipe in this direction, try retyping via open axis
+        if (!inferPipeType(srcType, direction.tqecAxis)) {
+          const options = determineCubeOptions(cursor, state.blocks);
+          const candidates = options.determined ? [options.type] : options.options;
+          const validForDir = candidates.filter(ct => inferPipeType(ct, direction.tqecAxis) !== null);
+          if (validForDir.length === 0) return reject("Cube colors don't match — cannot build in this direction");
+          const pipeSet = new Set(validForDir.map(ct => inferPipeType(ct, direction.tqecAxis)));
+          if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first"); // Ambiguous — user must cycle (R)
+          sourceRetype = { key: srcKey, prevType: srcType };
+          srcType = validForDir[0];
+        }
       }
     }
 
-    // Infer pipe type from source
+    // Infer pipe type from source — in free build mode, fall back to default pipe for axis
     let pipeType = inferPipeType(srcType, direction.tqecAxis);
-    if (!pipeType) return false;
+    if (!pipeType) {
+      if (state.freeBuild) {
+        pipeType = VARIANT_AXIS_MAP["ZX"][direction.tqecAxis];
+      } else {
+        return false;
+      }
+    }
 
     // Validate pipe position and overlap
     if (!isValidPos(pipePos, pipeType)) return reject("Invalid pipe position");
     if (hasBlockOverlap(pipePos, pipeType, state.blocks, state.spatialIndex)) return reject("Pipe would overlap existing blocks");
 
     // Y cube pipe axis conflict: Y cubes only work with Z-open pipes
-    if (hasYCubePipeAxisConflict(pipeType, pipePos, state.blocks)) return reject("Y blocks only work with Z-open pipes");
+    if (!state.freeBuild && hasYCubePipeAxisConflict(pipeType, pipePos, state.blocks)) return reject("Y blocks only work with Z-open pipes");
 
     // Check if destination already has a cube
     const existingDest = state.blocks.get(destKey);
     let destTypeChange: BuildStep["destTypeChange"];
     if (existingDest) {
       if (existingDest.type === "Y" || isPipeType(existingDest.type)) return reject();
-      // Destination exists — check if current type is compatible, auto-retype if needed
-      const tmpBlocks = new Map(state.blocks);
-      if (sourceDetermination || isEmptyOrigin) {
-        tmpBlocks.set(srcKey, { pos: cursor, type: srcType });
-      }
-      tmpBlocks.set(pipeKey, { pos: pipePos, type: pipeType });
-      const destOptions = determineCubeOptions(destPos, tmpBlocks);
-      const currentDestType = existingDest.type as CubeType;
-      if (destOptions.determined) {
-        if (destOptions.type !== currentDestType) {
-          destTypeChange = { key: destKey, prevType: currentDestType, newType: destOptions.type };
+      if (!state.freeBuild) {
+        // Destination exists — check if current type is compatible, auto-retype if needed
+        const tmpBlocks = new Map(state.blocks);
+        if (sourceDetermination || isEmptyOrigin) {
+          tmpBlocks.set(srcKey, { pos: cursor, type: srcType });
         }
-      } else if (destOptions.options.includes(currentDestType)) {
-        // Current type is still valid — keep it
-      } else if (destOptions.options.length > 0) {
-        destTypeChange = { key: destKey, prevType: currentDestType, newType: destOptions.options[0] };
-      } else {
-        // No valid dest type with current pipe — try Hadamard variant.
-        // For positive direction, source is at the head (not swapped by H) so
-        // a simple H toggle preserves the source match.
-        // For negative direction, source is at the tail (swapped by H) so we
-        // need the swapped-base + H variant to keep source colours intact.
-        const hPipeType: PipeType = direction.sign > 0
-          ? toggleHadamard(pipeType)
-          : (swapPipeVariant(pipeType) + "H") as PipeType;
-
-        tmpBlocks.set(pipeKey, { pos: pipePos, type: hPipeType });
-        const destOpts2 = determineCubeOptions(destPos, tmpBlocks);
-        if (destOpts2.determined) {
-          pipeType = hPipeType;
-          if (destOpts2.type !== currentDestType) {
-            destTypeChange = { key: destKey, prevType: currentDestType, newType: destOpts2.type };
+        tmpBlocks.set(pipeKey, { pos: pipePos, type: pipeType });
+        const destOptions = determineCubeOptions(destPos, tmpBlocks);
+        const currentDestType = existingDest.type as CubeType;
+        if (destOptions.determined) {
+          if (destOptions.type !== currentDestType) {
+            destTypeChange = { key: destKey, prevType: currentDestType, newType: destOptions.type };
           }
-        } else if (destOpts2.options.includes(currentDestType)) {
-          pipeType = hPipeType;
-        } else if (destOpts2.options.length > 0) {
-          pipeType = hPipeType;
-          destTypeChange = { key: destKey, prevType: currentDestType, newType: destOpts2.options[0] };
+        } else if (destOptions.options.includes(currentDestType)) {
+          // Current type is still valid — keep it
+        } else if (destOptions.options.length > 0) {
+          destTypeChange = { key: destKey, prevType: currentDestType, newType: destOptions.options[0] };
         } else {
-          return reject("Cube colors don't match the adjacent pipe");
+          // No valid dest type with current pipe — try Hadamard variant.
+          // For positive direction, source is at the head (not swapped by H) so
+          // a simple H toggle preserves the source match.
+          // For negative direction, source is at the tail (swapped by H) so we
+          // need the swapped-base + H variant to keep source colours intact.
+          const hPipeType: PipeType = direction.sign > 0
+            ? toggleHadamard(pipeType)
+            : (swapPipeVariant(pipeType) + "H") as PipeType;
+
+          tmpBlocks.set(pipeKey, { pos: pipePos, type: hPipeType });
+          const destOpts2 = determineCubeOptions(destPos, tmpBlocks);
+          if (destOpts2.determined) {
+            pipeType = hPipeType;
+            if (destOpts2.type !== currentDestType) {
+              destTypeChange = { key: destKey, prevType: currentDestType, newType: destOpts2.type };
+            }
+          } else if (destOpts2.options.includes(currentDestType)) {
+            pipeType = hPipeType;
+          } else if (destOpts2.options.length > 0) {
+            pipeType = hPipeType;
+            destTypeChange = { key: destKey, prevType: currentDestType, newType: destOpts2.options[0] };
+          } else {
+            return reject("Cube colors don't match the adjacent pipe");
+          }
         }
       }
+      // In free build mode: no destTypeChange, no Hadamard switching — keep dest as-is
     } else {
       // Validate destination position and check for overlap with non-cube blocks
       if (!isValidPos(destPos, "XZZ")) return reject("Invalid destination position");
       if (hasBlockOverlap(destPos, "XZZ", state.blocks, state.spatialIndex)) return reject("Destination would overlap existing blocks");
 
-      // Pre-check: if existing pipes at destPos conflict with the inferred pipe,
-      // try the Hadamard variant (mirrors the existing-dest logic above).
-      const tmpBlocks = new Map(state.blocks);
-      if (sourceDetermination || isEmptyOrigin) {
-        tmpBlocks.set(srcKey, { pos: cursor, type: srcType });
-      }
-      tmpBlocks.set(pipeKey, { pos: pipePos, type: pipeType });
-      const preDestOptions = determineCubeOptions(destPos, tmpBlocks);
-      if (!preDestOptions.determined && preDestOptions.options.length === 0) {
-        const hPipeType: PipeType = direction.sign > 0
-          ? toggleHadamard(pipeType)
-          : (swapPipeVariant(pipeType) + "H") as PipeType;
-        tmpBlocks.set(pipeKey, { pos: pipePos, type: hPipeType });
-        const preDestOptions2 = determineCubeOptions(destPos, tmpBlocks);
-        if (preDestOptions2.determined || preDestOptions2.options.length > 0) {
-          pipeType = hPipeType;
+      if (!state.freeBuild) {
+        // Pre-check: if existing pipes at destPos conflict with the inferred pipe,
+        // try the Hadamard variant (mirrors the existing-dest logic above).
+        const tmpBlocks = new Map(state.blocks);
+        if (sourceDetermination || isEmptyOrigin) {
+          tmpBlocks.set(srcKey, { pos: cursor, type: srcType });
+        }
+        tmpBlocks.set(pipeKey, { pos: pipePos, type: pipeType });
+        const preDestOptions = determineCubeOptions(destPos, tmpBlocks);
+        if (!preDestOptions.determined && preDestOptions.options.length === 0) {
+          const hPipeType: PipeType = direction.sign > 0
+            ? toggleHadamard(pipeType)
+            : (swapPipeVariant(pipeType) + "H") as PipeType;
+          tmpBlocks.set(pipeKey, { pos: pipePos, type: hPipeType });
+          const preDestOptions2 = determineCubeOptions(destPos, tmpBlocks);
+          if (preDestOptions2.determined || preDestOptions2.options.length > 0) {
+            pipeType = hPipeType;
+          }
         }
       }
     }
@@ -1147,21 +1170,23 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         originCubeEntry = { key: srcKey, block: originBlock };
       }
 
-      // Apply source determination (commit undetermined source to chosen type)
-      if (sourceDetermination) {
-        const oldSrc = blocks.get(srcKey)!;
-        ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, srcKey, oldSrc));
-        const newSrc: Block = { pos: cursor, type: srcType };
-        ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, srcKey, newSrc));
-        newUndetermined.delete(srcKey);
-      }
+      if (!state.freeBuild) {
+        // Apply source determination (commit undetermined source to chosen type)
+        if (sourceDetermination) {
+          const oldSrc = blocks.get(srcKey)!;
+          ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, srcKey, oldSrc));
+          const newSrc: Block = { pos: cursor, type: srcType };
+          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, srcKey, newSrc));
+          newUndetermined.delete(srcKey);
+        }
 
-      // Apply source retype (determined cube retyped for new pipe direction)
-      if (sourceRetype) {
-        const oldSrc = blocks.get(srcKey)!;
-        ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, srcKey, oldSrc));
-        const newSrc: Block = { pos: cursor, type: srcType };
-        ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, srcKey, newSrc));
+        // Apply source retype (determined cube retyped for new pipe direction)
+        if (sourceRetype) {
+          const oldSrc = blocks.get(srcKey)!;
+          ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, srcKey, oldSrc));
+          const newSrc: Block = { pos: cursor, type: srcType };
+          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, srcKey, newSrc));
+        }
       }
 
       // Place pipe
@@ -1170,7 +1195,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       // Check if origin cube should be undetermined (placed before the pipe was known)
       let originUndetermined: UndeterminedCubeInfo | undefined;
-      if (isEmptyOrigin) {
+      if (isEmptyOrigin && !state.freeBuild) {
         const originOptions = determineCubeOptions(cursor, blocks);
         if (!originOptions.determined && originOptions.options.length > 1) {
           const idx = Math.max(0, originOptions.options.indexOf(srcType));
@@ -1191,7 +1216,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       // A new pipe was explicitly built to this cube, so commit it even
       // when multiple options remain (the user can still cycle with R).
       let destDetermination: BuildStep["destDetermination"];
-      if (existingDest && newUndetermined.has(destKey)) {
+      if (!state.freeBuild && existingDest && newUndetermined.has(destKey)) {
         destDetermination = { key: destKey, prevUndeterminedInfo: newUndetermined.get(destKey)! };
         newUndetermined.delete(destKey);
       }
@@ -1202,17 +1227,22 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       if (!existingDest) {
         // Determine destination cube type
-        const destOptions = determineCubeOptions(destPos, blocks);
         let destType: CubeType;
-        if (destOptions.determined) {
-          destType = destOptions.type;
-        } else if (destOptions.options.length > 0) {
-          destType = destOptions.options[0];
-          destUndetermined = { options: [...destOptions.options], currentIndex: 0 };
-          newUndetermined.set(destKey, destUndetermined);
-        } else {
-          // Shouldn't happen — pipe was valid
+        if (state.freeBuild) {
+          // In free build mode, use same type as source — no inference from pipes
           destType = srcType;
+        } else {
+          const destOptions = determineCubeOptions(destPos, blocks);
+          if (destOptions.determined) {
+            destType = destOptions.type;
+          } else if (destOptions.options.length > 0) {
+            destType = destOptions.options[0];
+            destUndetermined = { options: [...destOptions.options], currentIndex: 0 };
+            newUndetermined.set(destKey, destUndetermined);
+          } else {
+            // Shouldn't happen — pipe was valid
+            destType = srcType;
+          }
         }
         const destBlock: Block = { pos: destPos, type: destType };
         ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, destKey, destBlock));
@@ -1383,16 +1413,21 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           }
         }
       }
-      if (pipeCount > 1) return state;
 
-      // Determine valid cube type options
-      const cubeOptions: (CubeType | "Y")[] = pipeCount === 0
-        ? [...CUBE_TYPES]
-        : (() => {
-            const result = determineCubeOptions(cursor, state.blocks);
-            return result.determined ? [result.type] : result.options;
-          })();
-      if (yValid) cubeOptions.push("Y");
+      // In free build mode, offer all types unconditionally
+      let cubeOptions: (CubeType | "Y")[];
+      if (state.freeBuild) {
+        cubeOptions = [...CUBE_TYPES, "Y"];
+      } else {
+        if (pipeCount > 1) return state;
+        cubeOptions = pipeCount === 0
+          ? [...CUBE_TYPES]
+          : (() => {
+              const result = determineCubeOptions(cursor, state.blocks);
+              return result.determined ? [result.type] : result.options;
+            })();
+        if (yValid) cubeOptions.push("Y");
+      }
       if (cubeOptions.length === 0) return state;
 
       // Cycle: undetermined → type1 → type2 → ... → Y (if valid) → undetermined
@@ -1444,7 +1479,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock));
 
       // Update adjacent pipes to match new cube type (skip for Y — Y doesn't change pipes)
-      if (placeType !== "Y") {
+      // In free build mode, skip pipe retyping entirely — just change the cube
+      if (placeType !== "Y" && !state.freeBuild) {
         for (let axis = 0; axis < 3; axis++) {
           for (const pipeOffset of [1, -2]) {
             const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
@@ -1532,9 +1568,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     const cursorCoords: [number, number, number] = [cursor.x, cursor.y, cursor.z];
 
     // Find adjacent pipes where either end (cursor or far cube) is undetermined
+    // In free build mode, any adjacent pipe is eligible for cycling
     const cursorKey = posKey(cursor);
     const cursorUndetermined = state.undeterminedCubes.has(cursorKey);
-    const undeterminedPipes: { key: string; block: Block }[] = [];
+    const candidatePipes: { key: string; block: Block }[] = [];
     for (let axis = 0; axis < 3; axis++) {
       for (const offset of [1, -2]) {
         const pc: [number, number, number] = [cursorCoords[0], cursorCoords[1], cursorCoords[2]];
@@ -1544,24 +1581,29 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (!pipe || !isPipeType(pipe.type)) continue;
         const pipeBase = (pipe.type as string).replace("H", "");
         if (pipeBase.indexOf("O") !== axis) continue;
-        // Check if the far cube is undetermined
-        const fc: [number, number, number] = [cursorCoords[0], cursorCoords[1], cursorCoords[2]];
-        fc[axis] += offset === 1 ? 3 : -3;
-        const farKey = posKey({ x: fc[0], y: fc[1], z: fc[2] });
-        if (cursorUndetermined || state.undeterminedCubes.has(farKey)) {
-          undeterminedPipes.push({ key: pk, block: pipe });
+        if (state.freeBuild) {
+          candidatePipes.push({ key: pk, block: pipe });
+        } else {
+          // Check if the far cube is undetermined
+          const fc: [number, number, number] = [cursorCoords[0], cursorCoords[1], cursorCoords[2]];
+          fc[axis] += offset === 1 ? 3 : -3;
+          const farKey = posKey({ x: fc[0], y: fc[1], z: fc[2] });
+          if (cursorUndetermined || state.undeterminedCubes.has(farKey)) {
+            candidatePipes.push({ key: pk, block: pipe });
+          }
         }
       }
     }
 
-    if (undeterminedPipes.length === 0) return;
-    if (undeterminedPipes.length > 1) {
+    if (candidatePipes.length === 0) return;
+    if (!state.freeBuild && candidatePipes.length > 1) {
       set({ hoveredInvalidReason: "Multiple undetermined pipes — cannot cycle" });
       return;
     }
 
-    const pipeKey = undeterminedPipes[0].key;
-    const pipeBlock = undeterminedPipes[0].block;
+    // In free build mode with multiple pipes, just cycle the first one
+    const pipeKey = candidatePipes[0].key;
+    const pipeBlock = candidatePipes[0].block;
     if (!isPipeType(pipeBlock.type)) return;
 
     const oldPipeType = pipeBlock.type as PipeType;
@@ -1573,21 +1615,27 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     const allCandidates = PIPE_VARIANTS.map(v => VARIANT_AXIS_MAP[v][openAxis]);
 
     // Filter to valid candidates: both neighbor cubes must have valid options
-    const validPipes: PipeType[] = [];
-    for (const candidate of allCandidates) {
-      const tmpBlocks = new Map(state.blocks);
-      tmpBlocks.set(pipeKey, { pos: pipeBlock.pos, type: candidate });
-      let valid = true;
-      for (const offset of [-1, 2]) {
-        const nCoords: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
-        nCoords[openAxis] += offset;
-        const nKey = posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
-        const neighbor = tmpBlocks.get(nKey);
-        if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
-        const options = determineCubeOptions(neighbor.pos, tmpBlocks);
-        if (!options.determined && options.options.length === 0) { valid = false; break; }
+    // In free build mode, all candidates are valid
+    let validPipes: PipeType[];
+    if (state.freeBuild) {
+      validPipes = allCandidates;
+    } else {
+      validPipes = [];
+      for (const candidate of allCandidates) {
+        const tmpBlocks = new Map(state.blocks);
+        tmpBlocks.set(pipeKey, { pos: pipeBlock.pos, type: candidate });
+        let valid = true;
+        for (const offset of [-1, 2]) {
+          const nCoords: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
+          nCoords[openAxis] += offset;
+          const nKey = posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
+          const neighbor = tmpBlocks.get(nKey);
+          if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
+          const options = determineCubeOptions(neighbor.pos, tmpBlocks);
+          if (!options.determined && options.options.length === 0) { valid = false; break; }
+        }
+        if (valid) validPipes.push(candidate);
       }
-      if (valid) validPipes.push(candidate);
     }
 
     if (validPipes.length <= 1) return;
@@ -1599,6 +1647,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
     // --- Dry-run pass: validate all neighbors using a temp blocks map ---
     // No spatial index mutations happen here.
+    // In free build mode, skip validation and don't auto-retype neighbors.
     const tmpBlocks = new Map(state.blocks);
     tmpBlocks.set(pipeKey, { pos: pipeBlock.pos, type: newPipeType });
 
@@ -1606,32 +1655,34 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       oldUndetermined?: UndeterminedCubeInfo; newUndetermined?: UndeterminedCubeInfo };
     const planned: RetypeEntry[] = [];
 
-    for (const offset of [-1, 2]) {
-      const nCoords: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
-      nCoords[openAxis] += offset;
-      const nKey = posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
-      const neighbor = tmpBlocks.get(nKey);
-      if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
+    if (!state.freeBuild) {
+      for (const offset of [-1, 2]) {
+        const nCoords: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
+        nCoords[openAxis] += offset;
+        const nKey = posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
+        const neighbor = tmpBlocks.get(nKey);
+        if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
 
-      const cubeInfo = state.undeterminedCubes.get(nKey);
-      const newOptions = determineCubeOptions(neighbor.pos, tmpBlocks);
-      const currentType = neighbor.type as CubeType;
+        const cubeInfo = state.undeterminedCubes.get(nKey);
+        const newOptions = determineCubeOptions(neighbor.pos, tmpBlocks);
+        const currentType = neighbor.type as CubeType;
 
-      if (newOptions.determined) {
-        if (newOptions.type !== currentType) {
-          planned.push({ key: nKey, pos: neighbor.pos, oldType: currentType, newType: newOptions.type,
-            oldUndetermined: cubeInfo, newUndetermined: undefined });
+        if (newOptions.determined) {
+          if (newOptions.type !== currentType) {
+            planned.push({ key: nKey, pos: neighbor.pos, oldType: currentType, newType: newOptions.type,
+              oldUndetermined: cubeInfo, newUndetermined: undefined });
+          }
+        } else if (newOptions.options.length > 0) {
+          if (!newOptions.options.includes(currentType)) {
+            const newInfo = cubeInfo ? { options: [...newOptions.options], currentIndex: 0 } : undefined;
+            planned.push({ key: nKey, pos: neighbor.pos, oldType: currentType, newType: newOptions.options[0],
+              oldUndetermined: cubeInfo, newUndetermined: newInfo });
+          }
+          // else: current type still valid, no retype needed
+        } else {
+          // No valid type — reject Hadamard toggle. No mutations happened.
+          return;
         }
-      } else if (newOptions.options.length > 0) {
-        if (!newOptions.options.includes(currentType)) {
-          const newInfo = cubeInfo ? { options: [...newOptions.options], currentIndex: 0 } : undefined;
-          planned.push({ key: nKey, pos: neighbor.pos, oldType: currentType, newType: newOptions.options[0],
-            oldUndetermined: cubeInfo, newUndetermined: newInfo });
-        }
-        // else: current type still valid, no retype needed
-      } else {
-        // No valid type — reject Hadamard toggle. No mutations happened.
-        return;
       }
     }
 
