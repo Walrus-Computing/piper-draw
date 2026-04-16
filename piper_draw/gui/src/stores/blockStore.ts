@@ -922,6 +922,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     const destKey = posKey(destPos);
     const srcKey = posKey(cursor);
 
+    const reject = (reason?: string) => {
+      if (reason) set({ hoveredInvalidReason: reason });
+      return false;
+    };
+
     // If pipe already exists, just move cursor to destination if it has a cube
     const existingPipe = state.blocks.get(pipeKey);
     if (existingPipe) {
@@ -932,10 +937,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           buildCursor: destPos,
           cameraSnapTarget: { azimuth, targetPos: destPos },
           lastBuildAxis: direction.tqecAxis,
+          hoveredInvalidReason: null,
         });
         return true;
       }
-      return false;
+      return reject();
     }
 
     const srcBlock = state.blocks.get(srcKey);
@@ -959,11 +965,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       // Filter to options that can pipe on this axis.
       const info = state.undeterminedCubes.get(srcKey)!;
       const validForDir = info.options.filter(opt => inferPipeType(opt, direction.tqecAxis) !== null);
-      if (validForDir.length === 0) return false;
+      if (validForDir.length === 0) return reject("Cannot build in this direction from undetermined cube");
 
       // Check if all valid options produce the same pipe type
       const pipeSet = new Set(validForDir.map(opt => inferPipeType(opt, direction.tqecAxis)));
-      if (pipeSet.size > 1) return false; // Truly ambiguous — different pipe types, must cycle (R)
+      if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first"); // Truly ambiguous — different pipe types, must cycle (R)
 
       // Prefer current type if it's valid for this direction
       const currentType = srcBlock!.type as CubeType;
@@ -982,9 +988,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const options = determineCubeOptions(cursor, state.blocks);
         const candidates = options.determined ? [options.type] : options.options;
         const validForDir = candidates.filter(ct => inferPipeType(ct, direction.tqecAxis) !== null);
-        if (validForDir.length === 0) return false;
+        if (validForDir.length === 0) return reject("Cube colors don't match — cannot build in this direction");
         const pipeSet = new Set(validForDir.map(ct => inferPipeType(ct, direction.tqecAxis)));
-        if (pipeSet.size > 1) return false; // Ambiguous — user must cycle (R)
+        if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first"); // Ambiguous — user must cycle (R)
         sourceRetype = { key: srcKey, prevType: srcType };
         srcType = validForDir[0];
       }
@@ -995,17 +1001,17 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     if (!pipeType) return false;
 
     // Validate pipe position and overlap
-    if (!isValidPos(pipePos, pipeType)) return false;
-    if (hasBlockOverlap(pipePos, pipeType, state.blocks, state.spatialIndex)) return false;
+    if (!isValidPos(pipePos, pipeType)) return reject("Invalid pipe position");
+    if (hasBlockOverlap(pipePos, pipeType, state.blocks, state.spatialIndex)) return reject("Pipe would overlap existing blocks");
 
     // Y cube pipe axis conflict: Y cubes only work with Z-open pipes
-    if (hasYCubePipeAxisConflict(pipeType, pipePos, state.blocks)) return false;
+    if (hasYCubePipeAxisConflict(pipeType, pipePos, state.blocks)) return reject("Y blocks only work with Z-open pipes");
 
     // Check if destination already has a cube
     const existingDest = state.blocks.get(destKey);
     let destTypeChange: BuildStep["destTypeChange"];
     if (existingDest) {
-      if (existingDest.type === "Y" || isPipeType(existingDest.type)) return false;
+      if (existingDest.type === "Y" || isPipeType(existingDest.type)) return reject();
       // Destination exists — check if current type is compatible, auto-retype if needed
       const tmpBlocks = new Map(state.blocks);
       if (sourceDetermination || isEmptyOrigin) {
@@ -1023,12 +1029,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       } else if (destOptions.options.length > 0) {
         destTypeChange = { key: destKey, prevType: currentDestType, newType: destOptions.options[0] };
       } else {
-        return false; // No valid type exists for dest with this pipe
+        return reject("Cube colors don't match the adjacent pipe"); // No valid type exists for dest with this pipe
       }
     } else {
       // Validate destination position and check for overlap with non-cube blocks
-      if (!isValidPos(destPos, "XZZ")) return false;
-      if (hasBlockOverlap(destPos, "XZZ", state.blocks, state.spatialIndex)) return false;
+      if (!isValidPos(destPos, "XZZ")) return reject("Invalid destination position");
+      if (hasBlockOverlap(destPos, "XZZ", state.blocks, state.spatialIndex)) return reject("Destination would overlap existing blocks");
     }
 
     // All validation passed — apply mutations
@@ -1146,6 +1152,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         lastBuildAxis: direction.tqecAxis,
         history: [...s.history, { kind: "build-step" as const, step }].slice(-MAX_HISTORY),
         future: [],
+        hoveredInvalidReason: null,
       };
     });
     return true;
@@ -1419,15 +1426,43 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
   cyclePipe: () => {
     const state = get();
-    if (state.mode !== "build" || state.buildHistory.length === 0) return;
+    if (state.mode !== "build" || !state.buildCursor) return;
 
-    // Find last pipe in build history
-    const lastStep = state.buildHistory[state.buildHistory.length - 1];
-    if (!lastStep.pipe) return;
+    const cursor = state.buildCursor;
+    const cursorCoords: [number, number, number] = [cursor.x, cursor.y, cursor.z];
 
-    const pipeKey = lastStep.pipe.key;
-    const pipeBlock = state.blocks.get(pipeKey);
-    if (!pipeBlock || !isPipeType(pipeBlock.type)) return;
+    // Find adjacent pipes where either end (cursor or far cube) is undetermined
+    const cursorKey = posKey(cursor);
+    const cursorUndetermined = state.undeterminedCubes.has(cursorKey);
+    const undeterminedPipes: { key: string; block: Block }[] = [];
+    for (let axis = 0; axis < 3; axis++) {
+      for (const offset of [1, -2]) {
+        const pc: [number, number, number] = [cursorCoords[0], cursorCoords[1], cursorCoords[2]];
+        pc[axis] += offset;
+        const pk = posKey({ x: pc[0], y: pc[1], z: pc[2] });
+        const pipe = state.blocks.get(pk);
+        if (!pipe || !isPipeType(pipe.type)) continue;
+        const pipeBase = (pipe.type as string).replace("H", "");
+        if (pipeBase.indexOf("O") !== axis) continue;
+        // Check if the far cube is undetermined
+        const fc: [number, number, number] = [cursorCoords[0], cursorCoords[1], cursorCoords[2]];
+        fc[axis] += offset === 1 ? 3 : -3;
+        const farKey = posKey({ x: fc[0], y: fc[1], z: fc[2] });
+        if (cursorUndetermined || state.undeterminedCubes.has(farKey)) {
+          undeterminedPipes.push({ key: pk, block: pipe });
+        }
+      }
+    }
+
+    if (undeterminedPipes.length === 0) return;
+    if (undeterminedPipes.length > 1) {
+      set({ hoveredInvalidReason: "Multiple undetermined pipes — cannot cycle" });
+      return;
+    }
+
+    const pipeKey = undeterminedPipes[0].key;
+    const pipeBlock = undeterminedPipes[0].block;
+    if (!isPipeType(pipeBlock.type)) return;
 
     const oldPipeType = pipeBlock.type as PipeType;
     const oldBase = oldPipeType.replace("H", "");
@@ -1544,18 +1579,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         }
       }
 
-      // Update the build history's last step to reflect new pipe type
-      const newBuildHistory = [...s.buildHistory];
-      const lastH = { ...newBuildHistory[newBuildHistory.length - 1] };
-      lastH.pipe = { key: pipeKey, block: newPipeBlock };
-      newBuildHistory[newBuildHistory.length - 1] = lastH;
-
       const cmd: UndoCommand = { kind: "pipe-cycle", pipeKey, oldType: oldPipeType, newType: newPipeType,
         retyped: retyped.length > 0 ? retyped : undefined };
       return {
         blocks,
         hiddenFaces,
-        buildHistory: newBuildHistory,
         undeterminedCubes: newUndetermined,
         history: [...s.history, cmd].slice(-MAX_HISTORY),
         future: [],
@@ -1566,9 +1594,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   moveBuildCursor: (pos) =>
     set((state) => {
       if (state.mode !== "build") return state;
+      // Allow moving to any valid cube position (existing block or empty)
       const key = posKey(pos);
       const block = state.blocks.get(key);
-      if (!block || isPipeType(block.type)) return state;
+      if (block && isPipeType(block.type)) return state; // can't land on a pipe
       return {
         buildCursor: pos,
         buildHistory: [],

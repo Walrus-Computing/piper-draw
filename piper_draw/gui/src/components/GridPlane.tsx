@@ -79,7 +79,26 @@ export function GridPlane() {
     setHoveredGridPos(null);
   };
 
-  if (mode === "delete" || mode === "build") return null;
+  if (mode === "delete") return null;
+  if (mode === "build") {
+    return (
+      <mesh
+        ref={meshRef}
+        rotation-x={-Math.PI / 2}
+        position={[0, 0, 0]}
+        onClick={(e: ThreeEvent<MouseEvent>) => {
+          e.stopPropagation();
+          if (e.delta > 2) return;
+          const pos = snapGroundPos(e.point.x, -e.point.z, false);
+          useBlockStore.getState().moveBuildCursor(pos);
+        }}
+        onPointerLeave={handlePointerLeave}
+      >
+        <planeGeometry args={[PLANE_SIZE, PLANE_SIZE]} />
+        <meshBasicMaterial visible={false} side={THREE.FrontSide} />
+      </mesh>
+    );
+  }
   if (mode === "select") {
     return (
       <mesh

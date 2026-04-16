@@ -118,29 +118,53 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
     return opts.join(",");
   });
   const buildValidTypes = buildValidTypesStr != null ? new Set(buildValidTypesStr.split(",").filter(Boolean)) : null;
+  // Find the adjacent pipe connecting cursor to an undetermined cube (for R cycling)
+  const findUndeterminedPipeKey = (s: { buildCursor: Position3D | null; blocks: Map<string, { pos: Position3D; type: BlockType }>; undeterminedCubes: Map<string, unknown> }): string | null => {
+    if (!s.buildCursor) return null;
+    const cc: [number, number, number] = [s.buildCursor.x, s.buildCursor.y, s.buildCursor.z];
+    const cursorUndetermined = s.undeterminedCubes.has(posKey(s.buildCursor));
+    let found: string | null = null;
+    for (let axis = 0; axis < 3; axis++) {
+      for (const offset of [1, -2]) {
+        const pc: [number, number, number] = [cc[0], cc[1], cc[2]];
+        pc[axis] += offset;
+        const pk = posKey({ x: pc[0], y: pc[1], z: pc[2] });
+        const pipe = s.blocks.get(pk);
+        if (!pipe || !isPipeType(pipe.type)) continue;
+        if ((pipe.type as string).replace("H", "").indexOf("O") !== axis) continue;
+        const fc: [number, number, number] = [cc[0], cc[1], cc[2]];
+        fc[axis] += offset === 1 ? 3 : -3;
+        const farKey = posKey({ x: fc[0], y: fc[1], z: fc[2] });
+        if (cursorUndetermined || s.undeterminedCubes.has(farKey)) {
+          if (found !== null) return null; // 2+ undetermined pipes — can't determine which to cycle
+          found = pk;
+        }
+      }
+    }
+    return found;
+  };
   const buildActivePipeVariant = useBlockStore((s): PipeVariant | null => {
-    if (s.mode !== "build" || s.buildHistory.length === 0) return null;
-    const lastStep = s.buildHistory[s.buildHistory.length - 1];
-    if (!lastStep.pipe) return null;
-    const pipeBlock = s.blocks.get(lastStep.pipe.key);
+    if (s.mode !== "build") return null;
+    const pk = findUndeterminedPipeKey(s);
+    if (!pk) return null;
+    const pipeBlock = s.blocks.get(pk);
     if (!pipeBlock || !isPipeType(pipeBlock.type)) return null;
     return PIPE_TYPE_TO_VARIANT[pipeBlock.type as PipeType];
   });
   const buildValidPipeVariantsStr = useBlockStore((s): string | null => {
-    if (s.mode !== "build" || s.buildHistory.length === 0) return null;
-    const lastStep = s.buildHistory[s.buildHistory.length - 1];
-    if (!lastStep.pipe) return null;
-    const pipeBlock = s.blocks.get(lastStep.pipe.key);
+    if (s.mode !== "build") return null;
+    const pk = findUndeterminedPipeKey(s);
+    if (!pk) return null;
+    const pipeBlock = s.blocks.get(pk);
     if (!pipeBlock || !isPipeType(pipeBlock.type)) return null;
     const base = (pipeBlock.type as string).replace("H", "");
     const openAxis = base.indexOf("O") as 0 | 1 | 2;
     const pipeCoords: [number, number, number] = [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z];
-    // Check each variant's pipe type against neighbor cube constraints
     const valid: string[] = [];
     for (const v of PIPE_VARIANTS) {
       const candidate = VARIANT_AXIS_MAP[v][openAxis];
       const tmp = new Map(s.blocks);
-      tmp.set(lastStep.pipe.key, { pos: pipeBlock.pos, type: candidate });
+      tmp.set(pk, { pos: pipeBlock.pos, type: candidate });
       let ok = true;
       for (const offset of [-1, 2]) {
         const nc: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
