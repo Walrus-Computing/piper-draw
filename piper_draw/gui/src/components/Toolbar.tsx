@@ -355,7 +355,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
               style={blockBtnStyle(
                 (cubeType === ct && mode === "place") ||
                 (mode === "build" && buildCursorBlockType === ct),
-                mode === "build" && buildValidTypes != null && !buildValidTypes.has(ct),
+                mode === "build" && !freeBuild && buildValidTypes != null && !buildValidTypes.has(ct),
               )}
             >
               {ct}
@@ -370,7 +370,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
             style={blockBtnStyle(
               (cubeType === "Y" && mode === "place") ||
               (mode === "build" && buildCursorBlockType === "Y"),
-              mode === "build" && buildValidTypes != null && !buildValidTypes.has("Y" as CubeType),
+              mode === "build" && !freeBuild && buildValidTypes != null && !buildValidTypes.has("Y" as CubeType),
             )}
           >
             Y
@@ -396,7 +396,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
               style={blockBtnStyle(
                 (pipeVariant === v && mode === "place") ||
                 (mode === "build" && buildActivePipeVariant === v),
-                mode === "build" && (buildValidPipeVariants == null || !buildValidPipeVariants.has(v)),
+                mode === "build" && !freeBuild && (buildValidPipeVariants == null || !buildValidPipeVariants.has(v)),
               )}
             >
               {v}
