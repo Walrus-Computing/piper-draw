@@ -135,10 +135,12 @@ function SelectModeHints() {
   const mode = useBlockStore((s) => s.mode);
   if (mode !== "select") return null;
 
+  const altKey = isMac ? "⌥ Option+" : "Alt+";
   const hints = [
     ["Click", "Select"],
     ["Drag", "Box select"],
-    ["Alt+Drag", "Orbit"],
+    [`${altKey}Drag`, "Orbit"],
+    ["Right Drag", "Pan"],
     ["Shift+Click", "Add/remove"],
     [`${modKey}A`, "Select all"],
     ["Delete", "Delete selected"],
@@ -329,11 +331,11 @@ export default function App() {
             case "undo":
               store.undoBuildStep();
               return;
-            case "cycleCubeType":
-              store.cycleCubeType();
+            case "cycleBlock":
+              store.cycleBlock();
               return;
-            case "toggleHadamard":
-              store.toggleHadamard();
+            case "cyclePipe":
+              store.cyclePipe();
               return;
             case "exitBuild":
               store.setMode("place");
@@ -383,7 +385,7 @@ export default function App() {
   return (
     <>
       <Toolbar onResetCamera={() => controlsRef.current?.reset()} controlsRef={controlsRef} toolbarRef={toolbarRef} />
-      <ValidationToast toolbarRef={toolbarRef} />
+      <ValidationToast toolbarRef={toolbarRef} controlsRef={controlsRef} />
       <div
         onPointerDown={(e) => e.stopPropagation()}
         style={{

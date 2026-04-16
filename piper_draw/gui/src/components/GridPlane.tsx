@@ -49,11 +49,11 @@ export function GridPlane() {
       setHoveredGridPos(pos, blockType, true, undefined, isReplace);
     } else if (existing && existing.type === blockType) {
       setHoveredGridPos(null);
-    } else if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, store.blocks)) {
+    } else if (!store.freeBuild && isPipeType(blockType) && hasPipeColorConflict(blockType, pos, store.blocks)) {
       setHoveredGridPos(pos, blockType, true, "Pipe colors don't match the adjacent cube", isReplace);
-    } else if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, store.blocks)) {
+    } else if (!store.freeBuild && !isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, store.blocks)) {
       setHoveredGridPos(pos, blockType, true, "Cube colors don't match the adjacent pipe", isReplace);
-    } else if (hasYCubePipeAxisConflict(blockType, pos, store.blocks)) {
+    } else if (!store.freeBuild && hasYCubePipeAxisConflict(blockType, pos, store.blocks)) {
       setHoveredGridPos(pos, blockType, true, "Y cube cannot be next to an X-open or Y-open pipe", isReplace);
     } else {
       setHoveredGridPos(pos, blockType, false, undefined, isReplace);
@@ -79,7 +79,26 @@ export function GridPlane() {
     setHoveredGridPos(null);
   };
 
-  if (mode === "delete" || mode === "build") return null;
+  if (mode === "delete") return null;
+  if (mode === "build") {
+    return (
+      <mesh
+        ref={meshRef}
+        rotation-x={-Math.PI / 2}
+        position={[0, 0, 0]}
+        onClick={(e: ThreeEvent<MouseEvent>) => {
+          e.stopPropagation();
+          if (e.delta > 2) return;
+          const pos = snapGroundPos(e.point.x, -e.point.z, false);
+          useBlockStore.getState().moveBuildCursor(pos);
+        }}
+        onPointerLeave={handlePointerLeave}
+      >
+        <planeGeometry args={[PLANE_SIZE, PLANE_SIZE]} />
+        <meshBasicMaterial visible={false} side={THREE.FrontSide} />
+      </mesh>
+    );
+  }
   if (mode === "select") {
     return (
       <mesh

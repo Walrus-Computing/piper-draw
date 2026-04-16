@@ -134,6 +134,17 @@ export const VARIANT_AXIS_MAP: Record<PipeVariant, [PipeType, PipeType, PipeType
   XZH: ["OXZH", "ZOXH", "XZOH"],
 };
 
+/** Reverse lookup: concrete PipeType → toolbar PipeVariant. */
+export const PIPE_TYPE_TO_VARIANT: Record<PipeType, PipeVariant> = Object.fromEntries(
+  (Object.entries(VARIANT_AXIS_MAP) as [PipeVariant, PipeType[]][])
+    .flatMap(([variant, types]) => types.map((t) => [t, variant]))
+) as Record<PipeType, PipeVariant>;
+
+/** Returns the [nonH, H] pair for a given pipe variant. */
+export function pipeVariantPair(v: PipeVariant): [PipeVariant, PipeVariant] {
+  return v.endsWith("H") ? [v.slice(0, -1) as PipeVariant, v] : [v, (v + "H") as PipeVariant];
+}
+
 export function resolvePipeType(variant: PipeVariant, pos: Position3D): PipeType | null {
   const axis = pipeAxisFromPos(pos);
   if (axis === null) return null;
