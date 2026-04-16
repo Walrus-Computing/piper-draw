@@ -8,8 +8,31 @@ For now we follow the naming convention of cubes and pipes of TQEC. See [the ter
 The user can then press the **Export to Collada (.dae)** button.
 This package contains a test that verifies the exported `.dae` file is correctly understood by the TQEC package.
 
-## Usage
-- Start the app locally and build your diagram in the browser using `piperdraw` in the command line.
+## Getting started
+
+### Prerequisites
+- Python 3.14+
+- [uv](https://docs.astral.sh/uv/) (Python package manager)
+- Node.js and npm
+
+### Starting the webapp
+
+1. Install Python dependencies:
+   ```sh
+   uv sync
+   ```
+2. Install frontend dependencies:
+   ```sh
+   cd piper_draw/gui
+   npm install
+   ```
+3. Start the development server (runs both the frontend and backend):
+   ```sh
+   npm run dev
+   ```
+   This launches the Vite frontend dev server and the FastAPI backend (`uvicorn`). Open the URL shown in the terminal (typically http://localhost:5173) in your browser.
+
+### Usage
 - Assemble stack elements with drag-and-drop.
 - Export the design via the Collada export button to generate a `.dae` file.
 - Run the provided validation test to check `.dae` compatibility.
