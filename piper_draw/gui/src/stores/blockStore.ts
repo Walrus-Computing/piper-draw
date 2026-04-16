@@ -501,6 +501,29 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
             else newUndetermined.delete(rd.cubeKey);
           }
         }
+        // Re-evaluate undetermined neighbors not in retyped list
+        if (pipeBlock) {
+          const base = cmd.oldType.replace("H", "");
+          const openAxis = base.indexOf("O");
+          const pc: [number, number, number] = [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z];
+          for (const offset of [-1, 2]) {
+            const nc: [number, number, number] = [pc[0], pc[1], pc[2]];
+            nc[openAxis] += offset;
+            const nKey = posKey({ x: nc[0], y: nc[1], z: nc[2] });
+            if (cmd.retyped?.some(r => r.cubeKey === nKey)) continue;
+            const cubeInfo = newUndetermined.get(nKey);
+            if (!cubeInfo) continue;
+            const neighbor = blocks.get(nKey);
+            if (!neighbor) continue;
+            const newOptions = determineCubeOptions(neighbor.pos, blocks);
+            if (newOptions.determined) {
+              newUndetermined.delete(nKey);
+            } else if (newOptions.options.length > 0) {
+              const idx = Math.max(0, newOptions.options.indexOf(neighbor.type as CubeType));
+              newUndetermined.set(nKey, { options: [...newOptions.options], currentIndex: idx });
+            }
+          }
+        }
         return { blocks, hiddenFaces, history: newHistory, future: [cmd, ...state.future].slice(0, MAX_HISTORY), undeterminedCubes: newUndetermined, hoveredGridPos: null };
       }
 
@@ -771,6 +794,16 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const mask = getHiddenFaceMaskForPos(block.pos, block.type, incoming, newIndex);
         if (mask !== 0) newHidden.set(key, mask);
       }
+      // Recompute undetermined state from loaded blocks
+      const newUndetermined = new Map<string, UndeterminedCubeInfo>();
+      for (const [key, block] of incoming) {
+        if (isPipeType(block.type) || block.type === "Y") continue;
+        const opts = determineCubeOptions(block.pos, incoming);
+        if (!opts.determined && opts.options.length > 1) {
+          const idx = Math.max(0, opts.options.indexOf(block.type as CubeType));
+          newUndetermined.set(key, { options: [...opts.options], currentIndex: idx });
+        }
+      }
       const cmd: UndoCommand = {
         kind: "load",
         savedBlocks: state.blocks,
@@ -787,7 +820,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         history: [...state.history, cmd].slice(-MAX_HISTORY),
         future: [],
         hoveredGridPos: null,
-        undeterminedCubes: new Map(),
+        undeterminedCubes: newUndetermined,
       };
     }),
 
@@ -1173,6 +1206,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const reverted: Block = { pos: step.prevCursorPos, type: sr.prevType };
           ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, sr.key, reverted));
         }
+        // Check if reverted source should now be undetermined (fewer pipe constraints)
+        const srcOpts = determineCubeOptions(step.prevCursorPos, blocks);
+        if (!srcOpts.determined && srcOpts.options.length > 1) {
+          const idx = Math.max(0, srcOpts.options.indexOf(sr.prevType));
+          newUndetermined.set(sr.key, { options: [...srcOpts.options], currentIndex: idx });
+        } else {
+          newUndetermined.delete(sr.key);
+        }
       }
 
       // Remove origin cube if this was first step
@@ -1346,14 +1387,18 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         }
       }
 
-      // Update undetermined state
+      // Update undetermined state — recompute from current blocks (pipes may have changed)
       const newUndetermined = new Map(state.undeterminedCubes);
       let newUndeterminedInfo: UndeterminedCubeInfo | undefined;
-      if (isNextUndetermined && cubeOptions.filter((t): t is CubeType => t !== "Y").length > 1) {
-        // Restore undetermined with all valid CubeType options
-        const opts = cubeOptions.filter((t): t is CubeType => t !== "Y");
-        newUndeterminedInfo = { options: opts, currentIndex: 0 };
-        newUndetermined.set(cursorKey, newUndeterminedInfo);
+      if (isNextUndetermined) {
+        const freshOpts = determineCubeOptions(cursor, blocks);
+        const freshCubeOpts = freshOpts.determined ? [] : freshOpts.options;
+        if (freshCubeOpts.length > 1) {
+          newUndeterminedInfo = { options: [...freshCubeOpts], currentIndex: 0 };
+          newUndetermined.set(cursorKey, newUndeterminedInfo);
+        } else {
+          newUndetermined.delete(cursorKey);
+        }
       } else {
         newUndetermined.delete(cursorKey);
       }
