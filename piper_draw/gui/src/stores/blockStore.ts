@@ -269,7 +269,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       hoveredBlockType: null,
       hoveredInvalid: false,
       hoveredInvalidReason: null,
-      ...(mode === "place" ? { selectedKeys: new Set<string>() } : {}),
+      ...(mode !== "select" ? { selectedKeys: new Set<string>() } : {}),
     });
   },
   setCubeType: (cubeType) => set({ cubeType, pipeVariant: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
