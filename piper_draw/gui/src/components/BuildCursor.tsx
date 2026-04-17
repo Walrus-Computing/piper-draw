@@ -9,12 +9,16 @@ const cursorMaterial = new THREE.MeshBasicMaterial({
   transparent: true,
   opacity: 0.35,
   depthWrite: false,
+  depthTest: false,
   side: THREE.DoubleSide,
 });
 
 const cursorLineMaterial = new THREE.LineBasicMaterial({
   color: 0x333333,
   linewidth: 2,
+  transparent: true,
+  depthTest: false,
+  depthWrite: false,
 });
 
 // Default cube geometry for cursor (1x1x1 in Three.js)
@@ -33,11 +37,13 @@ function CursorBox({ position }: { position: [number, number, number] }) {
         geometry={defaultBox}
         material={cursorMaterial}
         raycast={noRaycast}
+        renderOrder={999}
       />
       <lineSegments
         geometry={defaultEdges}
         material={cursorLineMaterial}
         raycast={noRaycast}
+        renderOrder={1000}
       />
     </group>
   );

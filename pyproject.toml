@@ -22,6 +22,9 @@ dev = [
     "tqec @ git+https://github.com/tqec/tqec.git",
 ]
 
+[tool.setuptools.packages.find]
+include = ["piper_draw*"]
+
 [tool.ruff]
 target-version = "py314"
 line-length = 100

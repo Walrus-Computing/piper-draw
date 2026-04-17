@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { useKeybindStore } from "./keybindStore";
 import type {
   Position3D, Block, BlockType, CubeType, PipeVariant, PipeType, SpatialIndex, FaceMask,
-  BuildDirection, UndeterminedCubeInfo,
+  BuildDirection, UndeterminedCubeInfo, ViewMode, IsoAxis,
 } from "../types";
 import {
   posKey,
@@ -28,6 +28,7 @@ import {
   VARIANT_AXIS_MAP,
   toggleHadamard,
   swapPipeVariant,
+  flipBlockType,
 } from "../types";
 
 export type Mode = "place" | "delete" | "select" | "build";
@@ -86,7 +87,9 @@ type UndoCommand =
       oldPlacedType: CubeType | "Y" | null; newPlacedType: CubeType | "Y";
       oldPipes?: Array<{ key: string; oldType: PipeType; newType: PipeType }>;
       oldUndetermined?: UndeterminedCubeInfo; newUndetermined?: UndeterminedCubeInfo }
-  | { kind: "replace"; key: string; oldBlock: Block; newBlock: Block };
+  | { kind: "replace"; key: string; oldBlock: Block; newBlock: Block }
+  | { kind: "bulk-replace"; entries: Array<{ key: string; oldBlock: Block; newBlock: Block }>;
+      undeterminedChanges: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> };
 
 interface BlockStore {
   blocks: Map<string, Block>;
@@ -129,6 +132,7 @@ interface BlockStore {
   selectBlock: (pos: Position3D, additive: boolean) => void;
   clearSelection: () => void;
   deleteSelected: () => void;
+  flipSelected: () => void;
   selectAll: () => void;
   selectBlocks: (keys: string[], additive: boolean) => void;
 
@@ -148,6 +152,14 @@ interface BlockStore {
   photoRequest: boolean;
   requestPhoto: () => void;
   clearPhotoRequest: () => void;
+
+  // View mode (perspective vs. orthographic elevation along an axis)
+  viewMode: ViewMode;
+  /** Per-axis last-used slice so toggling between iso views remembers position. */
+  lastIsoSlice: { x: number; y: number; z: number };
+  setPerspView: () => void;
+  setIsoView: (axis: IsoAxis) => void;
+  stepSlice: (delta: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +260,24 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   requestPhoto: () => set({ photoRequest: true }),
   clearPhotoRequest: () => set({ photoRequest: false }),
 
+  viewMode: { kind: "persp" },
+  lastIsoSlice: { x: 0, y: 0, z: 0 },
+  setPerspView: () =>
+    set((s) => (s.viewMode.kind === "persp" ? s : { viewMode: { kind: "persp" } })),
+  setIsoView: (axis) =>
+    set((s) => ({
+      viewMode: { kind: "iso", axis, slice: s.lastIsoSlice[axis] },
+    })),
+  stepSlice: (delta) =>
+    set((s) => {
+      if (s.viewMode.kind !== "iso") return s;
+      const slice = s.viewMode.slice + delta;
+      return {
+        viewMode: { ...s.viewMode, slice },
+        lastIsoSlice: { ...s.lastIsoSlice, [s.viewMode.axis]: slice },
+      };
+    }),
+
   setMode: (mode) => {
     const prev = get();
 
@@ -289,11 +319,16 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         }
       }
 
+      // In iso mode, seed a camera snap so the slice follows the cursor when
+      // it lands off-slab; in perspective we don't auto-animate on entry.
+      const cameraSnapTarget =
+        prev.viewMode.kind === "iso" ? { azimuth: null, targetPos: cursorPos } : null;
+
       set({
         mode,
         buildCursor: cursorPos,
         buildHistory: [],
-        cameraSnapTarget: null,
+        cameraSnapTarget,
         hoveredGridPos: null,
         hoveredBlockType: null,
         hoveredInvalid: false,
@@ -618,6 +653,27 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         };
       }
 
+      if (cmd.kind === "bulk-replace") {
+        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        for (const e of cmd.entries) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, e.key, e.newBlock));
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, e.key, e.oldBlock));
+        }
+        const newUndetermined = new Map(state.undeterminedCubes);
+        for (const u of cmd.undeterminedChanges) {
+          if (u.oldInfo) newUndetermined.set(u.key, { ...u.oldInfo, options: [...u.oldInfo.options] });
+          else newUndetermined.delete(u.key);
+        }
+        return {
+          blocks,
+          hiddenFaces,
+          history: newHistory,
+          future: [cmd, ...state.future].slice(0, MAX_HISTORY),
+          hoveredGridPos: null,
+          undeterminedCubes: newUndetermined,
+        };
+      }
+
       // cmd.kind === "clear" — restore saved state, rebuild spatial index
       const newIndex = buildSpatialIndex(cmd.savedBlocks);
       return {
@@ -817,6 +873,27 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         };
       }
 
+      if (cmd.kind === "bulk-replace") {
+        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        for (const e of cmd.entries) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, e.key, e.oldBlock));
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, e.key, e.newBlock));
+        }
+        const newUndetermined = new Map(state.undeterminedCubes);
+        for (const u of cmd.undeterminedChanges) {
+          if (u.newInfo) newUndetermined.set(u.key, { ...u.newInfo, options: [...u.newInfo.options] });
+          else newUndetermined.delete(u.key);
+        }
+        return {
+          blocks,
+          hiddenFaces,
+          history: [...state.history, cmd],
+          future: newFuture,
+          hoveredGridPos: null,
+          undeterminedCubes: newUndetermined,
+        };
+      }
+
       // cmd.kind === "clear" — save current state, then clear
       const savedCmd: UndoCommand = {
         kind: "clear",
@@ -939,6 +1016,72 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         selectedKeys: new Set<string>(),
         hoveredGridPos: null,
         undeterminedCubes: newUndetermined,
+      };
+    }),
+
+  flipSelected: () =>
+    set((state) => {
+      if (state.selectedKeys.size === 0) return state;
+
+      const entries: Array<{ key: string; oldBlock: Block; newBlock: Block }> = [];
+      for (const key of state.selectedKeys) {
+        const block = state.blocks.get(key);
+        if (!block) continue;
+        const newType = flipBlockType(block.type);
+        if (newType === block.type) continue;
+        entries.push({ key, oldBlock: block, newBlock: { pos: block.pos, type: newType } });
+      }
+      if (entries.length === 0) return state;
+
+      // Simulated post-flip map for color-conflict checks against non-selected neighbors.
+      const proposed = new Map(state.blocks);
+      for (const e of entries) proposed.set(e.key, e.newBlock);
+
+      const flipBlocked = "Flip blocked: selection boundary mismatches adjacent colors";
+      if (!state.freeBuild) {
+        for (const e of entries) {
+          const { pos, type } = e.newBlock;
+          if (isPipeType(type)) {
+            if (hasPipeColorConflict(type, pos, proposed)) {
+              return { hoveredInvalidReason: flipBlocked };
+            }
+          } else if (type !== "Y") {
+            if (hasCubeColorConflict(type as CubeType, pos, proposed)) {
+              return { hoveredInvalidReason: flipBlocked };
+            }
+          }
+          if (hasYCubePipeAxisConflict(type, pos, proposed)) {
+            return { hoveredInvalidReason: flipBlocked };
+          }
+        }
+      }
+
+      let blocks = state.blocks;
+      let hiddenFaces = state.hiddenFaces;
+      for (const e of entries) {
+        ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, e.key, e.oldBlock));
+        ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, e.key, e.newBlock));
+      }
+
+      const newUndetermined = new Map(state.undeterminedCubes);
+      const undeterminedChanges: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> = [];
+      for (const e of entries) {
+        const key = e.key;
+        const oldInfo = state.undeterminedCubes.get(key);
+        if (oldInfo) {
+          newUndetermined.delete(key);
+          undeterminedChanges.push({ key, oldInfo, newInfo: undefined });
+        }
+      }
+
+      const cmd: UndoCommand = { kind: "bulk-replace", entries, undeterminedChanges };
+      return {
+        blocks,
+        hiddenFaces,
+        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+        undeterminedCubes: newUndetermined,
+        hoveredInvalidReason: null,
       };
     }),
 
