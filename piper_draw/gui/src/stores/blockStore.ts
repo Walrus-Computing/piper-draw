@@ -1028,20 +1028,21 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       const proposed = new Map(state.blocks);
       for (const e of entries) proposed.set(e.key, e.newBlock);
 
+      const flipBlocked = "Flip blocked: selection boundary mismatches adjacent colors";
       if (!state.freeBuild) {
         for (const e of entries) {
           const { pos, type } = e.newBlock;
           if (isPipeType(type)) {
             if (hasPipeColorConflict(type, pos, proposed)) {
-              return { hoveredInvalidReason: "Flip blocked: selection boundary mismatches adjacent colors" };
+              return { hoveredInvalidReason: flipBlocked };
             }
           } else if (type !== "Y") {
             if (hasCubeColorConflict(type as CubeType, pos, proposed)) {
-              return { hoveredInvalidReason: "Flip blocked: selection boundary mismatches adjacent colors" };
+              return { hoveredInvalidReason: flipBlocked };
             }
           }
           if (hasYCubePipeAxisConflict(type, pos, proposed)) {
-            return { ...state, hoveredInvalidReason: "Flip blocked: selection boundary mismatches adjacent colors" };
+            return { hoveredInvalidReason: flipBlocked };
           }
         }
       }
