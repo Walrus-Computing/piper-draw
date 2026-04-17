@@ -148,6 +148,12 @@ interface BlockStore {
 // Helpers for incremental spatial-index + hidden-face updates
 // ---------------------------------------------------------------------------
 
+function charMatchCount(a: string, b: string): number {
+  let n = 0;
+  for (let i = 0; i < a.length && i < b.length; i++) if (a[i] === b[i]) n++;
+  return n;
+}
+
 function doAdd(
   blocks: Map<string, Block>,
   spatialIndex: SpatialIndex,
@@ -1056,14 +1062,17 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const validForDir = info.options.filter(opt => inferPipeType(opt, direction.tqecAxis) !== null);
         if (validForDir.length === 0) return reject("Cannot build in this direction from undetermined cube");
 
-        // Check if all valid options produce the same pipe type
-        const pipeSet = new Set(validForDir.map(opt => inferPipeType(opt, direction.tqecAxis)));
-        if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first"); // Truly ambiguous — different pipe types, must cycle (R)
-
-        // Prefer current type if it's valid for this direction
         const currentType = srcBlock!.type as CubeType;
-        srcType = validForDir.includes(currentType) ? currentType : validForDir[0];
-        // Always commit undetermined source
+        if (validForDir.includes(currentType)) {
+          // The displayed type uniquely determines the pipe — honor it even if
+          // other latent options would produce different pipes.
+          srcType = currentType;
+        } else {
+          // Displayed type can't pipe here. Only fall back when remaining options agree.
+          const pipeSet = new Set(validForDir.map(opt => inferPipeType(opt, direction.tqecAxis)));
+          if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first");
+          srcType = validForDir[0];
+        }
         sourceDetermination = {
           key: srcKey,
           prevType: currentType,
@@ -1078,10 +1087,15 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const candidates = options.determined ? [options.type] : options.options;
           const validForDir = candidates.filter(ct => inferPipeType(ct, direction.tqecAxis) !== null);
           if (validForDir.length === 0) return reject("Cube colors don't match — cannot build in this direction");
-          const pipeSet = new Set(validForDir.map(ct => inferPipeType(ct, direction.tqecAxis)));
-          if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first"); // Ambiguous — user must cycle (R)
+          // Prefer the candidate that shares the most chars with srcType (least disruptive retype).
+          // Ties resolved by candidate order; only ambiguous if tied candidates yield different pipes.
+          const ranked = [...validForDir].sort((a, b) => charMatchCount(b, srcType) - charMatchCount(a, srcType));
+          const bestScore = charMatchCount(ranked[0], srcType);
+          const bestTied = ranked.filter(ct => charMatchCount(ct, srcType) === bestScore);
+          const pipeSet = new Set(bestTied.map(ct => inferPipeType(ct, direction.tqecAxis)));
+          if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first");
           sourceRetype = { key: srcKey, prevType: srcType };
-          srcType = validForDir[0];
+          srcType = ranked[0];
         }
       }
     }
