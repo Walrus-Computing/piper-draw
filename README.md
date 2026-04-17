@@ -1,4 +1,7 @@
-# piper-draw
+<p align="center">
+  <img src="assets/logo.svg" alt="piper-draw" width="640">
+</p>
+
 An open source web application for building pipe diagrams for topological error correction.
 
 ## v0 Features
