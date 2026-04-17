@@ -1,16 +1,20 @@
 import { useBlockStore } from "../stores/blockStore";
 import { useKeybindStore } from "../stores/keybindStore";
+import { HintBar } from "./HintBar";
 
 export function BuildModeHints({ onCustomize }: { onCustomize: () => void }) {
   const mode = useBlockStore((s) => s.mode);
+  const viewMode = useBlockStore((s) => s.viewMode);
   const bindings = useKeybindStore((s) => s.bindings);
   const axisAbsoluteWasd = useKeybindStore((s) => s.axisAbsoluteWasd);
   if (mode !== "build") return null;
 
+  const isIso = viewMode.kind === "iso";
   const moveLabel = axisAbsoluteWasd ? "Move ±X / ±Y" : "Move XY";
-  const hints = [
+  const hints: Array<readonly [string, string]> = [
+    ["Click cube", "Move cursor here"],
     ["Drag", "Pan"],
-    ["Shift+Drag", "Rotate"],
+    ...(isIso ? [] : [["Shift+Drag", "Rotate"] as const]),
     ["Scroll", "Zoom"],
     [
       `${bindings.moveForward.displayLabel}/${bindings.moveLeft.displayLabel}/${bindings.moveBack.displayLabel}/${bindings.moveRight.displayLabel}`,
@@ -23,57 +27,20 @@ export function BuildModeHints({ onCustomize }: { onCustomize: () => void }) {
     [bindings.exitBuild.displayLabel, "Exit build"],
   ];
 
-  return (
-    <div
+  const customize = (
+    <span
+      onClick={onCustomize}
       style={{
-        position: "fixed",
-        bottom: 60,
-        left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: 1,
-        display: "flex",
-        gap: "6px",
-        alignItems: "center",
-        background: "rgba(0,0,0,0.7)",
-        color: "#fff",
-        padding: "6px 14px",
-        borderRadius: "8px",
-        fontSize: "12px",
-        fontFamily: "sans-serif",
-        pointerEvents: "none",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-        whiteSpace: "nowrap",
+        color: "rgba(255,255,255,0.5)",
+        cursor: "pointer",
+        pointerEvents: "auto",
+        textDecoration: "underline",
+        fontSize: "11px",
       }}
     >
-      {hints.map(([key, action], i) => (
-        <span key={key} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          {i > 0 && <span style={{ color: "rgba(255,255,255,0.3)" }}>|</span>}
-          <kbd
-            style={{
-              background: "rgba(255,255,255,0.15)",
-              padding: "1px 5px",
-              borderRadius: "3px",
-              fontSize: "11px",
-            }}
-          >
-            {key}
-          </kbd>
-          <span style={{ color: "rgba(255,255,255,0.7)" }}>{action}</span>
-        </span>
-      ))}
-      <span style={{ color: "rgba(255,255,255,0.3)" }}>|</span>
-      <span
-        onClick={onCustomize}
-        style={{
-          color: "rgba(255,255,255,0.5)",
-          cursor: "pointer",
-          pointerEvents: "auto",
-          textDecoration: "underline",
-          fontSize: "11px",
-        }}
-      >
-        Customize
-      </span>
-    </div>
+      Customize
+    </span>
   );
+
+  return <HintBar hints={hints} trailing={customize} />;
 }
