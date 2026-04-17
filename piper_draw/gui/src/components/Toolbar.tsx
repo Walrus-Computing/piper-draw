@@ -355,7 +355,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
               "#fff",
           }}
         >
-          {validationStatus === "loading" ? "Verifying..." : "Verify (TQEC)"}
+          {validationStatus === "loading" ? "Verifying..." : "Verify (tqec)"}
         </button>
         <button
           onClick={toggleFreeBuild}
