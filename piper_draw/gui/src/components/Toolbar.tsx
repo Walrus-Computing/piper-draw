@@ -318,7 +318,11 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
           Redo
         </button>
         <button
-          onClick={clearAll}
+          onClick={() => {
+            if (!window.confirm("Are you sure you want to delete the whole diagram?")) return;
+            clearAll();
+            onResetCamera();
+          }}
           disabled={blocksEmpty}
           style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
         >

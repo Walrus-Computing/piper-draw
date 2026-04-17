@@ -27,11 +27,14 @@ import { KeybindEditor } from "./components/KeybindEditor";
 import { HelpPanel } from "./components/HelpPanel";
 import { useBlockStore } from "./stores/blockStore";
 import { useKeybindStore, buildActionForKey, actionToWasdKey } from "./stores/keybindStore";
-import { wasdToBuildDirection, tqecToThree } from "./types";
+import { wasdToBuildDirection, tqecToThree, type Block } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
 
 const GRID_SNAP = 3;
+
+const AUTOSAVE_KEY = "piper-draw:autosave:v1";
+const AUTOSAVE_DEBOUNCE_MS = 500;
 
 /**
  * Shader-based ground grid: dark grey cells at block positions (mod 3 ≡ 0),
@@ -376,6 +379,44 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(AUTOSAVE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          useBlockStore.getState().hydrateBlocks(new Map<string, Block>(parsed));
+        }
+      }
+    } catch {
+      localStorage.removeItem(AUTOSAVE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const flush = (blocks: Map<string, Block>) => {
+      try {
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(Array.from(blocks.entries())));
+      } catch {
+        // Quota exceeded or storage unavailable — ignore.
+      }
+    };
+    const unsub = useBlockStore.subscribe((state, prev) => {
+      if (state.blocks === prev.blocks) return;
+      if (timeout !== null) clearTimeout(timeout);
+      const snapshot = state.blocks;
+      timeout = setTimeout(() => flush(snapshot), AUTOSAVE_DEBOUNCE_MS);
+    });
+    return () => {
+      if (timeout !== null) {
+        clearTimeout(timeout);
+        flush(useBlockStore.getState().blocks);
+      }
+      unsub();
+    };
   }, []);
 
   return (
