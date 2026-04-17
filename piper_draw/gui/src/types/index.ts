@@ -998,6 +998,21 @@ export function swapPipeVariant(pipeBase: string): string {
 }
 
 /**
+ * Flip basis colors on any BlockType by globally swapping X↔Z.
+ * Cubes: "XZZ" → "ZXX", pipes: "OXZ" → "OZX", "XZOH" → "ZXOH". Y is returned unchanged.
+ */
+export function flipBlockType(type: BlockType): BlockType {
+  if (type === "Y") return type;
+  let out = "";
+  for (const ch of type) {
+    if (ch === "X") out += "Z";
+    else if (ch === "Z") out += "X";
+    else out += ch;
+  }
+  return out as BlockType;
+}
+
+/**
  * Infer the non-Hadamard PipeType to place from a source cube along the given axis.
  * The pipe's closed-axis characters come from the source cube's type characters.
  * Returns null if the closed-axis characters are both the same (e.g. "OZZ"),

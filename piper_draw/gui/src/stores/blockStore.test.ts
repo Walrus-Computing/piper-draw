@@ -15,6 +15,8 @@ function reset() {
     hoveredBlockType: null,
     hoveredInvalid: false,
     selectedKeys: new Set(),
+    undeterminedCubes: new Map(),
+    freeBuild: false,
   });
 }
 
@@ -297,6 +299,88 @@ describe("blockStore", () => {
       // selectedKeys still has "0,0,0" but block was removed
       useBlockStore.getState().deleteSelected();
       expect(useBlockStore.getState().blocks.size).toBe(0);
+    });
+  });
+
+  describe("flipSelected", () => {
+    it("swaps X↔Z on a selected cube", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().flipSelected();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXX");
+    });
+
+    it("flips a connected cube+pipe+cube chain", () => {
+      // XZZ cubes with a Z-open pipe between them (variant XZ at Z-axis = XZO)
+      // matches the cubes' X=X, Y=Z on the closed axes.
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 1 });
+      useBlockStore.setState({ pipeVariant: null, cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 3 });
+      expect(useBlockStore.getState().blocks.size).toBe(3);
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().flipSelected();
+      const b = useBlockStore.getState().blocks;
+      expect(b.get("0,0,0")?.type).toBe("ZXX");
+      expect(b.get("0,0,1")?.type).toBe("ZXO");
+      expect(b.get("0,0,3")?.type).toBe("ZXX");
+    });
+
+    it("leaves Y blocks unchanged", () => {
+      useBlockStore.setState({ cubeType: "Y" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().flipSelected();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("Y");
+    });
+
+    it("is a no-op when nothing is selected", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      const histBefore = useBlockStore.getState().history.length;
+      useBlockStore.getState().flipSelected();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZZ");
+      expect(useBlockStore.getState().history.length).toBe(histBefore);
+    });
+
+    it("rejects when flipping would conflict with a non-selected adjacent pipe", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 1 });
+      expect(useBlockStore.getState().blocks.size).toBe(2);
+      // Select only the cube — flipping it would mismatch the adjacent pipe.
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
+      useBlockStore.getState().flipSelected();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZZ");
+      expect(useBlockStore.getState().blocks.get("0,0,1")?.type).toBe("XZO");
+    });
+
+    it("allows flipping across a selection boundary when freeBuild is on", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 1 });
+      useBlockStore.setState({ freeBuild: true });
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
+      useBlockStore.getState().flipSelected();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXX");
+    });
+
+    it("can be undone and redone", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().flipSelected();
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZZ");
+      useBlockStore.getState().redo();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXX");
+    });
+
+    it("is idempotent under double flip", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().flipSelected();
+      useBlockStore.getState().flipSelected();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZZ");
     });
   });
 

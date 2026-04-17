@@ -302,6 +302,7 @@ function SelectModeHints() {
     ["Shift+Click", "Add/remove"],
     [`${modKey}A`, "Select all"],
     ["Delete", "Delete selected"],
+    ["F", "Flip colors"],
     ["Esc", "Clear selection"],
   ];
 
@@ -536,6 +537,11 @@ export default function App() {
         if ((key === "[" || key === "]") && store.viewMode.kind === "iso") {
           e.preventDefault();
           store.stepSlice(key === "]" ? 3 : -3);
+          return;
+        }
+        if (key === "f" && store.mode === "select" && store.selectedKeys.size > 0) {
+          e.preventDefault();
+          store.flipSelected();
           return;
         }
         return;
