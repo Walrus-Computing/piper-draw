@@ -193,6 +193,7 @@ function SelectModeHints() {
  * Snaps the camera to the build direction target when cameraSnapTarget changes.
  * Uses OrbitControls to set azimuthal angle and target position.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> }) {
   const cameraSnapTarget = useBlockStore((s) => s.cameraSnapTarget);
   const lastBuildAxis = useBlockStore((s) => s.lastBuildAxis);
