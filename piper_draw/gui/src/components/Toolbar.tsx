@@ -125,6 +125,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
   const deleteSelected = useBlockStore((s) => s.deleteSelected);
 
   const buildCursor = useBlockStore((s) => s.buildCursor);
+  const moveBuildCursor = useBlockStore((s) => s.moveBuildCursor);
   const buildCursorBlockType = useBlockStore((s) => {
     if (s.mode !== "build" || !s.buildCursor) return null;
     // Undetermined cubes should not highlight any button
@@ -348,7 +349,11 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
           Redo
         </button>
         <button
-          onClick={clearAll}
+          onClick={() => {
+            if (!window.confirm("Are you sure you want to delete the whole diagram?")) return;
+            clearAll();
+            onResetCamera();
+          }}
           disabled={blocksEmpty}
           style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
         >
@@ -381,7 +386,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
               "#fff",
           }}
         >
-          {validationStatus === "loading" ? "Verifying..." : "Verify (TQEC)"}
+          {validationStatus === "loading" ? "Verifying..." : "Verify (tqec)"}
         </button>
         <button
           onClick={toggleFreeBuild}
@@ -486,9 +491,11 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
       <div style={{ width: 1, background: "#ddd" }} />
       <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", fontFamily: "monospace", fontSize: "12px", color: "#555", lineHeight: "1.6", minWidth: 90 }}>
         <span style={groupLabelStyle}>Position</span>
-        {(() => {
-          const pos: Position3D | null = mode === "build" ? buildCursor : hoveredGridPos;
-          const bt: BlockType | null = mode === "build" ? null : useBlockStore.getState().hoveredBlockType;
+        {mode === "build" && buildCursor ? (
+          <PositionEditor pos={buildCursor} onCommit={moveBuildCursor} />
+        ) : (() => {
+          const pos: Position3D | null = hoveredGridPos;
+          const bt: BlockType | null = useBlockStore.getState().hoveredBlockType;
           if (!pos) return <><span>X: —</span><span>Y: —</span><span>Z: —</span></>;
           const isPipe = bt ? isPipeType(bt) : pipeAxisFromPos(pos) !== null;
           if (isPipe) {
@@ -585,6 +592,76 @@ function IsoMenu({ viewMode, onPick }: { viewMode: ViewMode; onPick: (axis: IsoA
       )}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// PositionEditor — editable X/Y/Z inputs for the build cursor
+// ---------------------------------------------------------------------------
+
+function PositionEditor({ pos, onCommit }: { pos: Position3D; onCommit: (p: Position3D) => void }) {
+  const [draft, setDraft] = useState<{ x?: string; y?: string; z?: string }>({});
+
+  const valueOf = (k: "x" | "y" | "z") => draft[k] ?? String(pos[k] / 3);
+
+  const commit = () => {
+    const parse = (s: string): number | null => {
+      if (s.trim() === "") return null;
+      const n = Number(s);
+      return Number.isInteger(n) ? n : null;
+    };
+    const nx = draft.x !== undefined ? parse(draft.x) : pos.x / 3;
+    const ny = draft.y !== undefined ? parse(draft.y) : pos.y / 3;
+    const nz = draft.z !== undefined ? parse(draft.z) : pos.z / 3;
+    if (nx === null || ny === null || nz === null) {
+      setDraft({});
+      return;
+    }
+    if (nx * 3 !== pos.x || ny * 3 !== pos.y || nz * 3 !== pos.z) {
+      onCommit({ x: nx * 3, y: ny * 3, z: nz * 3 });
+    }
+    setDraft({});
+  };
+
+  const onContainerBlur = (e: React.FocusEvent<HTMLDivElement>) => {
+    // Focus moving to another input inside the group → don't commit yet
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    commit();
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      commit();
+      e.currentTarget.blur();
+    } else if (e.key === "Escape") {
+      setDraft({});
+      e.currentTarget.blur();
+    }
+  };
+
+  const axisRow = (k: "x" | "y" | "z") => (
+    <label key={k} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      {k.toUpperCase()}:
+      <input
+        type="number"
+        step={1}
+        value={valueOf(k)}
+        onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
+        onKeyDown={onKeyDown}
+        style={{
+          width: 42,
+          fontFamily: "monospace",
+          fontSize: 12,
+          padding: "1px 2px",
+          border: "1px solid #ccc",
+          borderRadius: 2,
+          background: "#fff",
+          color: "#333",
+        }}
+      />
+    </label>
+  );
+
+  return <div onBlur={onContainerBlur}>{axisRow("x")}{axisRow("y")}{axisRow("z")}</div>;
 }
 
 // ---------------------------------------------------------------------------

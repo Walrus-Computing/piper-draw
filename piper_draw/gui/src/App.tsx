@@ -23,6 +23,7 @@ import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { SelectionHighlights } from "./components/SelectionHighlights";
 import { BuildCursor } from "./components/BuildCursor";
 import { MarqueeSelect, type ThreeState } from "./components/MarqueeSelect";
+import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
 import { BuildModeHints } from "./components/BuildModeHints";
@@ -30,8 +31,7 @@ import { KeybindEditor } from "./components/KeybindEditor";
 import { HelpPanel } from "./components/HelpPanel";
 import { useBlockStore } from "./stores/blockStore";
 import { useKeybindStore, buildActionForKey, actionToWasdKey } from "./stores/keybindStore";
-import { wasdToBuildDirection, tqecToThree } from "./types";
-import type { ViewMode } from "./types";
+import { wasdToBuildDirection, tqecToThree, type Block, type ViewMode } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
 import {
@@ -44,6 +44,9 @@ import {
 } from "./utils/isoView";
 
 const GRID_SNAP = 3;
+
+const AUTOSAVE_KEY = "piper-draw:autosave:v1";
+const AUTOSAVE_DEBOUNCE_MS = 500;
 
 /**
  * Shader-based grid mesh: dark grey cells at block positions (mod 3 ≡ 0),
@@ -224,6 +227,8 @@ function ViewportCamera({ controlsRef }: { controlsRef: React.RefObject<any> }) 
           makeDefault
           enableRotate
           maxDistance={50000}
+          screenSpacePanning={false}
+          mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
         />
       </>
     );
@@ -273,6 +278,8 @@ function IsoViewport({
         enableRotate={false}
         maxZoom={500}
         minZoom={2}
+        screenSpacePanning={false}
+        mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
       />
     </>
   );
@@ -548,6 +555,44 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(AUTOSAVE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          useBlockStore.getState().hydrateBlocks(new Map<string, Block>(parsed));
+        }
+      }
+    } catch {
+      localStorage.removeItem(AUTOSAVE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const flush = (blocks: Map<string, Block>) => {
+      try {
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(Array.from(blocks.entries())));
+      } catch {
+        // Quota exceeded or storage unavailable — ignore.
+      }
+    };
+    const unsub = useBlockStore.subscribe((state, prev) => {
+      if (state.blocks === prev.blocks) return;
+      if (timeout !== null) clearTimeout(timeout);
+      const snapshot = state.blocks;
+      timeout = setTimeout(() => flush(snapshot), AUTOSAVE_DEBOUNCE_MS);
+    });
+    return () => {
+      if (timeout !== null) {
+        clearTimeout(timeout);
+        flush(useBlockStore.getState().blocks);
+      }
+      unsub();
+    };
+  }, []);
+
   return (
     <>
       <Toolbar
@@ -632,6 +677,7 @@ export default function App() {
         </GizmoHelper>
         <ThreeStateBridge stateRef={threeStateRef} />
         <ViewportCamera controlsRef={controlsRef} />
+        <NavControlsModifier controlsRef={controlsRef} />
       </Canvas>
       <MarqueeSelect threeStateRef={threeStateRef} controlsRef={controlsRef} />
     </>

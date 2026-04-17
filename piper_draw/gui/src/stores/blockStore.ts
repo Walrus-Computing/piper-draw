@@ -121,6 +121,7 @@ interface BlockStore {
   undo: () => void;
   redo: () => void;
   loadBlocks: (blocks: Map<string, Block>) => void;
+  hydrateBlocks: (blocks: Map<string, Block>) => void;
   clearAll: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
@@ -155,6 +156,12 @@ interface BlockStore {
 // Helpers for incremental spatial-index + hidden-face updates
 // ---------------------------------------------------------------------------
 
+function charMatchCount(a: string, b: string): number {
+  let n = 0;
+  for (let i = 0; i < a.length && i < b.length; i++) if (a[i] === b[i]) n++;
+  return n;
+}
+
 function doAdd(
   blocks: Map<string, Block>,
   spatialIndex: SpatialIndex,
@@ -188,6 +195,29 @@ function doRemove(
   newHidden.delete(key);
   for (const [k, v] of affected) newHidden.set(k, v);
   return { blocks: newBlocks, hiddenFaces: newHidden };
+}
+
+function computeDerivedFromBlocks(blocks: Map<string, Block>): {
+  spatialIndex: SpatialIndex;
+  hiddenFaces: Map<string, FaceMask>;
+  undeterminedCubes: Map<string, UndeterminedCubeInfo>;
+} {
+  const spatialIndex = buildSpatialIndex(blocks);
+  const hiddenFaces: Map<string, FaceMask> = new Map();
+  for (const [key, block] of blocks) {
+    const mask = getHiddenFaceMaskForPos(block.pos, block.type, blocks, spatialIndex);
+    if (mask !== 0) hiddenFaces.set(key, mask);
+  }
+  const undeterminedCubes = new Map<string, UndeterminedCubeInfo>();
+  for (const [key, block] of blocks) {
+    if (isPipeType(block.type) || block.type === "Y") continue;
+    const opts = determineCubeOptions(block.pos, blocks);
+    if (!opts.determined && opts.options.length > 1) {
+      const idx = Math.max(0, opts.options.indexOf(block.type as CubeType));
+      undeterminedCubes.set(key, { options: [...opts.options], currentIndex: idx });
+    }
+  }
+  return { spatialIndex, hiddenFaces, undeterminedCubes };
 }
 
 export const useBlockStore = create<BlockStore>((set, get) => ({
@@ -829,39 +859,38 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   loadBlocks: (incoming) =>
     set((state) => {
       if (incoming.size === 0 && state.blocks.size === 0) return state;
-      const newIndex = buildSpatialIndex(incoming);
-      const newHidden: Map<string, FaceMask> = new Map();
-      for (const [key, block] of incoming) {
-        const mask = getHiddenFaceMaskForPos(block.pos, block.type, incoming, newIndex);
-        if (mask !== 0) newHidden.set(key, mask);
-      }
-      // Recompute undetermined state from loaded blocks
-      const newUndetermined = new Map<string, UndeterminedCubeInfo>();
-      for (const [key, block] of incoming) {
-        if (isPipeType(block.type) || block.type === "Y") continue;
-        const opts = determineCubeOptions(block.pos, incoming);
-        if (!opts.determined && opts.options.length > 1) {
-          const idx = Math.max(0, opts.options.indexOf(block.type as CubeType));
-          newUndetermined.set(key, { options: [...opts.options], currentIndex: idx });
-        }
-      }
+      const { spatialIndex, hiddenFaces, undeterminedCubes } = computeDerivedFromBlocks(incoming);
       const cmd: UndoCommand = {
         kind: "load",
         savedBlocks: state.blocks,
         savedHiddenFaces: state.hiddenFaces,
         savedUndetermined: state.undeterminedCubes,
         newBlocks: incoming,
-        newIndex,
-        newHiddenFaces: newHidden,
+        newIndex: spatialIndex,
+        newHiddenFaces: hiddenFaces,
       };
       return {
         blocks: incoming,
-        spatialIndex: newIndex,
-        hiddenFaces: newHidden,
+        spatialIndex,
+        hiddenFaces,
         history: [...state.history, cmd].slice(-MAX_HISTORY),
         future: [],
         hoveredGridPos: null,
-        undeterminedCubes: newUndetermined,
+        undeterminedCubes,
+      };
+    }),
+
+  hydrateBlocks: (incoming) =>
+    set((state) => {
+      if (incoming.size === 0) return state;
+      const { spatialIndex, hiddenFaces } = computeDerivedFromBlocks(incoming);
+      return {
+        blocks: incoming,
+        spatialIndex,
+        hiddenFaces,
+        hoveredGridPos: null,
+        selectedKeys: new Set<string>(),
+        undeterminedCubes: new Map(),
       };
     }),
 
@@ -1064,14 +1093,17 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const validForDir = info.options.filter(opt => inferPipeType(opt, direction.tqecAxis) !== null);
         if (validForDir.length === 0) return reject("Cannot build in this direction from undetermined cube");
 
-        // Check if all valid options produce the same pipe type
-        const pipeSet = new Set(validForDir.map(opt => inferPipeType(opt, direction.tqecAxis)));
-        if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first"); // Truly ambiguous — different pipe types, must cycle (R)
-
-        // Prefer current type if it's valid for this direction
         const currentType = srcBlock!.type as CubeType;
-        srcType = validForDir.includes(currentType) ? currentType : validForDir[0];
-        // Always commit undetermined source
+        if (validForDir.includes(currentType)) {
+          // The displayed type uniquely determines the pipe — honor it even if
+          // other latent options would produce different pipes.
+          srcType = currentType;
+        } else {
+          // Displayed type can't pipe here. Only fall back when remaining options agree.
+          const pipeSet = new Set(validForDir.map(opt => inferPipeType(opt, direction.tqecAxis)));
+          if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first");
+          srcType = validForDir[0];
+        }
         sourceDetermination = {
           key: srcKey,
           prevType: currentType,
@@ -1086,10 +1118,15 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const candidates = options.determined ? [options.type] : options.options;
           const validForDir = candidates.filter(ct => inferPipeType(ct, direction.tqecAxis) !== null);
           if (validForDir.length === 0) return reject("Cube colors don't match — cannot build in this direction");
-          const pipeSet = new Set(validForDir.map(ct => inferPipeType(ct, direction.tqecAxis)));
-          if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first"); // Ambiguous — user must cycle (R)
+          // Prefer the candidate that shares the most chars with srcType (least disruptive retype).
+          // Ties resolved by candidate order; only ambiguous if tied candidates yield different pipes.
+          const ranked = [...validForDir].sort((a, b) => charMatchCount(b, srcType) - charMatchCount(a, srcType));
+          const bestScore = charMatchCount(ranked[0], srcType);
+          const bestTied = ranked.filter(ct => charMatchCount(ct, srcType) === bestScore);
+          const pipeSet = new Set(bestTied.map(ct => inferPipeType(ct, direction.tqecAxis)));
+          if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first");
           sourceRetype = { key: srcKey, prevType: srcType };
-          srcType = validForDir[0];
+          srcType = ranked[0];
         }
       }
     }

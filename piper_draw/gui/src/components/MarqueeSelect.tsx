@@ -45,8 +45,11 @@ export function MarqueeSelect({
       const target = e.target as HTMLElement;
       if (target.tagName !== "CANVAS") return;
 
-      // Disable orbit rotation for the duration of the marquee drag
-      if (controlsRef.current) controlsRef.current.enableRotate = false;
+      // Disable orbit rotation and pan for the duration of the marquee drag
+      if (controlsRef.current) {
+        controlsRef.current.enableRotate = false;
+        controlsRef.current.enablePan = false;
+      }
 
       const canvasRect = target.getBoundingClientRect();
       dragRef.current = {
@@ -89,8 +92,11 @@ export function MarqueeSelect({
         // Pointer capture may already be released (e.g., element removed)
       }
 
-      // Re-enable orbit rotation
-      if (controlsRef.current) controlsRef.current.enableRotate = true;
+      // Re-enable orbit rotation and pan
+      if (controlsRef.current) {
+        controlsRef.current.enableRotate = true;
+        controlsRef.current.enablePan = true;
+      }
 
       // Bail if mode changed mid-drag
       if (useBlockStore.getState().mode !== "select") return;
