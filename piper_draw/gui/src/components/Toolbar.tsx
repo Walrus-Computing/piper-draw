@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useBlockStore } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
 import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, PIPE_TYPE_TO_VARIANT } from "../types";
@@ -7,6 +8,48 @@ import { triggerDaeImport } from "../utils/daeImport";
 import { animateCamera } from "../utils/cameraAnim";
 import * as THREE from "three";
 import { usePreviewImages } from "./PreviewRenderer";
+
+// ---------------------------------------------------------------------------
+// Responsive sizing
+// ---------------------------------------------------------------------------
+
+// Horizontal margin (px) kept between the toolbar and the viewport edges
+// when the toolbar is scaled down to fit a narrow window.
+const TOOLBAR_VIEWPORT_MARGIN_PX = 20;
+
+// Returns a CSS scale factor that keeps the toolbar at its natural size when
+// it fits in the viewport, and shrinks it just enough to fit when it doesn't.
+function useToolbarScale(toolbarRef: React.RefObject<HTMLDivElement | null>): number {
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    let frame = 0;
+    const recompute = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const node = toolbarRef.current;
+        if (!node) return;
+        // offsetWidth is the layout (untransformed) width — independent of
+        // the scale we apply, so this measurement is stable across renders.
+        const natural = node.offsetWidth;
+        if (natural === 0) return;
+        const available = window.innerWidth - TOOLBAR_VIEWPORT_MARGIN_PX;
+        setScale(Math.min(1, available / natural));
+      });
+    };
+    const node = toolbarRef.current;
+    const ro = node ? new ResizeObserver(recompute) : null;
+    if (node && ro) ro.observe(node);
+    window.addEventListener("resize", recompute);
+    recompute();
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", recompute);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [toolbarRef]);
+  return scale;
+}
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -57,6 +100,7 @@ const blockBtnStyle = (active: boolean, disabled?: boolean) => ({
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCamera: () => void; controlsRef: React.RefObject<any>; toolbarRef: React.RefObject<HTMLDivElement | null> }) {
+  const scale = useToolbarScale(toolbarRef);
   const mode = useBlockStore((s) => s.mode);
   const setMode = useBlockStore((s) => s.setMode);
   const cubeType = useBlockStore((s) => s.cubeType);
@@ -211,7 +255,8 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         position: "fixed",
         top: 10,
         left: "50%",
-        transform: "translateX(-50%)",
+        transform: `translateX(-50%) scale(${scale})`,
+        transformOrigin: "top center",
         zIndex: 1,
         display: "flex",
         gap: "10px",
