@@ -6,13 +6,15 @@ export function DeleteModeHints({ onCustomize }: { onCustomize: () => void }) {
   const mode = useBlockStore((s) => s.mode);
   const viewMode = useBlockStore((s) => s.viewMode);
   const b = useKeybindStore((s) => s.bindings.delete);
+  const navStyle = useKeybindStore((s) => s.navStyle);
   if (mode !== "delete") return null;
 
   const isIso = viewMode.kind === "iso";
+  const dragRotates = !isIso && navStyle === "rotate";
   const hints: Array<readonly [string, string]> = [
     ["Click block", "Delete"],
-    ["Drag", "Pan"],
-    ...(isIso ? [] : [["Shift+Drag", "Rotate"] as const]),
+    ["Drag", dragRotates ? "Rotate" : "Pan"],
+    ...(isIso ? [] : [["Shift+Drag", dragRotates ? "Pan" : "Rotate"] as const]),
     ["Scroll", "Zoom"],
     [bindingToLabel(b.undo), "Undo"],
     [bindingToLabel(b.redo), "Redo"],

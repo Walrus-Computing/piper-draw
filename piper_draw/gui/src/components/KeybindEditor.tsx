@@ -7,7 +7,13 @@ import {
   type ActionForMode,
   type KeyBinding,
   type Mode,
+  type NavStyle,
 } from "../stores/keybindStore";
+
+const NAV_STYLE_OPTIONS: ReadonlyArray<{ value: NavStyle; label: string }> = [
+  { value: "pan", label: "Drag to pan" },
+  { value: "rotate", label: "Drag to rotate" },
+];
 
 const MODE_TITLES: Record<Mode, string> = {
   build: "Build Mode Key Bindings",
@@ -29,6 +35,8 @@ export function KeybindEditor<M extends Mode>({
   >;
   const setBinding = useKeybindStore((s) => s.setBinding);
   const resetMode = useKeybindStore((s) => s.resetMode);
+  const navStyle = useKeybindStore((s) => s.navStyle);
+  const setNavStyle = useKeybindStore((s) => s.setNavStyle);
   const [listening, setListening] = useState<ActionForMode[M] | null>(null);
 
   useEffect(() => {
@@ -117,6 +125,43 @@ export function KeybindEditor<M extends Mode>({
           >
             ✕
           </button>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "6px 8px",
+            marginBottom: 10,
+            borderRadius: 6,
+            background: "#f0f4f9",
+          }}
+        >
+          <span style={{ fontSize: 13, color: "#333" }}>Navigation style</span>
+          <div style={{ display: "flex", gap: 4 }}>
+            {NAV_STYLE_OPTIONS.map((opt) => {
+              const active = navStyle === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  onClick={() => setNavStyle(opt.value)}
+                  style={{
+                    padding: "3px 10px",
+                    border: active ? "2px solid #4285f4" : "1px solid #ccc",
+                    borderRadius: 4,
+                    background: active ? "#e8f0fe" : "#fff",
+                    color: active ? "#1a5ec8" : "#333",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontFamily: "sans-serif",
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

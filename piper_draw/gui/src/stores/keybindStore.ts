@@ -205,14 +205,18 @@ export function isDefaultBindings<M extends Mode>(
 
 type BindingsByMode = { [M in Mode]: Record<ActionForMode[M], KeyBinding> };
 
+export type NavStyle = "pan" | "rotate";
+
 interface KeybindState {
   bindings: BindingsByMode;
   cameraFollowsBuild: boolean;
   axisAbsoluteWasd: boolean;
+  navStyle: NavStyle;
   setBinding: <M extends Mode>(mode: M, action: ActionForMode[M], binding: KeyBinding) => void;
   resetMode: (mode: Mode) => void;
   toggleCameraFollowsBuild: () => void;
   toggleAxisAbsoluteWasd: () => void;
+  setNavStyle: (style: NavStyle) => void;
 }
 
 function cloneDefaults(): BindingsByMode {
@@ -230,6 +234,7 @@ export const useKeybindStore = create<KeybindState>()(
       bindings: cloneDefaults(),
       cameraFollowsBuild: false,
       axisAbsoluteWasd: false,
+      navStyle: "pan",
 
       setBinding: (mode, action, binding) =>
         set((state) => {
@@ -260,10 +265,11 @@ export const useKeybindStore = create<KeybindState>()(
         set((s) => ({ cameraFollowsBuild: !s.cameraFollowsBuild })),
       toggleAxisAbsoluteWasd: () =>
         set((s) => ({ axisAbsoluteWasd: !s.axisAbsoluteWasd })),
+      setNavStyle: (style) => set({ navStyle: style }),
     }),
     {
       name: "piper-draw-keybinds",
-      version: 5,
+      version: 7,
       migrate: () => ({ bindings: cloneDefaults() }),
       merge: (persisted, current) => {
         const p = persisted as Partial<KeybindState>;
@@ -287,6 +293,8 @@ export const useKeybindStore = create<KeybindState>()(
             typeof p.cameraFollowsBuild === "boolean" ? p.cameraFollowsBuild : cur.cameraFollowsBuild,
           axisAbsoluteWasd:
             typeof p.axisAbsoluteWasd === "boolean" ? p.axisAbsoluteWasd : cur.axisAbsoluteWasd,
+          navStyle:
+            p.navStyle === "pan" || p.navStyle === "rotate" ? p.navStyle : cur.navStyle,
         };
       },
     },

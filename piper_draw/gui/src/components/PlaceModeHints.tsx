@@ -6,13 +6,15 @@ export function PlaceModeHints({ onCustomize }: { onCustomize: () => void }) {
   const mode = useBlockStore((s) => s.mode);
   const viewMode = useBlockStore((s) => s.viewMode);
   const b = useKeybindStore((s) => s.bindings.place);
+  const navStyle = useKeybindStore((s) => s.navStyle);
   if (mode !== "place") return null;
 
   const isIso = viewMode.kind === "iso";
+  const dragRotates = !isIso && navStyle === "rotate";
   const hints: Array<readonly [string, string]> = [
     ["Click", "Place block"],
-    ["Drag", "Pan"],
-    ...(isIso ? [] : [["Shift+Drag", "Rotate"] as const]),
+    ["Drag", dragRotates ? "Rotate" : "Pan"],
+    ...(isIso ? [] : [["Shift+Drag", dragRotates ? "Pan" : "Rotate"] as const]),
     ["Scroll", "Zoom"],
     [bindingToLabel(b.undo), "Undo"],
     [bindingToLabel(b.redo), "Redo"],
