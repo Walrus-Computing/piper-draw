@@ -24,6 +24,7 @@ import { MarqueeSelect, type ThreeState } from "./components/MarqueeSelect";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { BuildModeHints } from "./components/BuildModeHints";
 import { KeybindEditor } from "./components/KeybindEditor";
+import { HelpPanel } from "./components/HelpPanel";
 import { useBlockStore } from "./stores/blockStore";
 import { useKeybindStore, buildActionForKey, actionToWasdKey } from "./stores/keybindStore";
 import { wasdToBuildDirection, tqecToThree } from "./types";
@@ -299,6 +300,7 @@ export default function App() {
   const controlsRef = useRef<any>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [keybindEditorOpen, setKeybindEditorOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const threeStateRef = useRef<ThreeState | null>(null);
 
   useEffect(() => {
@@ -386,6 +388,34 @@ export default function App() {
     <>
       <Toolbar onResetCamera={() => controlsRef.current?.reset()} controlsRef={controlsRef} toolbarRef={toolbarRef} />
       <ValidationToast toolbarRef={toolbarRef} controlsRef={controlsRef} />
+      <button
+        onClick={() => setHelpOpen(true)}
+        onPointerDown={(e) => e.stopPropagation()}
+        aria-label="About piper-draw"
+        title="About piper-draw"
+        style={{
+          position: "fixed",
+          bottom: 16,
+          left: 16,
+          zIndex: 1,
+          width: 32,
+          height: 32,
+          borderRadius: "50%",
+          border: "1px solid #ddd",
+          background: "rgba(255,255,255,0.9)",
+          boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
+          cursor: "pointer",
+          fontFamily: "sans-serif",
+          fontSize: 16,
+          fontWeight: 600,
+          color: "#555",
+          padding: 0,
+          lineHeight: 1,
+        }}
+      >
+        ?
+      </button>
+      {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
       <div
         onPointerDown={(e) => e.stopPropagation()}
         style={{
