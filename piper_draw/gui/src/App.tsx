@@ -28,6 +28,7 @@ import { useBlockStore } from "./stores/blockStore";
 import { useKeybindStore, buildActionForKey, actionToWasdKey } from "./stores/keybindStore";
 import { wasdToBuildDirection, tqecToThree } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
+import { animateCamera } from "./utils/cameraAnim";
 
 const GRID_SNAP = 3;
 
@@ -208,39 +209,31 @@ function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> })
 
     const controls = controlsRef.current;
     const [tx, ty, tz] = tqecToThree(cameraSnapTarget.targetPos, "XZZ");
+    const endTarget = new THREE.Vector3(tx, ty, tz);
 
     // Check if axis changed compared to previous build move
     const axisChanged = prevBuildAxis.current !== lastBuildAxis;
     prevBuildAxis.current = lastBuildAxis;
 
-    if (cameraSnapTarget.azimuth !== null) {
-      if (axisChanged) {
-        // First move into this axis — reposition camera behind build direction with slight offset
-        const currentDistance = camera.position.distanceTo(controls.target);
-        const dist = Math.max(currentDistance, 15);
-        controls.target.set(tx, ty, tz);
-        const polar = Math.min(controls.getPolarAngle(), 1.2);
-        const az = cameraSnapTarget.azimuth + 0.12;
-
-        camera.position.set(
-          tx + dist * Math.sin(polar) * Math.sin(az),
-          ty + dist * Math.cos(polar),
-          tz + dist * Math.sin(polar) * Math.cos(az),
-        );
-      } else {
-        // Same axis — translate camera to follow cursor, keep current viewing angle
-        const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
-        controls.target.set(tx, ty, tz);
-        camera.position.set(tx + offset.x, ty + offset.y, tz + offset.z);
-      }
+    let endPos: THREE.Vector3;
+    if (cameraSnapTarget.azimuth !== null && axisChanged) {
+      // First move into this axis — reposition camera behind build direction with slight offset
+      const currentDistance = camera.position.distanceTo(controls.target);
+      const dist = Math.max(currentDistance, 15);
+      const polar = Math.min(controls.getPolarAngle(), 1.2);
+      const az = cameraSnapTarget.azimuth + 0.12;
+      endPos = new THREE.Vector3(
+        tx + dist * Math.sin(polar) * Math.sin(az),
+        ty + dist * Math.cos(polar),
+        tz + dist * Math.sin(polar) * Math.cos(az),
+      );
     } else {
-      // Z movement — translate camera, preserve current viewing angle
+      // Same axis or Z movement — translate camera, preserve current viewing angle
       const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
-      controls.target.set(tx, ty, tz);
-      camera.position.set(tx + offset.x, ty + offset.y, tz + offset.z);
+      endPos = endTarget.clone().add(offset);
     }
 
-    controls.update();
+    animateCamera(controls, endTarget, endPos);
     clearCameraSnap();
   });
 
@@ -384,7 +377,15 @@ export default function App() {
 
   return (
     <>
-      <Toolbar onResetCamera={() => controlsRef.current?.reset()} controlsRef={controlsRef} toolbarRef={toolbarRef} />
+      <Toolbar
+        onResetCamera={() => {
+          const controls = controlsRef.current;
+          if (!controls) return;
+          animateCamera(controls, controls.target0.clone(), controls.position0.clone());
+        }}
+        controlsRef={controlsRef}
+        toolbarRef={toolbarRef}
+      />
       <ValidationToast toolbarRef={toolbarRef} controlsRef={controlsRef} />
       <div
         onPointerDown={(e) => e.stopPropagation()}

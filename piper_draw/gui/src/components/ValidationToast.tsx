@@ -3,28 +3,17 @@ import * as THREE from "three";
 import { useValidationStore } from "../stores/validationStore";
 import type { ValidationError } from "../stores/validationStore";
 import { tqecToThree, posKey } from "../types";
+import { animateCamera } from "../utils/cameraAnim";
 
 function navigateToError(error: ValidationError, controlsRef: React.RefObject<any>) {
   const controls = controlsRef.current;
   if (!controls || isNaN(error.position.x)) return;
   const [tx, ty, tz] = tqecToThree(error.position, "XZZ");
   const camera = controls.object as THREE.PerspectiveCamera;
-  const startTarget = controls.target.clone();
   const endTarget = new THREE.Vector3(tx, ty, tz);
-  const startPos = camera.position.clone();
-  const offset = new THREE.Vector3().subVectors(startPos, startTarget);
+  const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
   const endPos = endTarget.clone().add(offset);
-  const duration = 400;
-  const start = performance.now();
-  function animate() {
-    const t = Math.min((performance.now() - start) / duration, 1);
-    const ease = t * (2 - t); // ease-out quad
-    controls.target.lerpVectors(startTarget, endTarget, ease);
-    camera.position.lerpVectors(startPos, endPos, ease);
-    controls.update();
-    if (t < 1) requestAnimationFrame(animate);
-  }
-  animate();
+  animateCamera(controls, endTarget, endPos, { duration: 400 });
 }
 
 const baseStyle: React.CSSProperties = {
