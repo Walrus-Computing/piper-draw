@@ -12,20 +12,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-          allow-prereleases: true
-
-      - name: Install ruff
-        run: pip install ruff
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
 
       - name: Run ruff check
-        run: ruff check .
+        run: uvx ruff check .
 
       - name: Run ruff format check
-        run: ruff format --check .
+        run: uvx ruff format --check .
 
   pytest:
     runs-on: ubuntu-latest
@@ -33,14 +27,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-          allow-prereleases: true
-
-      - name: Install dependencies
-        run: PIP_IGNORE_REQUIRES_PYTHON=1 pip install . --group dev
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
 
       - name: Run tests
-        run: pytest
+        run: uv run --python 3.14 --group dev --no-python-downloads pytest
+        env:
+          UV_PYTHON_PREFERENCE: only-system
