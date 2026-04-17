@@ -1,18 +1,22 @@
-.PHONY: test test-python test-gui dev build lint
+.PHONY: install test test-python test-gui dev build lint
 
-test: test-python test-gui  ## Run all tests
+install:  ## Install all dependencies
+	uv sync
+	cd gui && npm install
 
-test-python:  ## Run Python tests
+test: install test-python test-gui  ## Run all tests
+
+test-python: install  ## Run Python tests
 	uv run pytest
 
-test-gui:  ## Run GUI (Vitest) tests
+test-gui: install  ## Run GUI (Vitest) tests
 	cd gui && npm test
 
-dev:  ## Start dev servers (frontend + backend)
+dev: install  ## Start dev servers (frontend + backend)
 	cd gui && npm run dev
 
-build:  ## Build the GUI for production
+build: install  ## Build the GUI for production
 	cd gui && npm run build
 
-lint:  ## Lint Python and GUI code
+lint: install  ## Lint Python and GUI code
 	cd gui && npm run lint
