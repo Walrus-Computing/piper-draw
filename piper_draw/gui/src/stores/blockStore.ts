@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { useKeybindStore } from "./keybindStore";
 import type {
   Position3D, Block, BlockType, CubeType, PipeVariant, PipeType, SpatialIndex, FaceMask,
-  BuildDirection, UndeterminedCubeInfo,
+  BuildDirection, UndeterminedCubeInfo, ViewMode, IsoAxis,
 } from "../types";
 import {
   posKey,
@@ -143,6 +143,14 @@ interface BlockStore {
   // Free build (disables color-matching validation)
   freeBuild: boolean;
   toggleFreeBuild: () => void;
+
+  // View mode (perspective vs. orthographic elevation along an axis)
+  viewMode: ViewMode;
+  /** Per-axis last-used slice so toggling between iso views remembers position. */
+  lastIsoSlice: { x: number; y: number; z: number };
+  setPerspView: () => void;
+  setIsoView: (axis: IsoAxis) => void;
+  stepSlice: (delta: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +247,24 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   freeBuild: false,
   toggleFreeBuild: () => set((s) => ({ freeBuild: !s.freeBuild })),
 
+  viewMode: { kind: "persp" },
+  lastIsoSlice: { x: 0, y: 0, z: 0 },
+  setPerspView: () =>
+    set((s) => (s.viewMode.kind === "persp" ? s : { viewMode: { kind: "persp" } })),
+  setIsoView: (axis) =>
+    set((s) => ({
+      viewMode: { kind: "iso", axis, slice: s.lastIsoSlice[axis] },
+    })),
+  stepSlice: (delta) =>
+    set((s) => {
+      if (s.viewMode.kind !== "iso") return s;
+      const slice = s.viewMode.slice + delta;
+      return {
+        viewMode: { ...s.viewMode, slice },
+        lastIsoSlice: { ...s.lastIsoSlice, [s.viewMode.axis]: slice },
+      };
+    }),
+
   setMode: (mode) => {
     const prev = get();
 
@@ -280,11 +306,16 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         }
       }
 
+      // In iso mode, seed a camera snap so the slice follows the cursor when
+      // it lands off-slab; in perspective we don't auto-animate on entry.
+      const cameraSnapTarget =
+        prev.viewMode.kind === "iso" ? { azimuth: null, targetPos: cursorPos } : null;
+
       set({
         mode,
         buildCursor: cursorPos,
         buildHistory: [],
-        cameraSnapTarget: null,
+        cameraSnapTarget,
         hoveredGridPos: null,
         hoveredBlockType: null,
         hoveredInvalid: false,
