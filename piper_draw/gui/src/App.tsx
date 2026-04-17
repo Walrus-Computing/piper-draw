@@ -24,6 +24,7 @@ import { MarqueeSelect, type ThreeState } from "./components/MarqueeSelect";
 import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { BuildModeHints } from "./components/BuildModeHints";
+import { BuildModeToggles } from "./components/BuildModeToggles";
 import { KeybindEditor } from "./components/KeybindEditor";
 import { HelpPanel } from "./components/HelpPanel";
 import { useBlockStore } from "./stores/blockStore";
@@ -324,7 +325,8 @@ export default function App() {
               if (!controls) return;
               const azimuth = controls.getAzimuthalAngle();
               const dirKey = actionToWasdKey(action);
-              const direction = wasdToBuildDirection(dirKey, azimuth);
+              const { axisAbsoluteWasd } = useKeybindStore.getState();
+              const direction = wasdToBuildDirection(dirKey, azimuth, axisAbsoluteWasd);
               store.buildMove(direction);
               return;
             }
@@ -478,6 +480,7 @@ export default function App() {
       </div>
       <SelectModeHints />
       <BuildModeHints onCustomize={() => setKeybindEditorOpen(true)} />
+      <BuildModeToggles />
       {keybindEditorOpen && <KeybindEditor onClose={() => setKeybindEditorOpen(false)} />}
       <PlacementWarning toolbarRef={toolbarRef} />
       <Canvas

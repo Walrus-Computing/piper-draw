@@ -4,15 +4,17 @@ import { useKeybindStore } from "../stores/keybindStore";
 export function BuildModeHints({ onCustomize }: { onCustomize: () => void }) {
   const mode = useBlockStore((s) => s.mode);
   const bindings = useKeybindStore((s) => s.bindings);
+  const axisAbsoluteWasd = useKeybindStore((s) => s.axisAbsoluteWasd);
   if (mode !== "build") return null;
 
+  const moveLabel = axisAbsoluteWasd ? "Move ±X / ±Y" : "Move XY";
   const hints = [
     ["Drag", "Pan"],
     ["Shift+Drag", "Rotate"],
     ["Scroll", "Zoom"],
     [
       `${bindings.moveForward.displayLabel}/${bindings.moveLeft.displayLabel}/${bindings.moveBack.displayLabel}/${bindings.moveRight.displayLabel}`,
-      "Move XY",
+      moveLabel,
     ],
     [`${bindings.moveUp.displayLabel}/${bindings.moveDown.displayLabel}`, "Move Z"],
     [bindings.undo.displayLabel, "Undo step"],
