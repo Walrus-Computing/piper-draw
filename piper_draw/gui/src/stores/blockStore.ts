@@ -148,6 +148,11 @@ interface BlockStore {
   freeBuild: boolean;
   toggleFreeBuild: () => void;
 
+  // Photo export — transient flag consumed by ScreenshotCapture inside <Canvas>.
+  photoRequest: boolean;
+  requestPhoto: () => void;
+  clearPhotoRequest: () => void;
+
   // View mode (perspective vs. orthographic elevation along an axis)
   viewMode: ViewMode;
   /** Per-axis last-used slice so toggling between iso views remembers position. */
@@ -250,6 +255,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
   freeBuild: false,
   toggleFreeBuild: () => set((s) => ({ freeBuild: !s.freeBuild })),
+
+  photoRequest: false,
+  requestPhoto: () => set({ photoRequest: true }),
+  clearPhotoRequest: () => set({ photoRequest: false }),
 
   viewMode: { kind: "persp" },
   lastIsoSlice: { x: 0, y: 0, z: 0 },

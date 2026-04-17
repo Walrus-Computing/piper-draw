@@ -35,6 +35,7 @@ import { useKeybindStore, buildActionForKey, actionToWasdKey } from "./stores/ke
 import { wasdToBuildDirection, tqecToThree, type Block, type ViewMode } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
+import { downloadPng } from "./utils/photoExport";
 import {
   ISO_INITIAL_ZOOM,
   isoBuildDirection,
@@ -414,6 +415,41 @@ function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> })
   return null;
 }
 
+/**
+ * Captures the WebGL canvas as a PNG when `photoRequest` is set.
+ * Waits two animation frames so React's commit (which hides grid/overlays)
+ * and R3F's subsequent render both complete before reading pixels.
+ */
+function ScreenshotCapture() {
+  const photoRequest = useBlockStore((s) => s.photoRequest);
+  const clearPhotoRequest = useBlockStore((s) => s.clearPhotoRequest);
+  const { gl } = useThree();
+
+  useEffect(() => {
+    if (!photoRequest) return;
+    let raf1 = 0;
+    let raf2 = 0;
+    let cancelled = false;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        if (cancelled) return;
+        downloadPng(gl.domElement).catch((err) => {
+          console.error("Photo export failed:", err);
+        }).finally(() => {
+          clearPhotoRequest();
+        });
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [photoRequest, gl, clearPhotoRequest]);
+
+  return null;
+}
+
 /** Exposes Three.js camera + viewport size to HTML components via a shared ref. Must be inside <Canvas>. */
 function ThreeStateBridge({ stateRef }: { stateRef: React.MutableRefObject<ThreeState | null> }) {
   const { camera, size } = useThree();
@@ -468,6 +504,7 @@ export default function App() {
   const [keybindEditorOpen, setKeybindEditorOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const threeStateRef = useRef<ThreeState | null>(null);
+  const photoRequest = useBlockStore((s) => s.photoRequest);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -666,27 +703,30 @@ export default function App() {
       {keybindEditorOpen && <KeybindEditor onClose={() => setKeybindEditorOpen(false)} />}
       <PlacementWarning toolbarRef={toolbarRef} />
       <Canvas
-        gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }}
+        gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping, preserveDrawingBuffer: true }}
         onContextMenu={(e) => e.preventDefault()}
       >
         <color attach="background" args={["#CBDFC6"]} />
         <ambientLight intensity={1.4} />
         <directionalLight position={[10, 10, 10]} intensity={1.0} />
         <BlockInstances />
-        <FoldOutCubeOverlay />
-        <InvalidBlockHighlights />
-        <SelectionHighlights />
-        <BuildCursor />
-        <OpenPipeGhosts />
+        {!photoRequest && <FoldOutCubeOverlay />}
+        {!photoRequest && <InvalidBlockHighlights />}
+        {!photoRequest && <SelectionHighlights />}
+        {!photoRequest && <BuildCursor />}
+        {!photoRequest && <OpenPipeGhosts />}
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
-        <GhostBlock />
+        {!photoRequest && <GhostBlock />}
         <AxisLabels />
         <FpsSampler targetRef={fpsRef} />
-        <CheckerboardGrid />
-        <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
-          <OrientationGizmo />
-        </GizmoHelper>
+        {!photoRequest && <CheckerboardGrid />}
+        {!photoRequest && (
+          <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
+            <OrientationGizmo />
+          </GizmoHelper>
+        )}
+        <ScreenshotCapture />
         <ThreeStateBridge stateRef={threeStateRef} />
         <ViewportCamera controlsRef={controlsRef} />
         <NavControlsModifier controlsRef={controlsRef} />
