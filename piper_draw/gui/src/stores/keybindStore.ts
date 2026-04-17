@@ -1,5 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { isMac } from "../components/keyLabels";
+
+export type Mode = "select" | "place" | "delete" | "build";
 
 export type BuildAction =
   | "moveForward"
@@ -13,38 +16,121 @@ export type BuildAction =
   | "cyclePipe"
   | "exitBuild";
 
+export type SelectAction =
+  | "selectAll"
+  | "deleteSelection"
+  | "clearSelection"
+  | "flipColors"
+  | "undo"
+  | "redo"
+  | "stepForward"
+  | "stepBack";
+
+export type PlaceAction = "undo" | "redo" | "stepForward" | "stepBack";
+export type DeleteAction = "undo" | "redo" | "stepForward" | "stepBack";
+
+export type ActionForMode = {
+  build: BuildAction;
+  select: SelectAction;
+  place: PlaceAction;
+  delete: DeleteAction;
+};
+
+export type AnyAction = BuildAction | SelectAction | PlaceAction | DeleteAction;
+
 export type KeyBinding = {
-  key: string; // e.key.toLowerCase() value
-  displayLabel: string; // Human-readable label for tooltips
+  key: string;     // e.key.toLowerCase()
+  ctrl?: boolean;  // Cmd on Mac, Ctrl elsewhere
+  shift?: boolean;
+  alt?: boolean;
 };
 
-export const BUILD_ACTIONS: BuildAction[] = [
-  "moveForward",
-  "moveBack",
-  "moveLeft",
-  "moveRight",
-  "moveUp",
-  "moveDown",
-  "undo",
-  "cycleBlock",
-  "cyclePipe",
-  "exitBuild",
-];
-
-export const ACTION_LABELS: Record<BuildAction, string> = {
-  moveForward: "Move forward",
-  moveBack: "Move back",
-  moveLeft: "Move left",
-  moveRight: "Move right",
-  moveUp: "Move up",
-  moveDown: "Move down",
-  undo: "Undo step",
-  cycleBlock: "Cycle block",
-  cyclePipe: "Cycle pipe",
-  exitBuild: "Exit build",
+export const ACTIONS: { [M in Mode]: readonly ActionForMode[M][] } = {
+  build: [
+    "moveForward", "moveBack", "moveLeft", "moveRight",
+    "moveUp", "moveDown",
+    "undo", "cycleBlock", "cyclePipe", "exitBuild",
+  ],
+  select: ["selectAll", "deleteSelection", "clearSelection", "flipColors", "undo", "redo", "stepForward", "stepBack"],
+  place: ["undo", "redo", "stepForward", "stepBack"],
+  delete: ["undo", "redo", "stepForward", "stepBack"],
 };
 
-export function keyToDisplayLabel(key: string): string {
+export const ACTION_LABELS: { [M in Mode]: Record<ActionForMode[M], string> } = {
+  build: {
+    moveForward: "Move forward",
+    moveBack: "Move back",
+    moveLeft: "Move left",
+    moveRight: "Move right",
+    moveUp: "Move up",
+    moveDown: "Move down",
+    undo: "Undo step",
+    cycleBlock: "Cycle block",
+    cyclePipe: "Cycle pipe",
+    exitBuild: "Exit build",
+  },
+  select: {
+    selectAll: "Select all",
+    deleteSelection: "Delete selected",
+    clearSelection: "Clear selection",
+    flipColors: "Flip colors",
+    undo: "Undo",
+    redo: "Redo",
+    stepForward: "Step forward (iso)",
+    stepBack: "Step back (iso)",
+  },
+  place: {
+    undo: "Undo",
+    redo: "Redo",
+    stepForward: "Step forward (iso)",
+    stepBack: "Step back (iso)",
+  },
+  delete: {
+    undo: "Undo",
+    redo: "Redo",
+    stepForward: "Step forward (iso)",
+    stepBack: "Step back (iso)",
+  },
+};
+
+export const DEFAULT_BINDINGS: { [M in Mode]: Record<ActionForMode[M], KeyBinding> } = {
+  build: {
+    moveForward: { key: "w" },
+    moveBack: { key: "s" },
+    moveLeft: { key: "a" },
+    moveRight: { key: "d" },
+    moveUp: { key: "arrowup" },
+    moveDown: { key: "arrowdown" },
+    undo: { key: "q" },
+    cycleBlock: { key: "c" },
+    cyclePipe: { key: "r" },
+    exitBuild: { key: "escape" },
+  },
+  select: {
+    selectAll: { key: "a", ctrl: true },
+    deleteSelection: { key: "delete" },
+    clearSelection: { key: "escape" },
+    flipColors: { key: "f" },
+    undo: { key: "z", ctrl: true },
+    redo: { key: "z", ctrl: true, shift: true },
+    stepForward: { key: "arrowup" },
+    stepBack: { key: "arrowdown" },
+  },
+  place: {
+    undo: { key: "z", ctrl: true },
+    redo: { key: "z", ctrl: true, shift: true },
+    stepForward: { key: "arrowup" },
+    stepBack: { key: "arrowdown" },
+  },
+  delete: {
+    undo: { key: "z", ctrl: true },
+    redo: { key: "z", ctrl: true, shift: true },
+    stepForward: { key: "arrowup" },
+    stepBack: { key: "arrowdown" },
+  },
+};
+
+function keyOnlyLabel(key: string): string {
   switch (key) {
     case "arrowup": return "↑";
     case "arrowdown": return "↓";
@@ -60,31 +146,37 @@ export function keyToDisplayLabel(key: string): string {
   }
 }
 
-export const DEFAULT_BINDINGS: Record<BuildAction, KeyBinding> = {
-  moveForward: { key: "w", displayLabel: "W" },
-  moveBack: { key: "s", displayLabel: "S" },
-  moveLeft: { key: "a", displayLabel: "A" },
-  moveRight: { key: "d", displayLabel: "D" },
-  moveUp: { key: "arrowup", displayLabel: "↑" },
-  moveDown: { key: "arrowdown", displayLabel: "↓" },
-  undo: { key: "q", displayLabel: "Q" },
-  cycleBlock: { key: "c", displayLabel: "C" },
-  cyclePipe: { key: "r", displayLabel: "R" },
-  exitBuild: { key: "escape", displayLabel: "Esc" },
-};
+export function bindingToLabel(b: KeyBinding): string {
+  let s = "";
+  if (b.ctrl) s += isMac ? "\u2318" : "Ctrl+";
+  if (b.shift) s += isMac ? "\u21E7" : "Shift+";
+  if (b.alt) s += isMac ? "\u2325" : "Alt+";
+  s += keyOnlyLabel(b.key);
+  return s;
+}
 
-/** Reverse lookup: key string → BuildAction (or null if unbound) */
-export function buildActionForKey(
-  bindings: Record<BuildAction, KeyBinding>,
+export function bindingMatchesEvent(b: KeyBinding, key: string, ctrl: boolean, shift: boolean, alt: boolean): boolean {
+  return (
+    b.key === key &&
+    !!b.ctrl === ctrl &&
+    !!b.shift === shift &&
+    !!b.alt === alt
+  );
+}
+
+export function actionForKey<A extends string>(
+  modeBindings: Record<A, KeyBinding>,
   key: string,
-): BuildAction | null {
-  for (const action of BUILD_ACTIONS) {
-    if (bindings[action].key === key) return action;
+  ctrl: boolean,
+  shift: boolean,
+  alt: boolean,
+): A | null {
+  for (const action of Object.keys(modeBindings) as A[]) {
+    if (bindingMatchesEvent(modeBindings[action], key, ctrl, shift, alt)) return action;
   }
   return null;
 }
 
-/** Maps a movement action back to canonical WASD key for wasdToBuildDirection() */
 export function actionToWasdKey(
   action: BuildAction,
 ): "w" | "a" | "s" | "d" | "arrowup" | "arrowdown" {
@@ -99,62 +191,101 @@ export function actionToWasdKey(
   }
 }
 
+export function isDefaultBindings<M extends Mode>(
+  mode: M,
+  bindings: Record<ActionForMode[M], KeyBinding>,
+): boolean {
+  const defaults = DEFAULT_BINDINGS[mode] as Record<ActionForMode[M], KeyBinding>;
+  for (const action of Object.keys(bindings) as ActionForMode[M][]) {
+    const b = bindings[action];
+    const d = defaults[action];
+    if (b.key !== d.key || !!b.ctrl !== !!d.ctrl || !!b.shift !== !!d.shift || !!b.alt !== !!d.alt) {
+      return false;
+    }
+  }
+  return true;
+}
+
+type BindingsByMode = { [M in Mode]: Record<ActionForMode[M], KeyBinding> };
+
+export type NavStyle = "pan" | "rotate";
+
 interface KeybindState {
-  bindings: Record<BuildAction, KeyBinding>;
+  bindings: BindingsByMode;
   cameraFollowsBuild: boolean;
   axisAbsoluteWasd: boolean;
-  setBinding: (action: BuildAction, key: string) => void;
-  resetToDefaults: () => void;
+  navStyle: NavStyle;
+  setBinding: <M extends Mode>(mode: M, action: ActionForMode[M], binding: KeyBinding) => void;
+  resetMode: (mode: Mode) => void;
   toggleCameraFollowsBuild: () => void;
   toggleAxisAbsoluteWasd: () => void;
+  setNavStyle: (style: NavStyle) => void;
+}
+
+function cloneDefaults(): BindingsByMode {
+  return {
+    build: { ...DEFAULT_BINDINGS.build },
+    select: { ...DEFAULT_BINDINGS.select },
+    place: { ...DEFAULT_BINDINGS.place },
+    delete: { ...DEFAULT_BINDINGS.delete },
+  };
 }
 
 export const useKeybindStore = create<KeybindState>()(
   persist(
     (set) => ({
-      bindings: { ...DEFAULT_BINDINGS },
+      bindings: cloneDefaults(),
       cameraFollowsBuild: false,
       axisAbsoluteWasd: false,
+      navStyle: "pan",
 
-      setBinding: (action, key) =>
+      setBinding: (mode, action, binding) =>
         set((state) => {
-          const displayLabel = keyToDisplayLabel(key);
-          const newBindings = { ...state.bindings };
-
-          // If another action uses this key, swap it
-          const conflicting = buildActionForKey(newBindings, key);
-          if (conflicting && conflicting !== action) {
-            newBindings[conflicting] = { ...newBindings[action] };
+          const modeBindings = { ...state.bindings[mode] } as Record<string, KeyBinding>;
+          // Swap with conflicting action in the same mode (if any).
+          const conflicting = actionForKey(
+            modeBindings as never,
+            binding.key,
+            !!binding.ctrl,
+            !!binding.shift,
+            !!binding.alt,
+          );
+          if (conflicting && conflicting !== (action as string)) {
+            modeBindings[conflicting] = { ...(modeBindings[action as string]) };
           }
-
-          newBindings[action] = { key, displayLabel };
-          return { bindings: newBindings };
+          modeBindings[action as string] = binding;
+          return {
+            bindings: { ...state.bindings, [mode]: modeBindings },
+          } as Partial<KeybindState>;
         }),
 
-      resetToDefaults: () => set({ bindings: { ...DEFAULT_BINDINGS } }),
+      resetMode: (mode) =>
+        set((state) => ({
+          bindings: { ...state.bindings, [mode]: { ...DEFAULT_BINDINGS[mode] } },
+        })),
 
       toggleCameraFollowsBuild: () =>
         set((s) => ({ cameraFollowsBuild: !s.cameraFollowsBuild })),
       toggleAxisAbsoluteWasd: () =>
         set((s) => ({ axisAbsoluteWasd: !s.axisAbsoluteWasd })),
+      setNavStyle: (style) => set({ navStyle: style }),
     }),
     {
       name: "piper-draw-keybinds",
-      version: 4,
-      migrate: () => {
-        // Always reset on version change to pick up renamed/added actions
-        return { bindings: { ...DEFAULT_BINDINGS } };
-      },
+      version: 7,
+      migrate: () => ({ bindings: cloneDefaults() }),
       merge: (persisted, current) => {
-        // Only restore persisted bindings for actions that still exist,
-        // ensuring new/renamed actions always get their defaults.
         const p = persisted as Partial<KeybindState>;
         const cur = current as KeybindState;
-        const merged = { ...cur.bindings };
+        const merged = cloneDefaults();
         if (p.bindings) {
-          for (const action of BUILD_ACTIONS) {
-            if (action in p.bindings) {
-              merged[action] = (p.bindings as Record<string, KeyBinding>)[action];
+          for (const mode of Object.keys(merged) as Mode[]) {
+            const stored = (p.bindings as Partial<BindingsByMode>)[mode] as Record<string, KeyBinding> | undefined;
+            if (!stored) continue;
+            const target = merged[mode] as Record<string, KeyBinding>;
+            for (const action of Object.keys(target)) {
+              const b = stored[action];
+              if (b && typeof b.key === "string") target[action] = b;
             }
           }
         }
@@ -165,15 +296,10 @@ export const useKeybindStore = create<KeybindState>()(
             typeof p.cameraFollowsBuild === "boolean" ? p.cameraFollowsBuild : cur.cameraFollowsBuild,
           axisAbsoluteWasd:
             typeof p.axisAbsoluteWasd === "boolean" ? p.axisAbsoluteWasd : cur.axisAbsoluteWasd,
+          navStyle:
+            p.navStyle === "pan" || p.navStyle === "rotate" ? p.navStyle : cur.navStyle,
         };
       },
     },
   ),
 );
-
-export function isDefaultBindings(bindings: Record<BuildAction, KeyBinding>): boolean {
-  for (const action of BUILD_ACTIONS) {
-    if (bindings[action].key !== DEFAULT_BINDINGS[action].key) return false;
-  }
-  return true;
-}

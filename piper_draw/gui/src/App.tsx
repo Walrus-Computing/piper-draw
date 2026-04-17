@@ -28,11 +28,20 @@ import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
 import { BuildModeHints } from "./components/BuildModeHints";
+import { SelectModeHints } from "./components/SelectModeHints";
+import { PlaceModeHints } from "./components/PlaceModeHints";
+import { DeleteModeHints } from "./components/DeleteModeHints";
 import { BuildModeToggles } from "./components/BuildModeToggles";
 import { KeybindEditor } from "./components/KeybindEditor";
 import { HelpPanel } from "./components/HelpPanel";
 import { useBlockStore } from "./stores/blockStore";
-import { useKeybindStore, buildActionForKey, actionToWasdKey } from "./stores/keybindStore";
+import {
+  useKeybindStore,
+  actionForKey,
+  actionToWasdKey,
+  type KeyBinding,
+  type Mode,
+} from "./stores/keybindStore";
 import { wasdToBuildDirection, tqecToThree, type Block, type ViewMode } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
@@ -283,73 +292,10 @@ function IsoViewport({
         zoomToCursor
         maxZoom={500}
         minZoom={2}
-        screenSpacePanning={false}
+        screenSpacePanning
         mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
       />
     </>
-  );
-}
-
-const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent);
-const modKey = isMac ? "\u2318" : "Ctrl+";
-
-function SelectModeHints() {
-  const mode = useBlockStore((s) => s.mode);
-  if (mode !== "select") return null;
-
-  const altKey = isMac ? "⌥ Option+" : "Alt+";
-  const hints = [
-    ["Click", "Select"],
-    ["Drag", "Box select / Move selection"],
-    [`${altKey}Drag`, "Orbit"],
-    ["Right Drag", "Pan"],
-    ["Shift+Click", "Add/remove"],
-    ["↑ ↓", "Nudge z ±3"],
-    [`${modKey}A`, "Select all"],
-    ["Delete", "Delete selected"],
-    ["F", "Flip colors"],
-    ["Esc", "Clear selection"],
-  ];
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: 60,
-        left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: 1,
-        display: "flex",
-        gap: "6px",
-        alignItems: "center",
-        background: "rgba(0,0,0,0.7)",
-        color: "#fff",
-        padding: "6px 14px",
-        borderRadius: "8px",
-        fontSize: "12px",
-        fontFamily: "sans-serif",
-        pointerEvents: "none",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {hints.map(([key, action], i) => (
-        <span key={key} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          {i > 0 && <span style={{ color: "rgba(255,255,255,0.3)" }}>|</span>}
-          <kbd
-            style={{
-              background: "rgba(255,255,255,0.15)",
-              padding: "1px 5px",
-              borderRadius: "3px",
-              fontSize: "11px",
-            }}
-          >
-            {key}
-          </kbd>
-          <span style={{ color: "rgba(255,255,255,0.7)" }}>{action}</span>
-        </span>
-      ))}
-    </div>
   );
 }
 
@@ -505,7 +451,7 @@ export default function App() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
-  const [keybindEditorOpen, setKeybindEditorOpen] = useState(false);
+  const [keybindEditorMode, setKeybindEditorMode] = useState<Mode | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const threeStateRef = useRef<ThreeState | null>(null);
   const photoRequest = useBlockStore((s) => s.photoRequest);
@@ -514,93 +460,98 @@ export default function App() {
     const handler = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       const ctrl = e.ctrlKey || e.metaKey;
+      const shift = e.shiftKey;
+      const alt = e.altKey;
       const store = useBlockStore.getState();
+      const bindings = useKeybindStore.getState().bindings;
+      const mode = store.mode;
 
-      // Build mode keys (no modifier)
-      if (!ctrl && store.mode === "build") {
-        const bindings = useKeybindStore.getState().bindings;
-        const action = buildActionForKey(bindings, key);
-        if (action) {
-          e.preventDefault();
-          switch (action) {
-            case "moveForward":
-            case "moveBack":
-            case "moveLeft":
-            case "moveRight":
-            case "moveUp":
-            case "moveDown": {
-              const controls = controlsRef.current;
-              if (!controls) return;
-              const dirKey = actionToWasdKey(action);
-              let direction;
-              if (store.viewMode.kind === "iso") {
-                direction = isoBuildDirection(dirKey, store.viewMode.axis);
-              } else {
-                const { axisAbsoluteWasd } = useKeybindStore.getState();
-                direction = wasdToBuildDirection(dirKey, controls.getAzimuthalAngle(), axisAbsoluteWasd);
-              }
-              store.buildMove(direction);
-              return;
+      if (mode === "build") {
+        const action = actionForKey(bindings.build, key, ctrl, shift, alt);
+        if (!action) return;
+        e.preventDefault();
+        switch (action) {
+          case "moveForward":
+          case "moveBack":
+          case "moveLeft":
+          case "moveRight":
+          case "moveUp":
+          case "moveDown": {
+            const controls = controlsRef.current;
+            if (!controls) return;
+            const dirKey = actionToWasdKey(action);
+            let direction;
+            if (store.viewMode.kind === "iso") {
+              direction = isoBuildDirection(dirKey, store.viewMode.axis);
+            } else {
+              const { axisAbsoluteWasd } = useKeybindStore.getState();
+              direction = wasdToBuildDirection(dirKey, controls.getAzimuthalAngle(), axisAbsoluteWasd);
             }
-            case "undo":
-              store.undoBuildStep();
-              return;
-            case "cycleBlock":
-              store.cycleBlock();
-              return;
-            case "cyclePipe":
-              store.cyclePipe();
-              return;
-            case "exitBuild":
-              store.setMode("place");
-              return;
+            store.buildMove(direction);
+            return;
           }
+          case "undo": store.undoBuildStep(); return;
+          case "cycleBlock": store.cycleBlock(); return;
+          case "cyclePipe": store.cyclePipe(); return;
+          case "exitBuild": store.setMode("place"); return;
         }
+        return;
       }
 
-      // Non-modifier shortcuts
-      if (!ctrl) {
-        if (key === "delete" || key === "backspace") {
+      const action = actionForKey<string>(
+        bindings[mode] as Record<string, KeyBinding>,
+        key,
+        ctrl,
+        shift,
+        alt,
+      );
+      if (!action) return;
+
+      switch (action) {
+        case "selectAll":
+          e.preventDefault();
+          store.selectAll();
+          return;
+        case "deleteSelection":
           if (store.selectedKeys.size > 0) {
             e.preventDefault();
             store.deleteSelected();
           }
           return;
-        }
-        if (key === "escape") {
+        case "clearSelection":
           if (store.selectedKeys.size > 0) {
             e.preventDefault();
             store.clearSelection();
           }
           return;
-        }
-        // Slice stepping in iso mode: [ decreases, ] increases.
-        if ((key === "[" || key === "]") && store.viewMode.kind === "iso") {
+        case "undo":
           e.preventDefault();
-          store.stepSlice(key === "]" ? 3 : -3);
+          store.undo();
           return;
-        }
-        if (key === "f" && store.mode === "select" && store.selectedKeys.size > 0) {
+        case "redo":
           e.preventDefault();
-          store.flipSelected();
+          store.redo();
           return;
-        }
-        return;
-      }
-
-      // Ctrl/Cmd shortcuts
-      if (key === "a" && store.mode === "select") {
-        e.preventDefault();
-        store.selectAll();
-      } else if (key === "z" && e.shiftKey) {
-        e.preventDefault();
-        store.redo();
-      } else if (key === "z") {
-        e.preventDefault();
-        store.undo();
-      } else if (key === "y") {
-        e.preventDefault();
-        store.redo();
+        case "stepForward":
+          // Skip slice-step in select mode when there's a selection — SelectModePointer
+          // handles ↑/↓ as a Z-nudge of the selection.
+          if (store.viewMode.kind === "iso" && !(mode === "select" && store.selectedKeys.size > 0)) {
+            e.preventDefault();
+            store.stepSlice(3);
+          }
+          return;
+        case "stepBack":
+          if (store.viewMode.kind === "iso" && !(mode === "select" && store.selectedKeys.size > 0)) {
+            e.preventDefault();
+            store.stepSlice(-3);
+          }
+          return;
+        case "flipColors":
+          if (store.selectedKeys.size > 0) {
+            e.preventDefault();
+            store.flipSelected();
+          }
+          return;
       }
     };
     window.addEventListener("keydown", handler);
@@ -651,6 +602,19 @@ export default function App() {
         onResetCamera={() => {
           const controls = controlsRef.current;
           if (!controls) return;
+          const viewMode = useBlockStore.getState().viewMode;
+          if (viewMode.kind === "iso") {
+            const sliceZero = { ...viewMode, slice: 0 };
+            animateCamera(controls, isoTargetThree(sliceZero), isoCameraThree(sliceZero), {
+              onComplete: () => {
+                const cur = useBlockStore.getState();
+                if (cur.viewMode.kind === "iso" && cur.viewMode.slice !== 0) {
+                  cur.stepSlice(-cur.viewMode.slice);
+                }
+              },
+            });
+            return;
+          }
           animateCamera(controls, controls.target0.clone(), controls.position0.clone());
         }}
         controlsRef={controlsRef}
@@ -701,10 +665,14 @@ export default function App() {
       >
         <FpsDisplay spanRef={fpsRef} />
       </div>
-      <SelectModeHints />
-      <BuildModeHints onCustomize={() => setKeybindEditorOpen(true)} />
+      <SelectModeHints onCustomize={() => setKeybindEditorMode("select")} />
+      <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />
+      <PlaceModeHints onCustomize={() => setKeybindEditorMode("place")} />
+      <DeleteModeHints onCustomize={() => setKeybindEditorMode("delete")} />
       <BuildModeToggles />
-      {keybindEditorOpen && <KeybindEditor onClose={() => setKeybindEditorOpen(false)} />}
+      {keybindEditorMode && (
+        <KeybindEditor mode={keybindEditorMode} onClose={() => setKeybindEditorMode(null)} />
+      )}
       <PlacementWarning toolbarRef={toolbarRef} />
       <Canvas
         gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping, preserveDrawingBuffer: true }}
