@@ -56,3 +56,20 @@ export function HintBar({
     </div>
   );
 }
+
+export function CustomizeLink({ onClick }: { onClick: () => void }) {
+  return (
+    <span
+      onClick={onClick}
+      style={{
+        color: "rgba(255,255,255,0.5)",
+        cursor: "pointer",
+        pointerEvents: "auto",
+        textDecoration: "underline",
+        fontSize: "11px",
+      }}
+    >
+      Customize
+    </span>
+  );
+}

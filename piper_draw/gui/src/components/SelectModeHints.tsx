@@ -1,10 +1,12 @@
 import { useBlockStore } from "../stores/blockStore";
-import { HintBar } from "./HintBar";
-import { altKey, modKey } from "./keyLabels";
+import { bindingToLabel, useKeybindStore } from "../stores/keybindStore";
+import { HintBar, CustomizeLink } from "./HintBar";
+import { altKey } from "./keyLabels";
 
-export function SelectModeHints() {
+export function SelectModeHints({ onCustomize }: { onCustomize: () => void }) {
   const mode = useBlockStore((s) => s.mode);
   const viewMode = useBlockStore((s) => s.viewMode);
+  const b = useKeybindStore((s) => s.bindings.select);
   if (mode !== "select") return null;
 
   const isIso = viewMode.kind === "iso";
@@ -16,12 +18,18 @@ export function SelectModeHints() {
     ...(isIso ? [] : [[`${altKey}Drag`, "Orbit"] as const]),
     ["Right Drag", "Pan"],
     ["Scroll", "Zoom"],
-    [`${modKey}A`, "Select all"],
-    [`${modKey}Z`, "Undo"],
-    ["Delete", "Delete selected"],
-    ["Esc", "Clear selection"],
+    [bindingToLabel(b.selectAll), "Select all"],
+    [bindingToLabel(b.undo), "Undo"],
+    [bindingToLabel(b.redo), "Redo"],
+    [bindingToLabel(b.deleteSelection), "Delete selected"],
+    [bindingToLabel(b.clearSelection), "Clear selection"],
   ];
-  if (isIso) hints.push(["[ / ]", "Step slice"]);
+  if (isIso) {
+    hints.push([
+      `${bindingToLabel(b.stepForward)}/${bindingToLabel(b.stepBack)}`,
+      `Step in ${viewMode.axis.toUpperCase()} direction`,
+    ]);
+  }
 
-  return <HintBar hints={hints} />;
+  return <HintBar hints={hints} trailing={<CustomizeLink onClick={onCustomize} />} />;
 }

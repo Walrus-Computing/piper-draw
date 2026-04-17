@@ -1,11 +1,11 @@
 import { useBlockStore } from "../stores/blockStore";
-import { useKeybindStore } from "../stores/keybindStore";
-import { HintBar } from "./HintBar";
+import { bindingToLabel, useKeybindStore } from "../stores/keybindStore";
+import { HintBar, CustomizeLink } from "./HintBar";
 
 export function BuildModeHints({ onCustomize }: { onCustomize: () => void }) {
   const mode = useBlockStore((s) => s.mode);
   const viewMode = useBlockStore((s) => s.viewMode);
-  const bindings = useKeybindStore((s) => s.bindings);
+  const b = useKeybindStore((s) => s.bindings.build);
   const axisAbsoluteWasd = useKeybindStore((s) => s.axisAbsoluteWasd);
   if (mode !== "build") return null;
 
@@ -17,30 +17,15 @@ export function BuildModeHints({ onCustomize }: { onCustomize: () => void }) {
     ...(isIso ? [] : [["Shift+Drag", "Rotate"] as const]),
     ["Scroll", "Zoom"],
     [
-      `${bindings.moveForward.displayLabel}/${bindings.moveLeft.displayLabel}/${bindings.moveBack.displayLabel}/${bindings.moveRight.displayLabel}`,
+      `${bindingToLabel(b.moveForward)}/${bindingToLabel(b.moveLeft)}/${bindingToLabel(b.moveBack)}/${bindingToLabel(b.moveRight)}`,
       moveLabel,
     ],
-    [`${bindings.moveUp.displayLabel}/${bindings.moveDown.displayLabel}`, "Move Z"],
-    [bindings.undo.displayLabel, "Undo step"],
-    [bindings.cycleBlock.displayLabel, "Cycle block"],
-    [bindings.cyclePipe.displayLabel, "Cycle pipe"],
-    [bindings.exitBuild.displayLabel, "Exit build"],
+    [`${bindingToLabel(b.moveUp)}/${bindingToLabel(b.moveDown)}`, "Move Z"],
+    [bindingToLabel(b.undo), "Undo step"],
+    [bindingToLabel(b.cycleBlock), "Cycle block"],
+    [bindingToLabel(b.cyclePipe), "Cycle pipe"],
+    [bindingToLabel(b.exitBuild), "Exit build"],
   ];
 
-  const customize = (
-    <span
-      onClick={onCustomize}
-      style={{
-        color: "rgba(255,255,255,0.5)",
-        cursor: "pointer",
-        pointerEvents: "auto",
-        textDecoration: "underline",
-        fontSize: "11px",
-      }}
-    >
-      Customize
-    </span>
-  );
-
-  return <HintBar hints={hints} trailing={customize} />;
+  return <HintBar hints={hints} trailing={<CustomizeLink onClick={onCustomize} />} />;
 }

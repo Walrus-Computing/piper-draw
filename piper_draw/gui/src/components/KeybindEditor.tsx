@@ -1,36 +1,54 @@
 import { useCallback, useEffect, useState } from "react";
-import type { BuildAction } from "../stores/keybindStore";
 import {
-  BUILD_ACTIONS,
+  ACTIONS,
   ACTION_LABELS,
+  bindingToLabel,
   useKeybindStore,
-  isDefaultBindings,
-  keyToDisplayLabel,
+  type ActionForMode,
+  type KeyBinding,
+  type Mode,
 } from "../stores/keybindStore";
 
-export function KeybindEditor({ onClose }: { onClose: () => void }) {
-  const bindings = useKeybindStore((s) => s.bindings);
-  const setBinding = useKeybindStore((s) => s.setBinding);
-  const resetToDefaults = useKeybindStore((s) => s.resetToDefaults);
-  const [listening, setListening] = useState<BuildAction | null>(null);
+const MODE_TITLES: Record<Mode, string> = {
+  build: "Build Mode Key Bindings",
+  select: "Select Mode Key Bindings",
+  place: "Place Mode Key Bindings",
+  delete: "Delete Mode Key Bindings",
+};
 
-  // Capture key when in listening mode
+export function KeybindEditor<M extends Mode>({
+  mode,
+  onClose,
+}: {
+  mode: M;
+  onClose: () => void;
+}) {
+  const bindings = useKeybindStore((s) => s.bindings[mode]) as Record<
+    ActionForMode[M],
+    KeyBinding
+  >;
+  const setBinding = useKeybindStore((s) => s.setBinding);
+  const resetMode = useKeybindStore((s) => s.resetMode);
+  const [listening, setListening] = useState<ActionForMode[M] | null>(null);
+
   useEffect(() => {
     if (!listening) return;
     const handler = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
       const key = e.key.toLowerCase();
-      // Ignore modifier-only presses
       if (["control", "shift", "alt", "meta"].includes(key)) return;
-      setBinding(listening, key);
+      const binding: KeyBinding = { key };
+      if (e.ctrlKey || e.metaKey) binding.ctrl = true;
+      if (e.shiftKey) binding.shift = true;
+      if (e.altKey) binding.alt = true;
+      setBinding(mode, listening, binding);
       setListening(null);
     };
-    window.addEventListener("keydown", handler, true); // capture phase
+    window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [listening, setBinding]);
+  }, [listening, setBinding, mode]);
 
-  // Close on Escape when not listening
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !listening) {
@@ -50,7 +68,8 @@ export function KeybindEditor({ onClose }: { onClose: () => void }) {
     [onClose],
   );
 
-  const showReset = !isDefaultBindings(bindings);
+  const actions = ACTIONS[mode] as readonly ActionForMode[M][];
+  const labels = ACTION_LABELS[mode] as Record<ActionForMode[M], string>;
 
   return (
     <div
@@ -76,9 +95,15 @@ export function KeybindEditor({ onClose }: { onClose: () => void }) {
           boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
         }}
       >
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Build Mode Key Bindings</h3>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 16,
+          }}
+        >
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{MODE_TITLES[mode]}</h3>
           <button
             onClick={onClose}
             style={{
@@ -94,14 +119,13 @@ export function KeybindEditor({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        {/* Binding rows */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {BUILD_ACTIONS.map((action) => {
+          {actions.map((action) => {
             const binding = bindings[action];
             const isListeningThis = listening === action;
             return (
               <div
-                key={action}
+                key={action as string}
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
@@ -111,7 +135,7 @@ export function KeybindEditor({ onClose }: { onClose: () => void }) {
                   background: isListeningThis ? "#e8f0fe" : "#f8f8f8",
                 }}
               >
-                <span style={{ fontSize: 13, color: "#333" }}>{ACTION_LABELS[action]}</span>
+                <span style={{ fontSize: 13, color: "#333" }}>{labels[action]}</span>
                 <button
                   onClick={() => setListening(isListeningThis ? null : action)}
                   style={{
@@ -119,7 +143,7 @@ export function KeybindEditor({ onClose }: { onClose: () => void }) {
                     padding: "4px 10px",
                     border: isListeningThis ? "2px solid #4285f4" : "1px solid #ccc",
                     borderRadius: 4,
-                    background: isListeningThis ? "#fff" : "#fff",
+                    background: "#fff",
                     cursor: "pointer",
                     fontSize: 13,
                     fontFamily: "monospace",
@@ -127,32 +151,29 @@ export function KeybindEditor({ onClose }: { onClose: () => void }) {
                     textAlign: "center",
                   }}
                 >
-                  {isListeningThis ? "Press a key…" : keyToDisplayLabel(binding.key)}
+                  {isListeningThis ? "Press a key…" : bindingToLabel(binding)}
                 </button>
               </div>
             );
           })}
         </div>
 
-        {/* Footer */}
-        {showReset && (
-          <div style={{ marginTop: 14, textAlign: "right" }}>
-            <button
-              onClick={resetToDefaults}
-              style={{
-                background: "none",
-                border: "1px solid #ccc",
-                borderRadius: 6,
-                padding: "5px 12px",
-                fontSize: 12,
-                cursor: "pointer",
-                color: "#555",
-              }}
-            >
-              Reset to defaults
-            </button>
-          </div>
-        )}
+        <div style={{ marginTop: 14, textAlign: "right" }}>
+          <button
+            onClick={() => resetMode(mode)}
+            style={{
+              background: "none",
+              border: "1px solid #ccc",
+              borderRadius: 6,
+              padding: "5px 12px",
+              fontSize: 12,
+              cursor: "pointer",
+              color: "#555",
+            }}
+          >
+            Reset to defaults
+          </button>
+        </div>
       </div>
     </div>
   );

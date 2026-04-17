@@ -1,10 +1,11 @@
 import { useBlockStore } from "../stores/blockStore";
-import { HintBar } from "./HintBar";
-import { modKey } from "./keyLabels";
+import { bindingToLabel, useKeybindStore } from "../stores/keybindStore";
+import { HintBar, CustomizeLink } from "./HintBar";
 
-export function DeleteModeHints() {
+export function DeleteModeHints({ onCustomize }: { onCustomize: () => void }) {
   const mode = useBlockStore((s) => s.mode);
   const viewMode = useBlockStore((s) => s.viewMode);
+  const b = useKeybindStore((s) => s.bindings.delete);
   if (mode !== "delete") return null;
 
   const isIso = viewMode.kind === "iso";
@@ -13,10 +14,15 @@ export function DeleteModeHints() {
     ["Drag", "Pan"],
     ...(isIso ? [] : [["Shift+Drag", "Rotate"] as const]),
     ["Scroll", "Zoom"],
-    [`${modKey}Z`, "Undo"],
-    [`${modKey}\u21E7Z`, "Redo"],
+    [bindingToLabel(b.undo), "Undo"],
+    [bindingToLabel(b.redo), "Redo"],
   ];
-  if (isIso) hints.push(["[ / ]", "Step slice"]);
+  if (isIso) {
+    hints.push([
+      `${bindingToLabel(b.stepForward)}/${bindingToLabel(b.stepBack)}`,
+      `Step in ${viewMode.axis.toUpperCase()} direction`,
+    ]);
+  }
 
-  return <HintBar hints={hints} />;
+  return <HintBar hints={hints} trailing={<CustomizeLink onClick={onCustomize} />} />;
 }
