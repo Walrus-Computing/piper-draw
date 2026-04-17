@@ -23,7 +23,12 @@ TEMPLATES = [
     ("cz.dae", "CZ", gallery.cz, "Logical CZ gate."),
     ("move_rotation.dae", "Move + Rotation", gallery.move_rotation, "Patch move and rotation."),
     ("three_cnots.dae", "Three CNOTs", gallery.three_cnots, "Three logical CNOTs in sequence."),
-    ("steane_encoding.dae", "Steane Encoding", gallery.steane_encoding, "Steane code encoding circuit compressed in spacetime."),
+    (
+        "steane_encoding.dae",
+        "Steane Encoding",
+        gallery.steane_encoding,
+        "Steane code encoding circuit compressed in spacetime.",
+    ),
 ]
 
 
