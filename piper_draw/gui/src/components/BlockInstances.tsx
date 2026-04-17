@@ -291,6 +291,7 @@ function TypedInstances({
     const b = blocksRef.current;
     if (e.instanceId == null || e.instanceId >= b.length) return;
     const store = useBlockStore.getState();
+    if (store.isDraggingSelection) return;
     if (store.mode === "build") {
       // In build mode, clicking a cube moves the cursor there
       const clicked = b[e.instanceId];

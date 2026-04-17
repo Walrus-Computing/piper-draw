@@ -20,6 +20,7 @@ export type SelectAction =
   | "selectAll"
   | "deleteSelection"
   | "clearSelection"
+  | "flipColors"
   | "undo"
   | "redo"
   | "stepForward"
@@ -50,7 +51,7 @@ export const ACTIONS: { [M in Mode]: readonly ActionForMode[M][] } = {
     "moveUp", "moveDown",
     "undo", "cycleBlock", "cyclePipe", "exitBuild",
   ],
-  select: ["selectAll", "deleteSelection", "clearSelection", "undo", "redo", "stepForward", "stepBack"],
+  select: ["selectAll", "deleteSelection", "clearSelection", "flipColors", "undo", "redo", "stepForward", "stepBack"],
   place: ["undo", "redo", "stepForward", "stepBack"],
   delete: ["undo", "redo", "stepForward", "stepBack"],
 };
@@ -72,6 +73,7 @@ export const ACTION_LABELS: { [M in Mode]: Record<ActionForMode[M], string> } = 
     selectAll: "Select all",
     deleteSelection: "Delete selected",
     clearSelection: "Clear selection",
+    flipColors: "Flip colors",
     undo: "Undo",
     redo: "Redo",
     stepForward: "Step forward (iso)",
@@ -108,6 +110,7 @@ export const DEFAULT_BINDINGS: { [M in Mode]: Record<ActionForMode[M], KeyBindin
     selectAll: { key: "a", ctrl: true },
     deleteSelection: { key: "delete" },
     clearSelection: { key: "escape" },
+    flipColors: { key: "f" },
     undo: { key: "z", ctrl: true },
     redo: { key: "z", ctrl: true, shift: true },
     stepForward: { key: "arrowup" },

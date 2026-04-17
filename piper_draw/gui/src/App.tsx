@@ -22,7 +22,8 @@ import { ValidationToast } from "./components/ValidationToast";
 import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { SelectionHighlights } from "./components/SelectionHighlights";
 import { BuildCursor } from "./components/BuildCursor";
-import { MarqueeSelect, type ThreeState } from "./components/MarqueeSelect";
+import { SelectModePointer, type ThreeState } from "./components/SelectModePointer";
+import { DragGhost } from "./components/DragGhost";
 import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
@@ -44,6 +45,7 @@ import {
 import { wasdToBuildDirection, tqecToThree, type Block, type ViewMode } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
+import { downloadPng } from "./utils/photoExport";
 import {
   ISO_INITIAL_ZOOM,
   isoBuildDirection,
@@ -236,6 +238,7 @@ function ViewportCamera({ controlsRef }: { controlsRef: React.RefObject<any> }) 
           ref={controlsRef}
           makeDefault
           enableRotate
+          zoomToCursor
           maxDistance={50000}
           screenSpacePanning={false}
           mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
@@ -286,6 +289,7 @@ function IsoViewport({
         ref={controlsRef}
         makeDefault
         enableRotate={false}
+        zoomToCursor
         maxZoom={500}
         minZoom={2}
         screenSpacePanning
@@ -361,6 +365,41 @@ function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> })
   return null;
 }
 
+/**
+ * Captures the WebGL canvas as a PNG when `photoRequest` is set.
+ * Waits two animation frames so React's commit (which hides grid/overlays)
+ * and R3F's subsequent render both complete before reading pixels.
+ */
+function ScreenshotCapture() {
+  const photoRequest = useBlockStore((s) => s.photoRequest);
+  const clearPhotoRequest = useBlockStore((s) => s.clearPhotoRequest);
+  const { gl } = useThree();
+
+  useEffect(() => {
+    if (!photoRequest) return;
+    let raf1 = 0;
+    let raf2 = 0;
+    let cancelled = false;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        if (cancelled) return;
+        downloadPng(gl.domElement).catch((err) => {
+          console.error("Photo export failed:", err);
+        }).finally(() => {
+          clearPhotoRequest();
+        });
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [photoRequest, gl, clearPhotoRequest]);
+
+  return null;
+}
+
 /** Exposes Three.js camera + viewport size to HTML components via a shared ref. Must be inside <Canvas>. */
 function ThreeStateBridge({ stateRef }: { stateRef: React.MutableRefObject<ThreeState | null> }) {
   const { camera, size } = useThree();
@@ -415,6 +454,7 @@ export default function App() {
   const [keybindEditorMode, setKeybindEditorMode] = useState<Mode | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const threeStateRef = useRef<ThreeState | null>(null);
+  const photoRequest = useBlockStore((s) => s.photoRequest);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -493,15 +533,23 @@ export default function App() {
           store.redo();
           return;
         case "stepForward":
-          if (store.viewMode.kind === "iso") {
+          // Skip slice-step in select mode when there's a selection — SelectModePointer
+          // handles ↑/↓ as a Z-nudge of the selection.
+          if (store.viewMode.kind === "iso" && !(mode === "select" && store.selectedKeys.size > 0)) {
             e.preventDefault();
             store.stepSlice(3);
           }
           return;
         case "stepBack":
-          if (store.viewMode.kind === "iso") {
+          if (store.viewMode.kind === "iso" && !(mode === "select" && store.selectedKeys.size > 0)) {
             e.preventDefault();
             store.stepSlice(-3);
+          }
+          return;
+        case "flipColors":
+          if (store.selectedKeys.size > 0) {
+            e.preventDefault();
+            store.flipSelected();
           }
           return;
       }
@@ -627,32 +675,36 @@ export default function App() {
       )}
       <PlacementWarning toolbarRef={toolbarRef} />
       <Canvas
-        gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }}
+        gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping, preserveDrawingBuffer: true }}
         onContextMenu={(e) => e.preventDefault()}
       >
         <color attach="background" args={["#CBDFC6"]} />
         <ambientLight intensity={1.4} />
         <directionalLight position={[10, 10, 10]} intensity={1.0} />
         <BlockInstances />
-        <FoldOutCubeOverlay />
-        <InvalidBlockHighlights />
-        <SelectionHighlights />
-        <BuildCursor />
-        <OpenPipeGhosts />
+        {!photoRequest && <FoldOutCubeOverlay />}
+        {!photoRequest && <InvalidBlockHighlights />}
+        {!photoRequest && <SelectionHighlights />}
+        {!photoRequest && <DragGhost />}
+        {!photoRequest && <BuildCursor />}
+        {!photoRequest && <OpenPipeGhosts />}
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
-        <GhostBlock />
+        {!photoRequest && <GhostBlock />}
         <AxisLabels />
         <FpsSampler targetRef={fpsRef} />
-        <CheckerboardGrid />
-        <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
-          <OrientationGizmo />
-        </GizmoHelper>
+        {!photoRequest && <CheckerboardGrid />}
+        {!photoRequest && (
+          <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
+            <OrientationGizmo />
+          </GizmoHelper>
+        )}
+        <ScreenshotCapture />
         <ThreeStateBridge stateRef={threeStateRef} />
         <ViewportCamera controlsRef={controlsRef} />
         <NavControlsModifier controlsRef={controlsRef} />
       </Canvas>
-      <MarqueeSelect threeStateRef={threeStateRef} controlsRef={controlsRef} />
+      <SelectModePointer threeStateRef={threeStateRef} controlsRef={controlsRef} />
     </>
   );
 }
