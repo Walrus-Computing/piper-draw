@@ -25,12 +25,17 @@ import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { BuildModeHints } from "./components/BuildModeHints";
 import { KeybindEditor } from "./components/KeybindEditor";
+import { HelpPanel } from "./components/HelpPanel";
 import { useBlockStore } from "./stores/blockStore";
 import { useKeybindStore, buildActionForKey, actionToWasdKey } from "./stores/keybindStore";
-import { wasdToBuildDirection, tqecToThree } from "./types";
+import { wasdToBuildDirection, tqecToThree, type Block } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
+import { animateCamera } from "./utils/cameraAnim";
 
 const GRID_SNAP = 3;
+
+const AUTOSAVE_KEY = "piper-draw:autosave:v1";
+const AUTOSAVE_DEBOUNCE_MS = 500;
 
 /**
  * Shader-based ground grid: dark grey cells at block positions (mod 3 ≡ 0),
@@ -194,6 +199,7 @@ function SelectModeHints() {
  * Snaps the camera to the build direction target when cameraSnapTarget changes.
  * Uses OrbitControls to set azimuthal angle and target position.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> }) {
   const cameraSnapTarget = useBlockStore((s) => s.cameraSnapTarget);
   const lastBuildAxis = useBlockStore((s) => s.lastBuildAxis);
@@ -209,39 +215,31 @@ function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> })
 
     const controls = controlsRef.current;
     const [tx, ty, tz] = tqecToThree(cameraSnapTarget.targetPos, "XZZ");
+    const endTarget = new THREE.Vector3(tx, ty, tz);
 
     // Check if axis changed compared to previous build move
     const axisChanged = prevBuildAxis.current !== lastBuildAxis;
     prevBuildAxis.current = lastBuildAxis;
 
-    if (cameraSnapTarget.azimuth !== null) {
-      if (axisChanged) {
-        // First move into this axis — reposition camera behind build direction with slight offset
-        const currentDistance = camera.position.distanceTo(controls.target);
-        const dist = Math.max(currentDistance, 15);
-        controls.target.set(tx, ty, tz);
-        const polar = Math.min(controls.getPolarAngle(), 1.2);
-        const az = cameraSnapTarget.azimuth + 0.12;
-
-        camera.position.set(
-          tx + dist * Math.sin(polar) * Math.sin(az),
-          ty + dist * Math.cos(polar),
-          tz + dist * Math.sin(polar) * Math.cos(az),
-        );
-      } else {
-        // Same axis — translate camera to follow cursor, keep current viewing angle
-        const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
-        controls.target.set(tx, ty, tz);
-        camera.position.set(tx + offset.x, ty + offset.y, tz + offset.z);
-      }
+    let endPos: THREE.Vector3;
+    if (cameraSnapTarget.azimuth !== null && axisChanged) {
+      // First move into this axis — reposition camera behind build direction with slight offset
+      const currentDistance = camera.position.distanceTo(controls.target);
+      const dist = Math.max(currentDistance, 15);
+      const polar = Math.min(controls.getPolarAngle(), 1.2);
+      const az = cameraSnapTarget.azimuth + 0.12;
+      endPos = new THREE.Vector3(
+        tx + dist * Math.sin(polar) * Math.sin(az),
+        ty + dist * Math.cos(polar),
+        tz + dist * Math.sin(polar) * Math.cos(az),
+      );
     } else {
-      // Z movement — translate camera, preserve current viewing angle
+      // Same axis or Z movement — translate camera, preserve current viewing angle
       const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
-      controls.target.set(tx, ty, tz);
-      camera.position.set(tx + offset.x, ty + offset.y, tz + offset.z);
+      endPos = endTarget.clone().add(offset);
     }
 
-    controls.update();
+    animateCamera(controls, endTarget, endPos);
     clearCameraSnap();
   });
 
@@ -300,6 +298,7 @@ export default function App() {
   const controlsRef = useRef<any>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [keybindEditorOpen, setKeybindEditorOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const threeStateRef = useRef<ThreeState | null>(null);
 
   useEffect(() => {
@@ -383,10 +382,84 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(AUTOSAVE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          useBlockStore.getState().hydrateBlocks(new Map<string, Block>(parsed));
+        }
+      }
+    } catch {
+      localStorage.removeItem(AUTOSAVE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const flush = (blocks: Map<string, Block>) => {
+      try {
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(Array.from(blocks.entries())));
+      } catch {
+        // Quota exceeded or storage unavailable — ignore.
+      }
+    };
+    const unsub = useBlockStore.subscribe((state, prev) => {
+      if (state.blocks === prev.blocks) return;
+      if (timeout !== null) clearTimeout(timeout);
+      const snapshot = state.blocks;
+      timeout = setTimeout(() => flush(snapshot), AUTOSAVE_DEBOUNCE_MS);
+    });
+    return () => {
+      if (timeout !== null) {
+        clearTimeout(timeout);
+        flush(useBlockStore.getState().blocks);
+      }
+      unsub();
+    };
+  }, []);
+
   return (
     <>
-      <Toolbar onResetCamera={() => controlsRef.current?.reset()} controlsRef={controlsRef} toolbarRef={toolbarRef} />
+      <Toolbar
+        onResetCamera={() => {
+          const controls = controlsRef.current;
+          if (!controls) return;
+          animateCamera(controls, controls.target0.clone(), controls.position0.clone());
+        }}
+        controlsRef={controlsRef}
+        toolbarRef={toolbarRef}
+      />
       <ValidationToast toolbarRef={toolbarRef} controlsRef={controlsRef} />
+      <button
+        onClick={() => setHelpOpen(true)}
+        onPointerDown={(e) => e.stopPropagation()}
+        aria-label="About piper-draw"
+        title="About piper-draw"
+        style={{
+          position: "fixed",
+          bottom: 16,
+          left: 16,
+          zIndex: 1,
+          width: 32,
+          height: 32,
+          borderRadius: "50%",
+          border: "1px solid #ddd",
+          background: "rgba(255,255,255,0.9)",
+          boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
+          cursor: "pointer",
+          fontFamily: "sans-serif",
+          fontSize: 16,
+          fontWeight: 600,
+          color: "#555",
+          padding: 0,
+          lineHeight: 1,
+        }}
+      >
+        ?
+      </button>
+      {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
       <div
         onPointerDown={(e) => e.stopPropagation()}
         style={{
@@ -408,7 +481,7 @@ export default function App() {
       {keybindEditorOpen && <KeybindEditor onClose={() => setKeybindEditorOpen(false)} />}
       <PlacementWarning toolbarRef={toolbarRef} />
       <Canvas
-        camera={{ position: [14, 14, -14], fov: 35 }}
+        camera={{ position: [14, 14, -14], fov: 35, near: 0.1, far: 100000 }}
         gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }}
         onContextMenu={(e) => e.preventDefault()}
       >
@@ -433,6 +506,7 @@ export default function App() {
         <OrbitControls
           ref={controlsRef}
           makeDefault
+          maxDistance={50000}
           screenSpacePanning={false}
           mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
         />

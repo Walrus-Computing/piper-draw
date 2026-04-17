@@ -1,11 +1,56 @@
+import { useEffect, useRef, useState } from "react";
 import { useBlockStore } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
 import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, PIPE_TYPE_TO_VARIANT } from "../types";
 import type { BlockType, CubeType, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
+import { fetchTemplateManifest, loadTemplateBlocks, type TemplateEntry } from "../utils/templates";
+import { animateCamera } from "../utils/cameraAnim";
 import * as THREE from "three";
 import { usePreviewImages } from "./PreviewRenderer";
+
+// ---------------------------------------------------------------------------
+// Responsive sizing
+// ---------------------------------------------------------------------------
+
+// Horizontal margin (px) kept between the toolbar and the viewport edges
+// when the toolbar is scaled down to fit a narrow window.
+const TOOLBAR_VIEWPORT_MARGIN_PX = 20;
+
+// Returns a CSS scale factor that keeps the toolbar at its natural size when
+// it fits in the viewport, and shrinks it just enough to fit when it doesn't.
+function useToolbarScale(toolbarRef: React.RefObject<HTMLDivElement | null>): number {
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    let frame = 0;
+    const recompute = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const node = toolbarRef.current;
+        if (!node) return;
+        // offsetWidth is the layout (untransformed) width — independent of
+        // the scale we apply, so this measurement is stable across renders.
+        const natural = node.offsetWidth;
+        if (natural === 0) return;
+        const available = window.innerWidth - TOOLBAR_VIEWPORT_MARGIN_PX;
+        setScale(Math.min(1, available / natural));
+      });
+    };
+    const node = toolbarRef.current;
+    const ro = node ? new ResizeObserver(recompute) : null;
+    if (node && ro) ro.observe(node);
+    window.addEventListener("resize", recompute);
+    recompute();
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", recompute);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [toolbarRef]);
+  return scale;
+}
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -56,6 +101,7 @@ const blockBtnStyle = (active: boolean, disabled?: boolean) => ({
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCamera: () => void; controlsRef: React.RefObject<any>; toolbarRef: React.RefObject<HTMLDivElement | null> }) {
+  const scale = useToolbarScale(toolbarRef);
   const mode = useBlockStore((s) => s.mode);
   const setMode = useBlockStore((s) => s.setMode);
   const cubeType = useBlockStore((s) => s.cubeType);
@@ -192,10 +238,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
   const setCameraPreset = (position: [number, number, number]) => {
     const controls = controlsRef.current;
     if (!controls) return;
-    const camera = controls.object as THREE.PerspectiveCamera;
-    camera.position.set(...position);
-    controls.target.set(0, 0, 0);
-    controls.update();
+    animateCamera(controls, new THREE.Vector3(0, 0, 0), new THREE.Vector3(...position));
   };
 
   const previewImg = (key: string) => {
@@ -213,7 +256,8 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         position: "fixed",
         top: 10,
         left: "50%",
-        transform: "translateX(-50%)",
+        transform: `translateX(-50%) scale(${scale})`,
+        transformOrigin: "top center",
         zIndex: 1,
         display: "flex",
         gap: "10px",
@@ -274,7 +318,11 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
           Redo
         </button>
         <button
-          onClick={clearAll}
+          onClick={() => {
+            if (!window.confirm("Are you sure you want to delete the whole diagram?")) return;
+            clearAll();
+            onResetCamera();
+          }}
           disabled={blocksEmpty}
           style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
         >
@@ -337,6 +385,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         >
           Export
         </button>
+        <TemplatePicker onLoad={loadBlocks} />
       </div>
 
       {/* Separator */}
@@ -432,6 +481,103 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
           return <><span>X: {pos.x / 3}</span><span>Y: {pos.y / 3}</span><span>Z: {pos.z / 3}</span></>;
         })()}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Template picker — lists bundled .dae files generated from tqec.gallery
+// ---------------------------------------------------------------------------
+
+function TemplatePicker({ onLoad }: { onLoad: (blocks: Map<string, import("../types").Block>) => void }) {
+  const [open, setOpen] = useState(false);
+  const [templates, setTemplates] = useState<TemplateEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loadingFile, setLoadingFile] = useState<string | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const toggle = async () => {
+    const next = !open;
+    setOpen(next);
+    if (next && templates === null) {
+      try {
+        setTemplates(await fetchTemplateManifest());
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    }
+  };
+
+  const pick = async (entry: TemplateEntry) => {
+    setLoadingFile(entry.filename);
+    try {
+      const blocks = await loadTemplateBlocks(entry.filename);
+      onLoad(blocks);
+      setOpen(false);
+    } catch (err) {
+      alert(`Failed to load template: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setLoadingFile(null);
+    }
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button onClick={toggle} style={btnStyle(open)} title="Load a bundled template diagram from tqec.gallery">
+        Templates ▾
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            right: 0,
+            background: "#fff",
+            border: "1px solid #ccc",
+            borderRadius: 4,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            padding: 4,
+            minWidth: 220,
+            zIndex: 1000,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          {error && <div style={{ padding: 6, color: "#c0392b", fontSize: 12 }}>{error}</div>}
+          {!error && templates === null && <div style={{ padding: 6, fontSize: 12, color: "#666" }}>Loading…</div>}
+          {templates?.map((t) => (
+            <button
+              key={t.filename}
+              onClick={() => pick(t)}
+              disabled={loadingFile !== null}
+              title={`${t.description} (${t.filename})`}
+              style={{
+                ...btnStyle(false),
+                textAlign: "left",
+                padding: "6px 10px",
+                opacity: loadingFile && loadingFile !== t.filename ? 0.5 : 1,
+              }}
+            >
+              {loadingFile === t.filename ? `${t.name}…` : t.name}
+            </button>
+          ))}
+          {templates && (
+            <div style={{ padding: "4px 6px 2px", fontSize: 10, color: "#888" }}>
+              From <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

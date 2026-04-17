@@ -141,8 +141,8 @@ export function exportBlocksToDae(blocks: Map<string, Block>): string {
     const kindLower = block.type.toLowerCase();
     const nodeId = `lib_${kindLower}`;
 
-    let tx = block.pos.x;
-    let ty = block.pos.y;
+    const tx = block.pos.x;
+    const ty = block.pos.y;
     let tz = block.pos.z;
 
     // Y half-cube offset: shift +0.5 in Z when there's a pipe above

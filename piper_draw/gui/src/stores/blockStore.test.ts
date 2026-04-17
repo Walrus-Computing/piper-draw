@@ -309,12 +309,12 @@ describe("blockStore", () => {
       expect(useBlockStore.getState().selectedKeys.size).toBe(0);
     });
 
-    it("preserves selection when switching to delete mode", () => {
+    it("clears selection when switching to delete mode", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       useBlockStore.setState({ mode: "select" });
       useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
       useBlockStore.getState().setMode("delete");
-      expect(useBlockStore.getState().selectedKeys.size).toBe(1);
+      expect(useBlockStore.getState().selectedKeys.size).toBe(0);
     });
   });
 

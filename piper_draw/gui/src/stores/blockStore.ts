@@ -121,6 +121,7 @@ interface BlockStore {
   undo: () => void;
   redo: () => void;
   loadBlocks: (blocks: Map<string, Block>) => void;
+  hydrateBlocks: (blocks: Map<string, Block>) => void;
   clearAll: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
@@ -180,6 +181,29 @@ function doRemove(
   newHidden.delete(key);
   for (const [k, v] of affected) newHidden.set(k, v);
   return { blocks: newBlocks, hiddenFaces: newHidden };
+}
+
+function computeDerivedFromBlocks(blocks: Map<string, Block>): {
+  spatialIndex: SpatialIndex;
+  hiddenFaces: Map<string, FaceMask>;
+  undeterminedCubes: Map<string, UndeterminedCubeInfo>;
+} {
+  const spatialIndex = buildSpatialIndex(blocks);
+  const hiddenFaces: Map<string, FaceMask> = new Map();
+  for (const [key, block] of blocks) {
+    const mask = getHiddenFaceMaskForPos(block.pos, block.type, blocks, spatialIndex);
+    if (mask !== 0) hiddenFaces.set(key, mask);
+  }
+  const undeterminedCubes = new Map<string, UndeterminedCubeInfo>();
+  for (const [key, block] of blocks) {
+    if (isPipeType(block.type) || block.type === "Y") continue;
+    const opts = determineCubeOptions(block.pos, blocks);
+    if (!opts.determined && opts.options.length > 1) {
+      const idx = Math.max(0, opts.options.indexOf(block.type as CubeType));
+      undeterminedCubes.set(key, { options: [...opts.options], currentIndex: idx });
+    }
+  }
+  return { spatialIndex, hiddenFaces, undeterminedCubes };
 }
 
 export const useBlockStore = create<BlockStore>((set, get) => ({
@@ -269,7 +293,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       hoveredBlockType: null,
       hoveredInvalid: false,
       hoveredInvalidReason: null,
-      ...(mode === "place" ? { selectedKeys: new Set<string>() } : {}),
+      ...(mode !== "select" ? { selectedKeys: new Set<string>() } : {}),
     });
   },
   setCubeType: (cubeType) => set({ cubeType, pipeVariant: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
@@ -798,39 +822,38 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   loadBlocks: (incoming) =>
     set((state) => {
       if (incoming.size === 0 && state.blocks.size === 0) return state;
-      const newIndex = buildSpatialIndex(incoming);
-      const newHidden: Map<string, FaceMask> = new Map();
-      for (const [key, block] of incoming) {
-        const mask = getHiddenFaceMaskForPos(block.pos, block.type, incoming, newIndex);
-        if (mask !== 0) newHidden.set(key, mask);
-      }
-      // Recompute undetermined state from loaded blocks
-      const newUndetermined = new Map<string, UndeterminedCubeInfo>();
-      for (const [key, block] of incoming) {
-        if (isPipeType(block.type) || block.type === "Y") continue;
-        const opts = determineCubeOptions(block.pos, incoming);
-        if (!opts.determined && opts.options.length > 1) {
-          const idx = Math.max(0, opts.options.indexOf(block.type as CubeType));
-          newUndetermined.set(key, { options: [...opts.options], currentIndex: idx });
-        }
-      }
+      const { spatialIndex, hiddenFaces, undeterminedCubes } = computeDerivedFromBlocks(incoming);
       const cmd: UndoCommand = {
         kind: "load",
         savedBlocks: state.blocks,
         savedHiddenFaces: state.hiddenFaces,
         savedUndetermined: state.undeterminedCubes,
         newBlocks: incoming,
-        newIndex,
-        newHiddenFaces: newHidden,
+        newIndex: spatialIndex,
+        newHiddenFaces: hiddenFaces,
       };
       return {
         blocks: incoming,
-        spatialIndex: newIndex,
-        hiddenFaces: newHidden,
+        spatialIndex,
+        hiddenFaces,
         history: [...state.history, cmd].slice(-MAX_HISTORY),
         future: [],
         hoveredGridPos: null,
-        undeterminedCubes: newUndetermined,
+        undeterminedCubes,
+      };
+    }),
+
+  hydrateBlocks: (incoming) =>
+    set((state) => {
+      if (incoming.size === 0) return state;
+      const { spatialIndex, hiddenFaces } = computeDerivedFromBlocks(incoming);
+      return {
+        blocks: incoming,
+        spatialIndex,
+        hiddenFaces,
+        hoveredGridPos: null,
+        selectedKeys: new Set<string>(),
+        undeterminedCubes: new Map(),
       };
     }),
 

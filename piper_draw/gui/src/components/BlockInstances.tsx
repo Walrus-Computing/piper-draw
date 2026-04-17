@@ -48,6 +48,7 @@ function resolvePipeTypeFromFace(
   return null;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function getCachedGeometry(blockType: BlockType, hiddenFaces: FaceMask): THREE.BufferGeometry {
   const key = `${blockType}:${hiddenFaces}`;
   let geo = geometryCache.get(key);
@@ -58,6 +59,7 @@ export function getCachedGeometry(blockType: BlockType, hiddenFaces: FaceMask): 
   return geo;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function getCachedEdges(blockType: BlockType, hiddenFaces: FaceMask): THREE.BufferGeometry {
   const key = `${blockType}:${hiddenFaces}`;
   let geo = edgesCache.get(key);
@@ -68,6 +70,7 @@ export function getCachedEdges(blockType: BlockType, hiddenFaces: FaceMask): THR
   return geo;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function getCachedFullBox(blockType: BlockType): THREE.BoxGeometry {
   let geo = fullBoxCache.get(blockType);
   if (!geo) {

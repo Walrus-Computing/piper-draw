@@ -1,8 +1,8 @@
-import { useRef, useMemo } from "react";
+import { useMemo } from "react";
 import * as THREE from "three";
-import { useFrame } from "@react-three/fiber";
 import { useValidationStore } from "../stores/validationStore";
 import { useBlockStore } from "../stores/blockStore";
+import { usePulseScale } from "../hooks/usePulseScale";
 import { tqecToThree, yBlockZOffset, blockThreeSize, posKey } from "../types";
 import type { BlockType, Position3D } from "../types";
 
@@ -57,14 +57,8 @@ function parseKey(key: string): Position3D | null {
 
 /** Pulsing red ghost cube for the currently selected error */
 function PulsingErrorBlock({ position, blockType }: { position: [number, number, number]; blockType: BlockType }) {
-  const groupRef = useRef<THREE.Group>(null!);
+  const groupRef = usePulseScale();
   const { box } = getHighlightGeo(blockType);
-
-  useFrame(({ clock }) => {
-    if (!groupRef.current) return;
-    const pulse = 1.06 + 0.03 * Math.sin(clock.getElapsedTime() * 4);
-    groupRef.current.scale.setScalar(pulse);
-  });
 
   return (
     <group ref={groupRef} position={position}>

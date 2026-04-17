@@ -1,16 +1,8 @@
 """Test that piper-draw's DAE export is compatible with tqec's BlockGraph.from_dae_file()."""
 
-import io
 import tempfile
-from pathlib import Path
-
-import pytest
 
 from tqec.computation.block_graph import BlockGraph
-from tqec.computation.cube import YHalfCube, ZXCube
-from tqec.computation.pipe import PipeKind
-from tqec.utils.enums import Basis
-
 
 # ---------------------------------------------------------------------------
 # Helper: generate a DAE string matching piper-draw's export format
@@ -69,7 +61,9 @@ def _piper_draw_dae(blocks: list[tuple[str, tuple[float, float, float]]]) -> str
           <float_array id="{gid}_pos_arr" count="9">0 0 0 1 0 0 0 1 0</float_array>
           <technique_common>
             <accessor source="#{gid}_pos_arr" count="3" stride="3">
-              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+              <param name="X" type="float"/>
+              <param name="Y" type="float"/>
+              <param name="Z" type="float"/>
             </accessor>
           </technique_common>
         </source>
@@ -77,7 +71,9 @@ def _piper_draw_dae(blocks: list[tuple[str, tuple[float, float, float]]]) -> str
           <float_array id="{gid}_norm_arr" count="9">0 0 1 0 0 1 0 0 1</float_array>
           <technique_common>
             <accessor source="#{gid}_norm_arr" count="3" stride="3">
-              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+              <param name="X" type="float"/>
+              <param name="Y" type="float"/>
+              <param name="Z" type="float"/>
             </accessor>
           </technique_common>
         </source>
@@ -176,11 +172,13 @@ class TestDaeTqecCompat:
 
     def test_two_cubes_with_pipe(self):
         """Two cubes connected by a pipe."""
-        graph = _write_and_read([
-            ("xzz", (0, 0, 0)),
-            ("ozx", (1, 0, 0)),
-            ("zxz", (3, 0, 0)),
-        ])
+        graph = _write_and_read(
+            [
+                ("xzz", (0, 0, 0)),
+                ("ozx", (1, 0, 0)),
+                ("zxz", (3, 0, 0)),
+            ]
+        )
         assert len(graph.cubes) == 2
         assert len(graph.pipes) == 1
         pipe = graph.pipes[0]
@@ -188,11 +186,13 @@ class TestDaeTqecCompat:
 
     def test_hadamard_pipe(self):
         """Two cubes connected by a Hadamard pipe."""
-        graph = _write_and_read([
-            ("xzz", (0, 0, 0)),
-            ("ozxh", (1, 0, 0)),
-            ("xzz", (3, 0, 0)),
-        ])
+        graph = _write_and_read(
+            [
+                ("xzz", (0, 0, 0)),
+                ("ozxh", (1, 0, 0)),
+                ("xzz", (3, 0, 0)),
+            ]
+        )
         assert len(graph.pipes) == 1
         pipe = graph.pipes[0]
         assert str(pipe.kind) == "OZXH"
@@ -208,22 +208,26 @@ class TestDaeTqecCompat:
 
     def test_y_pipe_direction(self):
         """Pipe along Y axis."""
-        graph = _write_and_read([
-            ("xzz", (0, 0, 0)),
-            ("zox", (0, 1, 0)),
-            ("xzz", (0, 3, 0)),
-        ])
+        graph = _write_and_read(
+            [
+                ("xzz", (0, 0, 0)),
+                ("zox", (0, 1, 0)),
+                ("xzz", (0, 3, 0)),
+            ]
+        )
         assert len(graph.pipes) == 1
         pipe = graph.pipes[0]
         assert str(pipe.kind) == "ZOX"
 
     def test_z_pipe_direction(self):
         """Pipe along Z axis."""
-        graph = _write_and_read([
-            ("xzz", (0, 0, 0)),
-            ("zxo", (0, 0, 1)),
-            ("xzz", (0, 0, 3)),
-        ])
+        graph = _write_and_read(
+            [
+                ("xzz", (0, 0, 0)),
+                ("zxo", (0, 0, 1)),
+                ("xzz", (0, 0, 3)),
+            ]
+        )
         assert len(graph.pipes) == 1
         pipe = graph.pipes[0]
         assert str(pipe.kind) == "ZXO"
