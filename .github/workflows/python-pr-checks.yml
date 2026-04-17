@@ -31,6 +31,4 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Run tests
-        run: uv run --python 3.14 --group dev --no-python-downloads pytest
-        env:
-          UV_PYTHON_PREFERENCE: only-system
+        run: uv run --python 3.14 --group dev pytest
