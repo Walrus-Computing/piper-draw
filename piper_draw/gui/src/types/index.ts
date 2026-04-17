@@ -828,10 +828,17 @@ function pipeEndBasis(base: string, hadamard: boolean, openAxis: number, axis: n
  * For Hadamard pipes, the far end (offset +2) uses swapped colors.
  * Returns true if there IS a conflict (placement should be rejected).
  */
+/** Structural subset of Map<string, Block> — helpers only need `.get()`, so
+ *  a lightweight wrapper (e.g. one that hides selected keys during a drag)
+ *  can be passed instead of cloning the full map. */
+export interface BlocksLookup {
+  get(key: string): Block | undefined;
+}
+
 export function hasPipeColorConflict(
   pipeType: PipeType,
   pipePos: Position3D,
-  blocks: Map<string, Block>,
+  blocks: BlocksLookup,
 ): boolean {
   const base = pipeType.replace("H", "");
   const hadamard = pipeType.length > 3;
@@ -867,7 +874,7 @@ export function hasPipeColorConflict(
 export function hasCubeColorConflict(
   cubeType: CubeType,
   cubePos: Position3D,
-  blocks: Map<string, Block>,
+  blocks: BlocksLookup,
 ): boolean {
   const coords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
 
@@ -908,7 +915,7 @@ export function hasCubeColorConflict(
 export function hasYCubePipeAxisConflict(
   blockType: BlockType,
   pos: Position3D,
-  blocks: Map<string, Block>,
+  blocks: BlocksLookup,
 ): boolean {
   if (blockType === "Y") {
     const coords: [number, number, number] = [pos.x, pos.y, pos.z];

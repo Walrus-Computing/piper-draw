@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
-import { tqecToThree, posKey } from "../types";
+import { tqecToThree } from "../types";
 import type { Block, Position3D } from "../types";
 import { getCachedGeometry, getCachedEdges } from "./BlockInstances";
 
@@ -61,25 +61,27 @@ export function DragGhost() {
   const selectedKeys = useBlockStore((s) => s.selectedKeys);
   const blocks = useBlockStore((s) => s.blocks);
 
+  // Keys-only dep so the ghost list is stable across the rAF-driven dragDelta
+  // updates — child GhostInstances just get new delta props instead of re-mounting.
   const ghosts = useMemo(() => {
-    if (!dragDelta) return [];
-    if (dragDelta.x === 0 && dragDelta.y === 0 && dragDelta.z === 0) return [];
-    const result: Block[] = [];
-    for (const block of blocks.values()) {
-      if (selectedKeys.has(posKey(block.pos))) {
-        result.push(block);
-        if (result.length >= MAX_GHOSTS) break;
-      }
+    const result: Array<{ key: string; block: Block }> = [];
+    for (const key of selectedKeys) {
+      const block = blocks.get(key);
+      if (!block) continue;
+      result.push({ key, block });
+      if (result.length >= MAX_GHOSTS) break;
     }
     return result;
-  }, [dragDelta, selectedKeys, blocks]);
+  }, [selectedKeys, blocks]);
 
-  if (!dragDelta || ghosts.length === 0) return null;
+  if (!dragDelta) return null;
+  if (dragDelta.x === 0 && dragDelta.y === 0 && dragDelta.z === 0) return null;
+  if (ghosts.length === 0) return null;
 
   return (
     <>
-      {ghosts.map((block) => (
-        <GhostInstance key={posKey(block.pos)} block={block} delta={dragDelta} valid={dragValid} />
+      {ghosts.map(({ key, block }) => (
+        <GhostInstance key={key} block={block} delta={dragDelta} valid={dragValid} />
       ))}
     </>
   );
