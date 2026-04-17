@@ -291,6 +291,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         <button
           onClick={runValidation}
           disabled={blocksEmpty || validationStatus === "loading"}
+          title="Server-side validation via the TQEC library"
           style={{
             ...btnStyle(false),
             opacity: blocksEmpty ? 0.4 : 1,
@@ -306,7 +307,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
               "#fff",
           }}
         >
-          {validationStatus === "loading" ? "Verifying..." : "Verify"}
+          {validationStatus === "loading" ? "Verifying..." : "Verify (TQEC)"}
         </button>
         <button
           onClick={toggleFreeBuild}
