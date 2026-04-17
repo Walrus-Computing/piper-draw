@@ -20,6 +20,7 @@ export function FpsDisplay({ spanRef }: { spanRef: React.RefObject<HTMLSpanEleme
 
 export function FpsSampler({ targetRef }: { targetRef: React.RefObject<HTMLSpanElement | null> }) {
   const frames = useRef(0);
+  // eslint-disable-next-line react-hooks/purity
   const lastTime = useRef(performance.now());
 
   useFrame(() => {

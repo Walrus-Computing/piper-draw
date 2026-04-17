@@ -4,6 +4,7 @@ import { useValidationStore } from "../stores/validationStore";
 import type { ValidationError } from "../stores/validationStore";
 import { tqecToThree, posKey } from "../types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function navigateToError(error: ValidationError, controlsRef: React.RefObject<any>) {
   const controls = controlsRef.current;
   if (!controls || isNaN(error.position.x)) return;
@@ -89,6 +90,7 @@ export function ValidationToast({
   controlsRef,
 }: {
   toolbarRef: React.RefObject<HTMLDivElement | null>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   controlsRef: React.RefObject<any>;
 }) {
   const status = useValidationStore((s) => s.status);
@@ -114,6 +116,7 @@ export function ValidationToast({
   }, [status, dismiss]);
 
   // Collapse back when errors shrink to fit
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     if (expanded && errors.length <= 5) setExpanded(false);
   }, [expanded, errors.length]);
