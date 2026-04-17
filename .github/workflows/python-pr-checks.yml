@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  python-checks:
+  ruff:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -15,16 +15,32 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
+          allow-prereleases: true
 
-      - name: Install dependencies
-        run: pip install . --group dev
+      - name: Install ruff
+        run: pip install ruff
 
       - name: Run ruff check
         run: ruff check .
 
       - name: Run ruff format check
         run: ruff format --check .
+
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          allow-prereleases: true
+
+      - name: Install dependencies
+        run: PIP_IGNORE_REQUIRES_PYTHON=1 pip install . --group dev
 
       - name: Run tests
         run: pytest

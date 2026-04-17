@@ -115,12 +115,6 @@ export function ValidationToast({
     }
   }, [status, dismiss]);
 
-  // Collapse back when errors shrink to fit
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => {
-    if (expanded && errors.length <= 5) setExpanded(false);
-  }, [expanded, errors.length]);
-
   if (status === "idle") return null;
 
   const variantKey = status === "invalid" && errors.some((e) => e.message.includes("not available")) ? "error" : status;
@@ -146,7 +140,9 @@ export function ValidationToast({
   // Invalid / error status
   const MAX_VISIBLE = 5;
   const hasOverflow = errors.length > MAX_VISIBLE;
-  const visibleErrors = expanded ? errors : errors.slice(0, MAX_VISIBLE);
+  // Collapse back automatically when errors shrink to fit
+  const effectiveExpanded = expanded && hasOverflow;
+  const visibleErrors = effectiveExpanded ? errors : errors.slice(0, MAX_VISIBLE);
 
   const renderErrorRow = (e: ValidationError, i: number) => {
     const hasPosition = !isNaN(e.position.x);
@@ -188,12 +184,12 @@ export function ValidationToast({
         ref={scrollRef}
         style={{
           fontSize: "12px",
-          ...(expanded && hasOverflow ? { maxHeight: "200px", overflowY: "auto" } : {}),
+          ...(effectiveExpanded ? { maxHeight: "200px", overflowY: "auto" } : {}),
         }}
       >
         {visibleErrors.map((e, i) => renderErrorRow(e, i))}
       </div>
-      {hasOverflow && !expanded && (
+      {hasOverflow && !effectiveExpanded && (
         <button
           style={{ ...dismissAllStyle, borderColor: "rgba(114, 28, 36, 0.2)" }}
           onClick={() => setExpanded(true)}
