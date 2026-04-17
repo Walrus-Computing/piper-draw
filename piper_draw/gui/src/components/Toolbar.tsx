@@ -386,6 +386,14 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         >
           Export
         </button>
+        <button
+          onClick={() => useBlockStore.getState().requestPhoto()}
+          disabled={blocksEmpty}
+          title="Save current view as PNG"
+          style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
+        >
+          Photo
+        </button>
         <TemplatePicker onLoad={loadBlocks} />
       </div>
 

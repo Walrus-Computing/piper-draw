@@ -143,6 +143,11 @@ interface BlockStore {
   // Free build (disables color-matching validation)
   freeBuild: boolean;
   toggleFreeBuild: () => void;
+
+  // Photo export — transient flag consumed by ScreenshotCapture inside <Canvas>.
+  photoRequest: boolean;
+  requestPhoto: () => void;
+  clearPhotoRequest: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -238,6 +243,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
   freeBuild: false,
   toggleFreeBuild: () => set((s) => ({ freeBuild: !s.freeBuild })),
+
+  photoRequest: false,
+  requestPhoto: () => set({ photoRequest: true }),
+  clearPhotoRequest: () => set({ photoRequest: false }),
 
   setMode: (mode) => {
     const prev = get();
