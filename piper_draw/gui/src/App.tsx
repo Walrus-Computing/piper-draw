@@ -21,6 +21,7 @@ import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { SelectionHighlights } from "./components/SelectionHighlights";
 import { BuildCursor } from "./components/BuildCursor";
 import { MarqueeSelect, type ThreeState } from "./components/MarqueeSelect";
+import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { BuildModeHints } from "./components/BuildModeHints";
 import { KeybindEditor } from "./components/KeybindEditor";
@@ -502,7 +503,14 @@ export default function App() {
           <OrientationGizmo />
         </GizmoHelper>
         <ThreeStateBridge stateRef={threeStateRef} />
-        <OrbitControls ref={controlsRef} makeDefault maxDistance={50000} />
+        <OrbitControls
+          ref={controlsRef}
+          makeDefault
+          maxDistance={50000}
+          screenSpacePanning={false}
+          mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
+        />
+        <NavControlsModifier controlsRef={controlsRef} />
       </Canvas>
       <MarqueeSelect threeStateRef={threeStateRef} controlsRef={controlsRef} />
     </>

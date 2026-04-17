@@ -7,6 +7,9 @@ export function BuildModeHints({ onCustomize }: { onCustomize: () => void }) {
   if (mode !== "build") return null;
 
   const hints = [
+    ["Drag", "Pan"],
+    ["Shift+Drag", "Rotate"],
+    ["Scroll", "Zoom"],
     [
       `${bindings.moveForward.displayLabel}/${bindings.moveLeft.displayLabel}/${bindings.moveBack.displayLabel}/${bindings.moveRight.displayLabel}`,
       "Move XY",
