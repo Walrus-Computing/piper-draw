@@ -1,7 +1,7 @@
-import { useRef, useMemo } from "react";
+import { useMemo } from "react";
 import * as THREE from "three";
-import { useFrame } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
+import { usePulseScale } from "../hooks/usePulseScale";
 import { tqecToThree } from "../types";
 
 const cursorMaterial = new THREE.MeshBasicMaterial({
@@ -25,13 +25,7 @@ const noRaycast = () => {};
 
 /** Pulsing cursor at the build position */
 function CursorBox({ position }: { position: [number, number, number] }) {
-  const groupRef = useRef<THREE.Group>(null!);
-
-  useFrame(({ clock }) => {
-    if (!groupRef.current) return;
-    const pulse = 1.06 + 0.03 * Math.sin(clock.getElapsedTime() * 4);
-    groupRef.current.scale.setScalar(pulse);
-  });
+  const groupRef = usePulseScale();
 
   return (
     <group ref={groupRef} position={position}>
