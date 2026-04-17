@@ -4,6 +4,7 @@ import { useValidationStore } from "../stores/validationStore";
 import type { ValidationError } from "../stores/validationStore";
 import { tqecToThree, posKey } from "../types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function navigateToError(error: ValidationError, controlsRef: React.RefObject<any>) {
   const controls = controlsRef.current;
   if (!controls || isNaN(error.position.x)) return;
@@ -89,6 +90,7 @@ export function ValidationToast({
   controlsRef,
 }: {
   toolbarRef: React.RefObject<HTMLDivElement | null>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   controlsRef: React.RefObject<any>;
 }) {
   const status = useValidationStore((s) => s.status);
@@ -112,11 +114,6 @@ export function ValidationToast({
       return () => clearTimeout(t);
     }
   }, [status, dismiss]);
-
-  // Collapse back when errors shrink to fit
-  useEffect(() => {
-    if (expanded && errors.length <= 5) setExpanded(false);
-  }, [expanded, errors.length]);
 
   if (status === "idle") return null;
 
@@ -143,7 +140,9 @@ export function ValidationToast({
   // Invalid / error status
   const MAX_VISIBLE = 5;
   const hasOverflow = errors.length > MAX_VISIBLE;
-  const visibleErrors = expanded ? errors : errors.slice(0, MAX_VISIBLE);
+  // Collapse back automatically when errors shrink to fit
+  const effectiveExpanded = expanded && hasOverflow;
+  const visibleErrors = effectiveExpanded ? errors : errors.slice(0, MAX_VISIBLE);
 
   const renderErrorRow = (e: ValidationError, i: number) => {
     const hasPosition = !isNaN(e.position.x);
@@ -185,12 +184,12 @@ export function ValidationToast({
         ref={scrollRef}
         style={{
           fontSize: "12px",
-          ...(expanded && hasOverflow ? { maxHeight: "200px", overflowY: "auto" } : {}),
+          ...(effectiveExpanded ? { maxHeight: "200px", overflowY: "auto" } : {}),
         }}
       >
         {visibleErrors.map((e, i) => renderErrorRow(e, i))}
       </div>
-      {hasOverflow && !expanded && (
+      {hasOverflow && !effectiveExpanded && (
         <button
           style={{ ...dismissAllStyle, borderColor: "rgba(114, 28, 36, 0.2)" }}
           onClick={() => setExpanded(true)}
