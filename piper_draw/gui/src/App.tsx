@@ -228,6 +228,7 @@ function ViewportCamera({ controlsRef }: { controlsRef: React.RefObject<any> }) 
           ref={controlsRef}
           makeDefault
           enableRotate
+          zoomToCursor
           maxDistance={50000}
           screenSpacePanning={false}
           mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
@@ -278,6 +279,7 @@ function IsoViewport({
         ref={controlsRef}
         makeDefault
         enableRotate={false}
+        zoomToCursor
         maxZoom={500}
         minZoom={2}
         screenSpacePanning={false}
