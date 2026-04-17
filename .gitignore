@@ -17,8 +17,8 @@ wheels/
 .env.*
 
 # GUI / Node.js
-piper_draw/gui/node_modules/
-piper_draw/gui/dist/
+gui/node_modules/
+gui/dist/
 
 # Security reports
 .gstack/

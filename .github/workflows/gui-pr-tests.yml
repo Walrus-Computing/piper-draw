@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: piper_draw/gui
+        working-directory: gui
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -20,7 +20,7 @@ jobs:
         with:
           node-version: "20.19.0"
           cache: npm
-          cache-dependency-path: piper_draw/gui/package-lock.json
+          cache-dependency-path: gui/package-lock.json
 
       - name: Install dependencies
         run: npm ci
