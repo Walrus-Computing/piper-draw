@@ -1050,9 +1050,20 @@ export function determineCubeOptions(
 export function wasdToBuildDirection(
   key: "w" | "a" | "s" | "d" | "arrowup" | "arrowdown",
   cameraAzimuth: number,
+  axisAbsolute: boolean = false,
 ): BuildDirection {
   if (key === "arrowup") return { tqecAxis: 2, sign: 1 };
   if (key === "arrowdown") return { tqecAxis: 2, sign: -1 };
+
+  // Axis-absolute mode: WASD maps to fixed world axes regardless of camera.
+  if (axisAbsolute) {
+    switch (key) {
+      case "w": return { tqecAxis: 0, sign: 1 };
+      case "s": return { tqecAxis: 0, sign: -1 };
+      case "a": return { tqecAxis: 1, sign: 1 };
+      case "d": return { tqecAxis: 1, sign: -1 };
+    }
+  }
 
   // Snap to nearest 90° quadrant: 0, 1, 2, 3
   const q = ((Math.round(cameraAzimuth / (Math.PI / 2)) % 4) + 4) % 4;

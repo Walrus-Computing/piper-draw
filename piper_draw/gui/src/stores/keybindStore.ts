@@ -101,14 +101,20 @@ export function actionToWasdKey(
 
 interface KeybindState {
   bindings: Record<BuildAction, KeyBinding>;
+  cameraFollowsBuild: boolean;
+  axisAbsoluteWasd: boolean;
   setBinding: (action: BuildAction, key: string) => void;
   resetToDefaults: () => void;
+  toggleCameraFollowsBuild: () => void;
+  toggleAxisAbsoluteWasd: () => void;
 }
 
 export const useKeybindStore = create<KeybindState>()(
   persist(
     (set) => ({
       bindings: { ...DEFAULT_BINDINGS },
+      cameraFollowsBuild: false,
+      axisAbsoluteWasd: false,
 
       setBinding: (action, key) =>
         set((state) => {
@@ -126,6 +132,11 @@ export const useKeybindStore = create<KeybindState>()(
         }),
 
       resetToDefaults: () => set({ bindings: { ...DEFAULT_BINDINGS } }),
+
+      toggleCameraFollowsBuild: () =>
+        set((s) => ({ cameraFollowsBuild: !s.cameraFollowsBuild })),
+      toggleAxisAbsoluteWasd: () =>
+        set((s) => ({ axisAbsoluteWasd: !s.axisAbsoluteWasd })),
     }),
     {
       name: "piper-draw-keybinds",
@@ -138,7 +149,8 @@ export const useKeybindStore = create<KeybindState>()(
         // Only restore persisted bindings for actions that still exist,
         // ensuring new/renamed actions always get their defaults.
         const p = persisted as Partial<KeybindState>;
-        const merged = { ...(current as KeybindState).bindings };
+        const cur = current as KeybindState;
+        const merged = { ...cur.bindings };
         if (p.bindings) {
           for (const action of BUILD_ACTIONS) {
             if (action in p.bindings) {
@@ -146,7 +158,14 @@ export const useKeybindStore = create<KeybindState>()(
             }
           }
         }
-        return { ...(current as KeybindState), bindings: merged };
+        return {
+          ...cur,
+          bindings: merged,
+          cameraFollowsBuild:
+            typeof p.cameraFollowsBuild === "boolean" ? p.cameraFollowsBuild : cur.cameraFollowsBuild,
+          axisAbsoluteWasd:
+            typeof p.axisAbsoluteWasd === "boolean" ? p.axisAbsoluteWasd : cur.axisAbsoluteWasd,
+        };
       },
     },
   ),
