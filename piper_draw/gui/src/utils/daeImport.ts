@@ -1,5 +1,5 @@
-import type { Block, BlockType, Position3D } from "../types";
-import { CUBE_TYPES, PIPE_TYPES, posKey } from "../types";
+import type { Block, BlockType, CubeType, Position3D } from "../types";
+import { CUBE_TYPES, PIPE_TYPES, posKey, isPipeType, determineCubeOptions, countAttachedPipes } from "../types";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -362,7 +362,38 @@ export function parseDaeToBlocks(xmlString: string): Map<string, Block> {
     blocks.set(key, { pos, type: blockType });
   }
 
+  canonicaliseImportedCubes(blocks);
   return blocks;
+}
+
+/**
+ * After import, normalise each cube whose type is ambiguous given its adjacent
+ * pipes (e.g. a cube sandwiched between two Z-pipes could be XZZ or XZX — both
+ * are distinct TQEC kinds but indistinguishable in piper-draw's visuals).
+ * Piper-draw collapses this ambiguity by always picking the first valid type in
+ * CUBE_TYPES order. See CLAUDE.md "Canonicalisation assumption".
+ */
+function canonicaliseImportedCubes(blocks: Map<string, Block>): void {
+  for (const [key, block] of blocks) {
+    if (isPipeType(block.type) || block.type === "Y") continue;
+    // Only canonicalise when pipes actually constrain the cube to 2+ options.
+    // An isolated cube (no adjacent pipes) has all 6 types valid but the user's
+    // declared type should be preserved.
+    if (countAttachedPipes(block.pos, blocks) < 2) continue;
+    const result = determineCubeOptions(block.pos, blocks);
+    if (result.determined) continue;
+    if (result.options.length < 2) continue;
+    if (!result.options.includes(block.type as CubeType)) continue;
+    for (const ct of CUBE_TYPES) {
+      if (result.options.includes(ct)) {
+        if (ct !== block.type) {
+          console.log(`[dae import] canonicalising cube at ${key}: ${block.type} → ${ct}`);
+          blocks.set(key, { pos: block.pos, type: ct });
+        }
+        break;
+      }
+    }
+  }
 }
 
 /**

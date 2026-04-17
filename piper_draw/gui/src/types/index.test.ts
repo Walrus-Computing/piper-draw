@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createBlockGeometry, getHiddenFaceMaskForPos, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict } from "./index";
+import { createBlockGeometry, getHiddenFaceMaskForPos, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes } from "./index";
 import type { PipeType, CubeType } from "./index";
 import type { BlockType } from "./index";
 import { Vector3 } from "three";
@@ -130,6 +130,18 @@ describe("pipe snapping and adjacency consistency", () => {
     expect(isValidPipePos(northSnap)).toBe(true);
     expect(southSnap.x === south.x || southSnap.y === south.y).toBe(true);
     expect(northSnap.x === north.x || northSnap.y === north.y).toBe(true);
+  });
+
+  it("snapGroundPos(_, _, true) always produces a valid pipe position", () => {
+    // Regression guard: a pipe placed via the ground-plane snapper must never
+    // land half-on-a-cube. Sweep a dense grid of raw inputs including points
+    // exactly on block corners, pipe-slot midpoints, and between them.
+    for (let x = -6; x <= 6; x += 0.05) {
+      for (let y = -6; y <= 6; y += 0.05) {
+        const snapped = snapGroundPos(x, y, true);
+        expect(isValidPipePos(snapped)).toBe(true);
+      }
+    }
   });
 });
 
@@ -321,6 +333,124 @@ describe("hasYCubePipeAxisConflict", () => {
   it("does not affect regular cube placement", () => {
     const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OZX" as BlockType }]);
     expect(hasYCubePipeAxisConflict("XZZ" as BlockType, { x: 0, y: 0, z: 0 }, blocks)).toBe(false);
+  });
+});
+
+describe("countAttachedPipes", () => {
+  it("counts 0 when no adjacent pipes", () => {
+    const blocks = makeBlocks([]);
+    expect(countAttachedPipes({ x: 0, y: 0, z: 0 }, blocks)).toBe(0);
+  });
+
+  it("counts 1 for a single adjacent pipe on an axis", () => {
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OZX" }]);
+    expect(countAttachedPipes({ x: 0, y: 0, z: 0 }, blocks)).toBe(1);
+  });
+
+  it("counts 2 for pipes on opposite sides of the same axis (colinear)", () => {
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OZX" },
+      { x: -2, y: 0, z: 0, type: "OZX" },
+    ]);
+    expect(countAttachedPipes({ x: 0, y: 0, z: 0 }, blocks)).toBe(2);
+  });
+
+  it("counts pipes on multiple axes", () => {
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OZX" },
+      { x: 0, y: 1, z: 0, type: "ZOX" },
+    ]);
+    expect(countAttachedPipes({ x: 0, y: 0, z: 0 }, blocks)).toBe(2);
+  });
+
+  it("ignores pipes whose open axis is not along the offset axis", () => {
+    // Pipe at (1,0,0) but Y-open: offset axis is X, open axis is Y → don't count.
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "ZOX" }]);
+    expect(countAttachedPipes({ x: 0, y: 0, z: 0 }, blocks)).toBe(0);
+  });
+
+  it("ignores non-pipe neighbors", () => {
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "XZZ" }]);
+    expect(countAttachedPipes({ x: 0, y: 0, z: 0 }, blocks)).toBe(0);
+  });
+});
+
+describe("canonicalCubeForPort", () => {
+  it("returns null for 0 attached pipes", () => {
+    const blocks = makeBlocks([]);
+    expect(canonicalCubeForPort({ x: 0, y: 0, z: 0 }, blocks)).toBeNull();
+  });
+
+  it("returns null for 1 attached pipe (stays a port)", () => {
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OZX" }]);
+    expect(canonicalCubeForPort({ x: 0, y: 0, z: 0 }, blocks)).toBeNull();
+  });
+
+  it("returns the unique type when 2 pipes on different axes fully determine", () => {
+    // Pipe OZX at +X: axis1='Z', axis2='X'
+    // Pipe ZOX at +Y: axis0='Z', axis2='X'
+    // Combined: axis0='Z', axis1='Z', axis2='X' → ZZX uniquely
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OZX" },
+      { x: 0, y: 1, z: 0, type: "ZOX" },
+    ]);
+    expect(canonicalCubeForPort({ x: 0, y: 0, z: 0 }, blocks)).toBe("ZZX");
+  });
+
+  it("canonicalises the colinear-pipe ambiguity deterministically", () => {
+    // Two X-axis OZX pipes → axis1='Z', axis2='X', axis0 free.
+    // Valid options: ZZX (index 4) and XZX (index 5). Canonical = ZZX.
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OZX" },
+      { x: -2, y: 0, z: 0, type: "OZX" },
+    ]);
+    expect(canonicalCubeForPort({ x: 0, y: 0, z: 0 }, blocks)).toBe("ZZX");
+  });
+
+  it("canonical pick is stable across equivalent pipe orderings", () => {
+    const a = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OXZ" },
+      { x: -2, y: 0, z: 0, type: "OXZ" },
+    ]);
+    const b = makeBlocks([
+      { x: -2, y: 0, z: 0, type: "OXZ" },
+      { x: 1, y: 0, z: 0, type: "OXZ" },
+    ]);
+    expect(canonicalCubeForPort({ x: 0, y: 0, z: 0 }, a)).toBe(
+      canonicalCubeForPort({ x: 0, y: 0, z: 0 }, b),
+    );
+  });
+
+  it("returns null when 2 pipes give conflicting constraints", () => {
+    // OZX at +X: axis1='Z', axis2='X'. OXZ at -X: axis1='X', axis2='Z'. Conflict on both axes.
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OZX" },
+      { x: -2, y: 0, z: 0, type: "OXZ" },
+    ]);
+    expect(canonicalCubeForPort({ x: 0, y: 0, z: 0 }, blocks)).toBeNull();
+  });
+
+  it("resolves 3 pipes (2 colinear + 1 perpendicular) to the fully-determined type", () => {
+    // Two X-axis OZX pipes (axis1='Z', axis2='X') + one Y-axis ZOX pipe (axis0='Z', axis2='X')
+    // → axis0='Z', axis1='Z', axis2='X' → ZZX
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OZX" },
+      { x: -2, y: 0, z: 0, type: "OZX" },
+      { x: 0, y: 1, z: 0, type: "ZOX" },
+    ]);
+    expect(canonicalCubeForPort({ x: 0, y: 0, z: 0 }, blocks)).toBe("ZZX");
+  });
+
+  it("handles Hadamard pipe at the swap end", () => {
+    // OZXH at (-2,0,0): cube at (0,0,0) is at pipe's +2 (swap) end.
+    // Swapped constraints: axis1='X', axis2='Z'.
+    // Combined with OZXH at (1,0,0) (cube at -1, no swap): axis1='Z', axis2='X'.
+    // Conflict on both axes.
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OZXH" },
+      { x: -2, y: 0, z: 0, type: "OZXH" },
+    ]);
+    expect(canonicalCubeForPort({ x: 0, y: 0, z: 0 }, blocks)).toBeNull();
   });
 });
 

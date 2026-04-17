@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { useBlockStore } from "./blockStore";
+import type { Block } from "../types";
 
 function reset() {
   useBlockStore.setState({
@@ -11,6 +12,8 @@ function reset() {
     mode: "place",
     cubeType: "XZZ",
     pipeVariant: null,
+    placePort: false,
+    portWarning: null,
     hoveredGridPos: null,
     hoveredBlockType: null,
     hoveredInvalid: false,
@@ -115,6 +118,42 @@ describe("blockStore", () => {
       useBlockStore.getState().removeBlock({ x: 3, y: 0, z: 0 });
       expect(useBlockStore.getState().blocks.size).toBe(1);
       expect(useBlockStore.getState().history.length).toBe(histBefore);
+    });
+
+    it("cascades attached pipes when removing a cube with ≥2 pipes", () => {
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ["0,1,0", { pos: { x: 0, y: 1, z: 0 }, type: "ZOX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.getState().removeBlock({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(0);
+    });
+
+    it("does not cascade when removing a cube with <2 pipes", () => {
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.getState().removeBlock({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(1);
+      expect(useBlockStore.getState().blocks.has("1,0,0")).toBe(true);
+    });
+
+    it("undoes a cube-with-pipes cascade as a single step", () => {
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ["0,1,0", { pos: { x: 0, y: 1, z: 0 }, type: "ZOX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      const histBefore = useBlockStore.getState().history.length;
+      useBlockStore.getState().removeBlock({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().history.length).toBe(histBefore + 1);
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.size).toBe(3);
     });
   });
 
@@ -297,6 +336,110 @@ describe("blockStore", () => {
       // selectedKeys still has "0,0,0" but block was removed
       useBlockStore.getState().deleteSelected();
       expect(useBlockStore.getState().blocks.size).toBe(0);
+    });
+
+    it("cascades attached pipes when deleting a selected cube with ≥2 pipes", () => {
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ["0,1,0", { pos: { x: 0, y: 1, z: 0 }, type: "ZOX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.setState({ selectedKeys: new Set(["0,0,0"]) });
+      useBlockStore.getState().deleteSelected();
+      expect(useBlockStore.getState().blocks.size).toBe(0);
+    });
+
+    it("cascade-delete undoes in a single step", () => {
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ["0,1,0", { pos: { x: 0, y: 1, z: 0 }, type: "ZOX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.setState({ selectedKeys: new Set(["0,0,0"]) });
+      useBlockStore.getState().deleteSelected();
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.size).toBe(3);
+    });
+  });
+
+  describe("convertBlockToPort", () => {
+    it("removes a standalone cube (0 pipes)", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().convertBlockToPort({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(0);
+      expect(useBlockStore.getState().portWarning).toBeNull();
+    });
+
+    it("removes a cube with 1 attached pipe (leaving the pipe)", () => {
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.getState().convertBlockToPort({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.has("0,0,0")).toBe(false);
+      expect(useBlockStore.getState().blocks.has("1,0,0")).toBe(true);
+    });
+
+    it("refuses a cube with 2+ pipes and sets a warning", () => {
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ["0,1,0", { pos: { x: 0, y: 1, z: 0 }, type: "ZOX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.getState().convertBlockToPort({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(3);
+      expect(useBlockStore.getState().portWarning).toMatch(/2 pipes attached/);
+    });
+
+    it("refuses a pipe and sets a warning", () => {
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.getState().convertBlockToPort({ x: 1, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(1);
+      expect(useBlockStore.getState().portWarning).toMatch(/Only cubes/);
+    });
+
+    it("is a no-op on an empty position", () => {
+      useBlockStore.getState().convertBlockToPort({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().portWarning).toBeNull();
+    });
+
+    it("can be undone to restore the cube", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().convertBlockToPort({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.has("0,0,0")).toBe(true);
+    });
+  });
+
+  describe("setPlacePort", () => {
+    it("clears pipeVariant when turned on", () => {
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().setPlacePort(true);
+      expect(useBlockStore.getState().placePort).toBe(true);
+      expect(useBlockStore.getState().pipeVariant).toBeNull();
+    });
+
+    it("is cleared by setCubeType", () => {
+      useBlockStore.getState().setPlacePort(true);
+      useBlockStore.getState().setCubeType("ZXZ");
+      expect(useBlockStore.getState().placePort).toBe(false);
+    });
+
+    it("is cleared by setPipeVariant", () => {
+      useBlockStore.getState().setPlacePort(true);
+      useBlockStore.getState().setPipeVariant("ZX");
+      expect(useBlockStore.getState().placePort).toBe(false);
+    });
+
+    it("is cleared when leaving place mode", () => {
+      useBlockStore.getState().setPlacePort(true);
+      useBlockStore.getState().setMode("delete");
+      expect(useBlockStore.getState().placePort).toBe(false);
     });
   });
 

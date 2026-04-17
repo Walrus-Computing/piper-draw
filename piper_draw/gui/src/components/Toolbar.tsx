@@ -108,6 +108,8 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
   const pipeVariant = useBlockStore((s) => s.pipeVariant);
   const setCubeType = useBlockStore((s) => s.setCubeType);
   const setPipeVariant = useBlockStore((s) => s.setPipeVariant);
+  const placePort = useBlockStore((s) => s.placePort);
+  const setPlacePort = useBlockStore((s) => s.setPlacePort);
   const historyLen = useBlockStore((s) => s.history.length);
   const futureLen = useBlockStore((s) => s.future.length);
   const undo = useBlockStore((s) => s.undo);
@@ -129,10 +131,12 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
   const moveBuildCursor = useBlockStore((s) => s.moveBuildCursor);
   const buildCursorBlockType = useBlockStore((s) => {
     if (s.mode !== "build" || !s.buildCursor) return null;
-    // Undetermined cubes should not highlight any button
-    if (s.undeterminedCubes.has(posKey(s.buildCursor))) return null;
     const block = s.blocks.get(posKey(s.buildCursor));
-    return block && !isPipeType(block.type) ? block.type : null;
+    if (!block || isPipeType(block.type)) return null;
+    // Cubes with multiple valid options should not highlight any button
+    const opts = determineCubeOptions(block.pos, s.blocks);
+    if (!opts.determined && opts.options.length > 1) return null;
+    return block.type;
   });
   // Returns a stable string of valid cube types (comma-separated) to avoid
   // infinite re-renders from creating new Set objects in the selector.
@@ -167,11 +171,51 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
     return opts.join(",");
   });
   const buildValidTypes = buildValidTypesStr != null ? new Set(buildValidTypesStr.split(",").filter(Boolean)) : null;
-  // Find the adjacent pipe connecting cursor to an undetermined cube (for R cycling)
-  const findUndeterminedPipeKey = (s: { buildCursor: Position3D | null; blocks: Map<string, { pos: Position3D; type: BlockType }>; undeterminedCubes: Map<string, unknown> }): string | null => {
+
+  // When exactly one port is selected (and no real blocks), compute which cube
+  // types could replace it given the adjacent pipe constraints. Used to grey out
+  // invalid cube buttons in the toolbar.
+  const selectedPortValidTypesStr = useBlockStore((s): string | null => {
+    if (s.mode !== "select") return null;
+    if (s.selectedKeys.size > 0) return null;
+    if (s.selectedPortPositions.size !== 1) return null;
+    const portKey = s.selectedPortPositions.values().next().value as string;
+    const [x, y, z] = portKey.split(",").map(Number);
+    const portPos: Position3D = { x, y, z };
+    const coords: [number, number, number] = [portPos.x, portPos.y, portPos.z];
+    let yValid = true;
+    for (let axis = 0; axis < 3; axis++) {
+      for (const offset of [1, -2]) {
+        const nc: [number, number, number] = [coords[0], coords[1], coords[2]];
+        nc[axis] += offset;
+        const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
+        if (n && isPipeType(n.type)) {
+          const openAxis = n.type.replace("H", "").indexOf("O");
+          if (openAxis === axis && openAxis !== 2) yValid = false;
+        }
+      }
+    }
+    const result = determineCubeOptions(portPos, s.blocks);
+    const opts: string[] = result.determined ? [result.type] : [...result.options];
+    if (yValid) opts.push("Y");
+    return opts.join(",");
+  });
+  const selectedPortValidTypes = selectedPortValidTypesStr != null
+    ? new Set(selectedPortValidTypesStr.split(",").filter(Boolean))
+    : null;
+  // Find the adjacent pipe connecting cursor to an undetermined cube (for R cycling).
+  // A cube is "undetermined" if its position has multiple valid CUBE_TYPES given
+  // the current adjacent pipes — derived on demand from determineCubeOptions.
+  const isUndeterminedCubeAt = (key: string, blocks: Map<string, { pos: Position3D; type: BlockType }>): boolean => {
+    const b = blocks.get(key);
+    if (!b || isPipeType(b.type) || b.type === "Y") return false;
+    const opts = determineCubeOptions(b.pos, blocks);
+    return !opts.determined && opts.options.length > 1;
+  };
+  const findUndeterminedPipeKey = (s: { buildCursor: Position3D | null; blocks: Map<string, { pos: Position3D; type: BlockType }> }): string | null => {
     if (!s.buildCursor) return null;
     const cc: [number, number, number] = [s.buildCursor.x, s.buildCursor.y, s.buildCursor.z];
-    const cursorUndetermined = s.undeterminedCubes.has(posKey(s.buildCursor));
+    const cursorUndetermined = isUndeterminedCubeAt(posKey(s.buildCursor), s.blocks);
     let found: string | null = null;
     for (let axis = 0; axis < 3; axis++) {
       for (const offset of [1, -2]) {
@@ -184,7 +228,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         const fc: [number, number, number] = [cc[0], cc[1], cc[2]];
         fc[axis] += offset === 1 ? 3 : -3;
         const farKey = posKey({ x: fc[0], y: fc[1], z: fc[2] });
-        if (cursorUndetermined || s.undeterminedCubes.has(farKey)) {
+        if (cursorUndetermined || isUndeterminedCubeAt(farKey, s.blocks)) {
           if (found !== null) return null; // 2+ undetermined pipes — can't determine which to cycle
           found = pk;
         }
@@ -392,10 +436,22 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
       {/* Separator */}
       <div style={{ width: 1, background: "#ddd" }} />
 
-      {/* Blocks group (ZXCubes + Y) */}
+      {/* Blocks group (Port + ZXCubes + Y) */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px", pointerEvents: mode === "build" ? "none" : "auto" }}>
         <span style={groupLabelStyle}>Blocks</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
+          <button
+            key="port"
+            onClick={() => {
+              setPlacePort(true);
+              setMode("place");
+            }}
+            title="Convert a cube back into a port (removes cubes with 0–1 attached pipes)"
+            style={blockBtnStyle(placePort && mode === "place")}
+          >
+            Port
+            <div style={previewWrapStyle}>{previewImg("Port")}</div>
+          </button>
           {CUBE_TYPES.map((ct) => (
             <button
               key={ct}
@@ -404,9 +460,10 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
                 setMode("place");
               }}
               style={blockBtnStyle(
-                (cubeType === ct && mode === "place") ||
+                (!placePort && cubeType === ct && mode === "place") ||
                 (mode === "build" && buildCursorBlockType === ct),
-                mode === "build" && !freeBuild && buildValidTypes != null && !buildValidTypes.has(ct),
+                (mode === "build" && !freeBuild && buildValidTypes != null && !buildValidTypes.has(ct)) ||
+                (selectedPortValidTypes != null && !selectedPortValidTypes.has(ct)),
               )}
             >
               {ct}
@@ -419,9 +476,10 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
               setMode("place");
             }}
             style={blockBtnStyle(
-              (cubeType === "Y" && mode === "place") ||
+              (!placePort && cubeType === "Y" && mode === "place") ||
               (mode === "build" && buildCursorBlockType === "Y"),
-              mode === "build" && !freeBuild && buildValidTypes != null && !buildValidTypes.has("Y" as CubeType),
+              (mode === "build" && !freeBuild && buildValidTypes != null && !buildValidTypes.has("Y" as CubeType)) ||
+              (selectedPortValidTypes != null && !selectedPortValidTypes.has("Y")),
             )}
           >
             Y

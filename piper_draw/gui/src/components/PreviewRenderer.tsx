@@ -8,8 +8,13 @@ import {
 } from "../types";
 import type { BlockType } from "../types";
 
-/** All block types to render previews for, including pipe canonical forms. */
-const PREVIEW_TYPES: { key: string; blockType: BlockType }[] = [
+/**
+ * All block types to render previews for. Most entries render via the block's
+ * own geometry + vertex colours; the `Port` entry renders a plain ghost cube
+ * (matching the `OpenPipeGhosts.tsx` ghost style) as its only visual cue.
+ */
+const PREVIEW_TYPES: { key: string; blockType: BlockType | null }[] = [
+  { key: "Port", blockType: null },
   ...CUBE_TYPES.map((ct) => ({ key: ct, blockType: ct as BlockType })),
   { key: "Y", blockType: "Y" as BlockType },
   { key: "ZX", blockType: "ZXO" as BlockType },
@@ -24,6 +29,14 @@ const THROTTLE_MS = 66; // ~15fps
 
 const vertexColorMaterial = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
 const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
+/** Ghost-cube material for the PORT preview — matches OpenPipeGhosts.tsx styling. */
+const portGhostMaterial = new THREE.MeshBasicMaterial({
+  color: 0xdddddd,
+  transparent: true,
+  opacity: 0.35,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
 
 /**
  * Hook that renders 3D preview images for all toolbar block/pipe types,
@@ -62,6 +75,17 @@ export function usePreviewImages(controlsRef: React.RefObject<any>) {
 
     // Pre-build meshes
     for (const { key, blockType } of PREVIEW_TYPES) {
+      if (blockType == null) {
+        // Port preview: a plain ghost cube with black edges (no colours).
+        const geo = new THREE.BoxGeometry(1, 1, 1);
+        const mesh = new THREE.Mesh(geo, portGhostMaterial);
+        const edgeGeo = new THREE.EdgesGeometry(geo);
+        const edges = new THREE.LineSegments(edgeGeo, edgeMaterial);
+        const center = new THREE.Vector3(0, 0, 0);
+        const radius = Math.sqrt(3) / 2;
+        meshesRef.current.set(key, { mesh, edges, center, radius });
+        continue;
+      }
       const previewBandHH = blockType.toString().endsWith("H") ? 0.16 : undefined;
       const geo = createBlockGeometry(blockType, 0, previewBandHH);
       const mesh = new THREE.Mesh(geo, vertexColorMaterial);

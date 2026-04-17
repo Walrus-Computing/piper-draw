@@ -13,6 +13,15 @@ const ghostMaterial = new THREE.MeshLambertMaterial({
   depthWrite: false,
   side: THREE.DoubleSide,
 });
+const portGhostMaterial = new THREE.MeshBasicMaterial({
+  color: 0xdddddd,
+  transparent: true,
+  opacity: 0.35,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
+const portGhostBox = new THREE.BoxGeometry(1, 1, 1);
+const portGhostEdges = new THREE.EdgesGeometry(portGhostBox);
 const invalidMaterial = new THREE.MeshLambertMaterial({
   color: 0xff0000,
   transparent: true,
@@ -66,6 +75,25 @@ function GhostBlockInner() {
   const hoveredReplace = useBlockStore((s) => s.hoveredReplace);
   const blocks = useBlockStore((s) => s.blocks);
   const spatialIndex = useBlockStore((s) => s.spatialIndex);
+  const placePort = useBlockStore((s) => s.placePort);
+
+  // Port placement preview: render a port-style white ghost at the snapped
+  // cube position. No type-dependent coloring, no hidden-face mask.
+  if (placePort && mode === "place") {
+    const [x, y, z] = tqecToThree(hoveredGridPos, "XZZ");
+    return (
+      <group position={[x, y, z]}>
+        <mesh raycast={noRaycast}>
+          <primitive object={portGhostBox} attach="geometry" />
+          <primitive object={portGhostMaterial} attach="material" />
+        </mesh>
+        <lineSegments raycast={noRaycast}>
+          <primitive object={portGhostEdges} attach="geometry" />
+          <primitive object={validLineMaterial} attach="material" />
+        </lineSegments>
+      </group>
+    );
+  }
 
   const activeType = hoveredBlockType ?? cubeType;
 

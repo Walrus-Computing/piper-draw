@@ -257,15 +257,25 @@ function ThreeStateBridge({ stateRef }: { stateRef: React.MutableRefObject<Three
 
 function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivElement | null> }) {
   const reason = useBlockStore((s) => s.hoveredInvalidReason);
+  const portWarning = useBlockStore((s) => s.portWarning);
+  const clearPortWarning = useBlockStore((s) => s.clearPortWarning);
+  // Prefer the persistent port warning if set; fall back to the hover tooltip.
+  const message = portWarning ?? reason;
   const [topOffset, setTopOffset] = useState(0);
 
   useEffect(() => {
-    if (!reason || !toolbarRef.current) return;
+    if (!message || !toolbarRef.current) return;
     const rect = toolbarRef.current.getBoundingClientRect();
     setTopOffset(rect.bottom + 8);
-  }, [reason, toolbarRef]);
+  }, [message, toolbarRef]);
 
-  if (!reason) return null;
+  useEffect(() => {
+    if (!portWarning) return;
+    const t = setTimeout(clearPortWarning, 3000);
+    return () => clearTimeout(t);
+  }, [portWarning, clearPortWarning]);
+
+  if (!message) return null;
   return (
     <div
       style={{
@@ -287,7 +297,7 @@ function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivE
         textAlign: "center" as const,
       }}
     >
-      {reason}
+      {message}
     </div>
   );
 }
