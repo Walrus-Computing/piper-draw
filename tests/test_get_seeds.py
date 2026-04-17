@@ -1,5 +1,6 @@
-from tests.randomly_utils import get_seeds
 from types import GeneratorType
+
+from tests.randomly_utils import get_seeds
 
 
 def test_get_seeds():

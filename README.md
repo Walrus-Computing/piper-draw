@@ -8,6 +8,8 @@ For now we follow the naming convention of cubes and pipes of TQEC. See [the ter
 The user can then press the **Export to Collada (.dae)** button.
 This package contains a test that verifies the exported `.dae` file is correctly understood by the TQEC package.
 
+The **Verify (TQEC)** button sends the current diagram to a FastAPI backend that builds a [`tqec.BlockGraph`](https://github.com/tqec/tqec) and reports per-cube validation errors.
+
 ## Getting started
 
 ### Prerequisites
@@ -35,6 +37,7 @@ This package contains a test that verifies the exported `.dae` file is correctly
 ### Usage
 - Assemble stack elements with drag-and-drop.
 - Export the design via the Collada export button to generate a `.dae` file.
+- Click **Verify (TQEC)** to run server-side validation via the [tqec](https://github.com/tqec/tqec) package; any errors are shown inline on the offending cubes.
 - Run the provided validation test to check `.dae` compatibility.
 - Use the **Templates** button in the toolbar to load a bundled example diagram (CNOT, CZ, move + rotation, three CNOTs, Steane encoding) and edit it as a starting point.
 

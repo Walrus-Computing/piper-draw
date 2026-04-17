@@ -6,7 +6,6 @@ import math
 
 from fastapi import FastAPI
 from pydantic import BaseModel
-
 from tqec.computation.block_graph import BlockGraph
 from tqec.utils.exceptions import TQECError
 
@@ -14,9 +13,18 @@ app = FastAPI()
 
 CUBE_TYPES = {"XZZ", "ZXZ", "ZXX", "XXZ", "ZZX", "XZX", "Y"}
 PIPE_TYPES = {
-    "OZX", "OXZ", "OZXH", "OXZH",
-    "ZOX", "XOZ", "ZOXH", "XOZH",
-    "ZXO", "XZO", "ZXOH", "XZOH",
+    "OZX",
+    "OXZ",
+    "OZXH",
+    "OXZH",
+    "ZOX",
+    "XOZ",
+    "ZOXH",
+    "XOZH",
+    "ZXO",
+    "XZO",
+    "ZXOH",
+    "XZOH",
 }
 
 
@@ -84,11 +92,13 @@ def convert_blocks(blocks: list[BlockInput]) -> dict:
     for block in blocks:
         if block.type in CUBE_TYPES:
             tqec_pos = _piper_to_tqec_pos(block.pos)
-            cubes.append({
-                "position": list(tqec_pos),
-                "kind": block.type,
-                "label": "",
-            })
+            cubes.append(
+                {
+                    "position": list(tqec_pos),
+                    "kind": block.type,
+                    "label": "",
+                }
+            )
             cube_positions.add(tqec_pos)
 
     # Process pipes; auto-insert Ports at endpoints missing a cube
@@ -97,18 +107,22 @@ def convert_blocks(blocks: list[BlockInput]) -> dict:
         if block.type not in PIPE_TYPES:
             continue
         u, v = _pipe_endpoints(block.pos)
-        pipes.append({
-            "u": list(u),
-            "v": list(v),
-            "kind": block.type,
-        })
+        pipes.append(
+            {
+                "u": list(u),
+                "v": list(v),
+                "kind": block.type,
+            }
+        )
         for endpoint in (u, v):
             if endpoint not in cube_positions:
-                cubes.append({
-                    "position": list(endpoint),
-                    "kind": "PORT",
-                    "label": f"port_{port_counter}",
-                })
+                cubes.append(
+                    {
+                        "position": list(endpoint),
+                        "kind": "PORT",
+                        "label": f"port_{port_counter}",
+                    }
+                )
                 cube_positions.add(endpoint)
                 port_counter += 1
 
@@ -124,9 +138,10 @@ async def validate(req: ValidateRequest) -> ValidateResponse:
         graph_dict = convert_blocks(req.blocks)
         graph = BlockGraph.from_dict(graph_dict)
     except (TQECError, ValueError, KeyError) as e:
-        return ValidateResponse(valid=False, errors=[
-            ValidationError(position=None, message=f"Failed to build graph: {e}")
-        ])
+        return ValidateResponse(
+            valid=False,
+            errors=[ValidationError(position=None, message=f"Failed to build graph: {e}")],
+        )
 
     # Validate per-cube to collect all errors (not just the first)
     errors: list[ValidationError] = []
