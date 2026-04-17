@@ -4,6 +4,7 @@ import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPo
 import type { BlockType, CubeType, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
+import { animateCamera } from "../utils/cameraAnim";
 import * as THREE from "three";
 import { usePreviewImages } from "./PreviewRenderer";
 
@@ -192,10 +193,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
   const setCameraPreset = (position: [number, number, number]) => {
     const controls = controlsRef.current;
     if (!controls) return;
-    const camera = controls.object as THREE.PerspectiveCamera;
-    camera.position.set(...position);
-    controls.target.set(0, 0, 0);
-    controls.update();
+    animateCamera(controls, new THREE.Vector3(0, 0, 0), new THREE.Vector3(...position));
   };
 
   const previewImg = (key: string) => {
