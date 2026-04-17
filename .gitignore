@@ -12,6 +12,13 @@ wheels/
 .python-version
 .vscode
 
+# Environment files
+.env
+.env.*
+
 # GUI / Node.js
 piper_draw/gui/node_modules/
 piper_draw/gui/dist/
+
+# Security reports
+.gstack/
