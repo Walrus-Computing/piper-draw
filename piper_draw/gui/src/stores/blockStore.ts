@@ -28,6 +28,7 @@ import {
   VARIANT_AXIS_MAP,
   toggleHadamard,
   swapPipeVariant,
+  flipBlockType,
 } from "../types";
 
 export type Mode = "place" | "delete" | "select" | "build";
@@ -86,7 +87,9 @@ type UndoCommand =
       oldPlacedType: CubeType | "Y" | null; newPlacedType: CubeType | "Y";
       oldPipes?: Array<{ key: string; oldType: PipeType; newType: PipeType }>;
       oldUndetermined?: UndeterminedCubeInfo; newUndetermined?: UndeterminedCubeInfo }
-  | { kind: "replace"; key: string; oldBlock: Block; newBlock: Block };
+  | { kind: "replace"; key: string; oldBlock: Block; newBlock: Block }
+  | { kind: "bulk-replace"; entries: Array<{ key: string; oldBlock: Block; newBlock: Block }>;
+      undeterminedChanges: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> };
 
 interface BlockStore {
   blocks: Map<string, Block>;
@@ -129,6 +132,7 @@ interface BlockStore {
   selectBlock: (pos: Position3D, additive: boolean) => void;
   clearSelection: () => void;
   deleteSelected: () => void;
+  flipSelected: () => void;
   selectAll: () => void;
   selectBlocks: (keys: string[], additive: boolean) => void;
 
@@ -640,6 +644,27 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         };
       }
 
+      if (cmd.kind === "bulk-replace") {
+        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        for (const e of cmd.entries) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, e.key, e.newBlock));
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, e.key, e.oldBlock));
+        }
+        const newUndetermined = new Map(state.undeterminedCubes);
+        for (const u of cmd.undeterminedChanges) {
+          if (u.oldInfo) newUndetermined.set(u.key, { ...u.oldInfo, options: [...u.oldInfo.options] });
+          else newUndetermined.delete(u.key);
+        }
+        return {
+          blocks,
+          hiddenFaces,
+          history: newHistory,
+          future: [cmd, ...state.future].slice(0, MAX_HISTORY),
+          hoveredGridPos: null,
+          undeterminedCubes: newUndetermined,
+        };
+      }
+
       // cmd.kind === "clear" — restore saved state, rebuild spatial index
       const newIndex = buildSpatialIndex(cmd.savedBlocks);
       return {
@@ -839,6 +864,27 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         };
       }
 
+      if (cmd.kind === "bulk-replace") {
+        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        for (const e of cmd.entries) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, e.key, e.oldBlock));
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, e.key, e.newBlock));
+        }
+        const newUndetermined = new Map(state.undeterminedCubes);
+        for (const u of cmd.undeterminedChanges) {
+          if (u.newInfo) newUndetermined.set(u.key, { ...u.newInfo, options: [...u.newInfo.options] });
+          else newUndetermined.delete(u.key);
+        }
+        return {
+          blocks,
+          hiddenFaces,
+          history: [...state.history, cmd],
+          future: newFuture,
+          hoveredGridPos: null,
+          undeterminedCubes: newUndetermined,
+        };
+      }
+
       // cmd.kind === "clear" — save current state, then clear
       const savedCmd: UndoCommand = {
         kind: "clear",
@@ -961,6 +1007,71 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         selectedKeys: new Set<string>(),
         hoveredGridPos: null,
         undeterminedCubes: newUndetermined,
+      };
+    }),
+
+  flipSelected: () =>
+    set((state) => {
+      if (state.selectedKeys.size === 0) return state;
+
+      const entries: Array<{ key: string; oldBlock: Block; newBlock: Block }> = [];
+      for (const key of state.selectedKeys) {
+        const block = state.blocks.get(key);
+        if (!block) continue;
+        const newType = flipBlockType(block.type);
+        if (newType === block.type) continue;
+        entries.push({ key, oldBlock: block, newBlock: { pos: block.pos, type: newType } });
+      }
+      if (entries.length === 0) return state;
+
+      // Simulated post-flip map for color-conflict checks against non-selected neighbors.
+      const proposed = new Map(state.blocks);
+      for (const e of entries) proposed.set(e.key, e.newBlock);
+
+      if (!state.freeBuild) {
+        for (const e of entries) {
+          const { pos, type } = e.newBlock;
+          if (isPipeType(type)) {
+            if (hasPipeColorConflict(type, pos, proposed)) {
+              return { hoveredInvalidReason: "Flip blocked: selection boundary mismatches adjacent colors" };
+            }
+          } else if (type !== "Y") {
+            if (hasCubeColorConflict(type as CubeType, pos, proposed)) {
+              return { hoveredInvalidReason: "Flip blocked: selection boundary mismatches adjacent colors" };
+            }
+          }
+          if (hasYCubePipeAxisConflict(type, pos, proposed)) {
+            return { ...state, hoveredInvalidReason: "Flip blocked: selection boundary mismatches adjacent colors" };
+          }
+        }
+      }
+
+      let blocks = state.blocks;
+      let hiddenFaces = state.hiddenFaces;
+      for (const e of entries) {
+        ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, e.key, e.oldBlock));
+        ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, e.key, e.newBlock));
+      }
+
+      const newUndetermined = new Map(state.undeterminedCubes);
+      const undeterminedChanges: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> = [];
+      for (const e of entries) {
+        const key = e.key;
+        const oldInfo = state.undeterminedCubes.get(key);
+        if (oldInfo) {
+          newUndetermined.delete(key);
+          undeterminedChanges.push({ key, oldInfo, newInfo: undefined });
+        }
+      }
+
+      const cmd: UndoCommand = { kind: "bulk-replace", entries, undeterminedChanges };
+      return {
+        blocks,
+        hiddenFaces,
+        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+        undeterminedCubes: newUndetermined,
+        hoveredInvalidReason: null,
       };
     }),
 

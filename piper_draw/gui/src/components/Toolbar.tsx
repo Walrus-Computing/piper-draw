@@ -123,6 +123,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
     return count;
   });
   const deleteSelected = useBlockStore((s) => s.deleteSelected);
+  const flipSelected = useBlockStore((s) => s.flipSelected);
 
   const buildCursor = useBlockStore((s) => s.buildCursor);
   const moveBuildCursor = useBlockStore((s) => s.moveBuildCursor);
@@ -365,6 +366,15 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
             style={{ ...btnStyle(false), borderColor: "#dc3545", color: "#dc3545" }}
           >
             Delete {selectedCount}
+          </button>
+        )}
+        {selectedCount > 0 && (
+          <button
+            onClick={flipSelected}
+            title="Swap X↔Z colors on all selected blocks"
+            style={{ ...btnStyle(false), borderColor: "#4a9eff", color: "#4a9eff" }}
+          >
+            Flip {selectedCount}
           </button>
         )}
         <button
