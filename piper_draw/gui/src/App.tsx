@@ -27,6 +27,7 @@ import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
 import { BuildModeHints } from "./components/BuildModeHints";
+import { BuildModeToggles } from "./components/BuildModeToggles";
 import { KeybindEditor } from "./components/KeybindEditor";
 import { HelpPanel } from "./components/HelpPanel";
 import { useBlockStore } from "./stores/blockStore";
@@ -489,9 +490,13 @@ export default function App() {
               const controls = controlsRef.current;
               if (!controls) return;
               const dirKey = actionToWasdKey(action);
-              const direction = store.viewMode.kind === "iso"
-                ? isoBuildDirection(dirKey, store.viewMode.axis)
-                : wasdToBuildDirection(dirKey, controls.getAzimuthalAngle());
+              let direction;
+              if (store.viewMode.kind === "iso") {
+                direction = isoBuildDirection(dirKey, store.viewMode.axis);
+              } else {
+                const { axisAbsoluteWasd } = useKeybindStore.getState();
+                direction = wasdToBuildDirection(dirKey, controls.getAzimuthalAngle(), axisAbsoluteWasd);
+              }
               store.buildMove(direction);
               return;
             }
@@ -651,6 +656,7 @@ export default function App() {
       </div>
       <SelectModeHints />
       <BuildModeHints onCustomize={() => setKeybindEditorOpen(true)} />
+      <BuildModeToggles />
       {keybindEditorOpen && <KeybindEditor onClose={() => setKeybindEditorOpen(false)} />}
       <PlacementWarning toolbarRef={toolbarRef} />
       <Canvas

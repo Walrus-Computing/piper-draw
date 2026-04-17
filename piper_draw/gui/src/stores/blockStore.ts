@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useKeybindStore } from "./keybindStore";
 import type {
   Position3D, Block, BlockType, CubeType, PipeVariant, PipeType, SpatialIndex, FaceMask,
   BuildDirection, UndeterminedCubeInfo, ViewMode, IsoAxis,
@@ -993,6 +994,17 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     const destKey = posKey(destPos);
     const srcKey = posKey(cursor);
 
+    // Camera-follow toggle: when off, skip updating cameraSnapTarget and
+    // lastBuildAxis so the CameraBuildSnap component never animates.
+    const cameraFollowsBuild = useKeybindStore.getState().cameraFollowsBuild;
+    const snapUpdate: { cameraSnapTarget?: { azimuth: number | null; targetPos: Position3D }; lastBuildAxis?: number } =
+      cameraFollowsBuild
+        ? {
+            cameraSnapTarget: { azimuth: cameraAzimuthForDirection(direction), targetPos: destPos },
+            lastBuildAxis: direction.tqecAxis,
+          }
+        : {};
+
     const reject = (reason?: string) => {
       if (reason) set({ hoveredInvalidReason: reason });
       return false;
@@ -1004,11 +1016,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     if (existingPipe) {
       const existingDest = state.blocks.get(destKey);
       if (existingDest && !isPipeType(existingDest.type)) {
-        const azimuth = cameraAzimuthForDirection(direction);
         set({
           buildCursor: destPos,
-          cameraSnapTarget: { azimuth, targetPos: destPos },
-          lastBuildAxis: direction.tqecAxis,
+          ...snapUpdate,
           hoveredInvalidReason: null,
         });
         return true;
@@ -1040,15 +1050,13 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
             cube: { key: destKey, block: destBlock },
             destUndetermined,
           };
-          const azimuth = cameraAzimuthForDirection(direction);
           return {
             blocks,
             hiddenFaces,
             buildCursor: destPos,
             buildHistory: [...s.buildHistory, step],
             undeterminedCubes: newUndetermined,
-            cameraSnapTarget: { azimuth, targetPos: destPos },
-            lastBuildAxis: direction.tqecAxis,
+            ...snapUpdate,
             history: [...s.history, { kind: "build-step" as const, step }].slice(-MAX_HISTORY),
             future: [],
             hoveredInvalidReason: null,
@@ -1330,16 +1338,13 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         destDetermination,
       };
 
-      const azimuth = cameraAzimuthForDirection(direction);
-
       return {
         blocks,
         hiddenFaces,
         buildCursor: destPos,
         buildHistory: [...s.buildHistory, step],
         undeterminedCubes: newUndetermined,
-        cameraSnapTarget: { azimuth, targetPos: destPos },
-        lastBuildAxis: direction.tqecAxis,
+        ...snapUpdate,
         history: [...s.history, { kind: "build-step" as const, step }].slice(-MAX_HISTORY),
         future: [],
         hoveredInvalidReason: null,

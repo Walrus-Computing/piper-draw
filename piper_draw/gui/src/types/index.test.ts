@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createBlockGeometry, getHiddenFaceMaskForPos, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict } from "./index";
+import { createBlockGeometry, getHiddenFaceMaskForPos, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, wasdToBuildDirection } from "./index";
 import type { PipeType, CubeType } from "./index";
 import type { BlockType } from "./index";
 import { Vector3 } from "three";
@@ -321,6 +321,28 @@ describe("hasYCubePipeAxisConflict", () => {
   it("does not affect regular cube placement", () => {
     const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OZX" as BlockType }]);
     expect(hasYCubePipeAxisConflict("XZZ" as BlockType, { x: 0, y: 0, z: 0 }, blocks)).toBe(false);
+  });
+});
+
+describe("wasdToBuildDirection", () => {
+  it("axis-absolute: W/S map to TQEC X axis, A/D to TQEC Y axis", () => {
+    // Camera azimuth should be ignored in axis-absolute mode.
+    expect(wasdToBuildDirection("w", 1.3, true)).toEqual({ tqecAxis: 0, sign: 1 });
+    expect(wasdToBuildDirection("s", -2.7, true)).toEqual({ tqecAxis: 0, sign: -1 });
+    expect(wasdToBuildDirection("a", 0.5, true)).toEqual({ tqecAxis: 1, sign: 1 });
+    expect(wasdToBuildDirection("d", 3.14, true)).toEqual({ tqecAxis: 1, sign: -1 });
+  });
+
+  it("axis-absolute: arrow keys still map to vertical (Z) axis", () => {
+    expect(wasdToBuildDirection("arrowup", 0, true)).toEqual({ tqecAxis: 2, sign: 1 });
+    expect(wasdToBuildDirection("arrowdown", 0, true)).toEqual({ tqecAxis: 2, sign: -1 });
+  });
+
+  it("camera-relative (default): forward depends on camera azimuth quadrant", () => {
+    // Azimuth 0 → camera on +Z, W = build +Y
+    expect(wasdToBuildDirection("w", 0)).toEqual({ tqecAxis: 1, sign: 1 });
+    // Azimuth π/2 → W = build -X
+    expect(wasdToBuildDirection("w", Math.PI / 2)).toEqual({ tqecAxis: 0, sign: -1 });
   });
 });
 
