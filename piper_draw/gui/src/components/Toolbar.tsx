@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useBlockStore } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
 import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, PIPE_TYPE_TO_VARIANT } from "../types";
 import type { BlockType, CubeType, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
+import { fetchTemplateManifest, loadTemplateBlocks, type TemplateEntry } from "../utils/templates";
 import { animateCamera } from "../utils/cameraAnim";
 import * as THREE from "three";
 import { usePreviewImages } from "./PreviewRenderer";
@@ -379,6 +380,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         >
           Export
         </button>
+        <TemplatePicker onLoad={loadBlocks} />
       </div>
 
       {/* Separator */}
@@ -474,6 +476,103 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
           return <><span>X: {pos.x / 3}</span><span>Y: {pos.y / 3}</span><span>Z: {pos.z / 3}</span></>;
         })()}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Template picker — lists bundled .dae files generated from tqec.gallery
+// ---------------------------------------------------------------------------
+
+function TemplatePicker({ onLoad }: { onLoad: (blocks: Map<string, import("../types").Block>) => void }) {
+  const [open, setOpen] = useState(false);
+  const [templates, setTemplates] = useState<TemplateEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loadingFile, setLoadingFile] = useState<string | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const toggle = async () => {
+    const next = !open;
+    setOpen(next);
+    if (next && templates === null) {
+      try {
+        setTemplates(await fetchTemplateManifest());
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    }
+  };
+
+  const pick = async (entry: TemplateEntry) => {
+    setLoadingFile(entry.filename);
+    try {
+      const blocks = await loadTemplateBlocks(entry.filename);
+      onLoad(blocks);
+      setOpen(false);
+    } catch (err) {
+      alert(`Failed to load template: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setLoadingFile(null);
+    }
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button onClick={toggle} style={btnStyle(open)} title="Load a bundled template diagram from tqec.gallery">
+        Templates ▾
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            right: 0,
+            background: "#fff",
+            border: "1px solid #ccc",
+            borderRadius: 4,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            padding: 4,
+            minWidth: 220,
+            zIndex: 1000,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          {error && <div style={{ padding: 6, color: "#c0392b", fontSize: 12 }}>{error}</div>}
+          {!error && templates === null && <div style={{ padding: 6, fontSize: 12, color: "#666" }}>Loading…</div>}
+          {templates?.map((t) => (
+            <button
+              key={t.filename}
+              onClick={() => pick(t)}
+              disabled={loadingFile !== null}
+              title={`${t.description} (${t.filename})`}
+              style={{
+                ...btnStyle(false),
+                textAlign: "left",
+                padding: "6px 10px",
+                opacity: loadingFile && loadingFile !== t.filename ? 0.5 : 1,
+              }}
+            >
+              {loadingFile === t.filename ? `${t.name}…` : t.name}
+            </button>
+          ))}
+          {templates && (
+            <div style={{ padding: "4px 6px 2px", fontSize: 10, color: "#888" }}>
+              From <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

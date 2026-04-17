@@ -36,6 +36,16 @@ This package contains a test that verifies the exported `.dae` file is correctly
 - Assemble stack elements with drag-and-drop.
 - Export the design via the Collada export button to generate a `.dae` file.
 - Run the provided validation test to check `.dae` compatibility.
+- Use the **Templates** button in the toolbar to load a bundled example diagram (CNOT, CZ, move + rotation, three CNOTs, Steane encoding) and edit it as a starting point.
+
+### Bundled templates
+The `.dae` files served from `piper_draw/gui/public/templates/` are generated from
+[`tqec.gallery`](https://github.com/tqec/tqec/tree/main/src/tqec/gallery) — they
+originate from the TQEC project and are bundled here for convenience. Re-run the
+generator if TQEC is updated:
+```sh
+uv run python scripts/generate_templates.py
+```
 
 ### Testing
 We use `pytest`. For random numbers in test we use `pytest-randomly`, which sets a unique seed for each test run, such that failing tests are reproducible, but the seed is not fix.
