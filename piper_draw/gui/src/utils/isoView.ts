@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { IsoAxis, Position3D, ViewMode } from "../types";
+import type { BuildDirection, IsoAxis, Position3D, ViewMode } from "../types";
 import { axisIndex } from "../types";
 
 const ISO_DISTANCE = 1000;
@@ -59,6 +59,56 @@ export function posInActiveSlice(viewMode: ViewMode, pos: Position3D): boolean {
   if (viewMode.kind !== "iso") return true;
   const depth = viewMode.axis === "x" ? pos.x : viewMode.axis === "y" ? pos.y : pos.z;
   return depth >= viewMode.slice - 2 && depth < viewMode.slice + 3;
+}
+
+/**
+ * Build-mode key → TQEC build direction in iso mode.
+ *   W/S      → vertical in-plane axis (screen up/down)
+ *   A/D      → horizontal in-plane axis (screen left/right)
+ *   ArrowUp/ArrowDown → depth axis (out of / into screen, toward camera = up)
+ *
+ * Camera in iso mode is locked to a fixed orientation per axis (no rotation),
+ * so the mapping doesn't need an azimuth — it's a static table per IsoAxis.
+ */
+export function isoBuildDirection(
+  key: "w" | "a" | "s" | "d" | "arrowup" | "arrowdown",
+  axis: IsoAxis,
+): BuildDirection {
+  // [horizontal+ , vertical+ , depth-out] in TQEC-axis units, where depth-out
+  // points from the slice toward the camera (out of the screen).
+  // Iso X: camera at +X, up = +Three Y = +TQEC Z, screen-right = +TQEC Y.
+  // Iso Y: camera at -TQEC Y (Three +Z), up = +TQEC Z, screen-right = +TQEC X.
+  // Iso Z: camera at +TQEC Z (Three +Y), up = +TQEC Y, screen-right = +TQEC X.
+  const table: Record<IsoAxis, [BuildDirection, BuildDirection, BuildDirection]> = {
+    x: [
+      { tqecAxis: 1, sign:  1 }, // right = +Y
+      { tqecAxis: 2, sign:  1 }, // up    = +Z
+      { tqecAxis: 0, sign:  1 }, // out   = +X
+    ],
+    y: [
+      { tqecAxis: 0, sign:  1 }, // right = +X
+      { tqecAxis: 2, sign:  1 }, // up    = +Z
+      { tqecAxis: 1, sign: -1 }, // out   = -Y (camera is at -Y)
+    ],
+    z: [
+      { tqecAxis: 0, sign:  1 }, // right = +X
+      { tqecAxis: 1, sign:  1 }, // up    = +Y
+      { tqecAxis: 2, sign:  1 }, // out   = +Z
+    ],
+  };
+  const [right, up, out] = table[axis];
+  const flip = (d: BuildDirection): BuildDirection => ({
+    tqecAxis: d.tqecAxis,
+    sign: (d.sign * -1) as 1 | -1,
+  });
+  switch (key) {
+    case "d": return right;
+    case "a": return flip(right);
+    case "w": return up;
+    case "s": return flip(up);
+    case "arrowup": return out;
+    case "arrowdown": return flip(out);
+  }
 }
 
 /** Snap a Three.js point on the active iso plane to a valid TQEC position. */

@@ -36,6 +36,7 @@ import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
 import {
   ISO_INITIAL_ZOOM,
+  isoBuildDirection,
   isoCameraThree,
   isoGridMeshTransform,
   isoTargetThree,
@@ -480,9 +481,10 @@ export default function App() {
             case "moveDown": {
               const controls = controlsRef.current;
               if (!controls) return;
-              const azimuth = controls.getAzimuthalAngle();
               const dirKey = actionToWasdKey(action);
-              const direction = wasdToBuildDirection(dirKey, azimuth);
+              const direction = store.viewMode.kind === "iso"
+                ? isoBuildDirection(dirKey, store.viewMode.axis)
+                : wasdToBuildDirection(dirKey, controls.getAzimuthalAngle());
               store.buildMove(direction);
               return;
             }
