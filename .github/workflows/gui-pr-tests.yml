@@ -25,6 +25,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run GUI lint
+        run: npm run lint
+
       - name: Run GUI tests
         run: npm run test
 
