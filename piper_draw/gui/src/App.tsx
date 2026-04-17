@@ -408,7 +408,7 @@ export default function App() {
       {keybindEditorOpen && <KeybindEditor onClose={() => setKeybindEditorOpen(false)} />}
       <PlacementWarning toolbarRef={toolbarRef} />
       <Canvas
-        camera={{ position: [14, 14, -14], fov: 35 }}
+        camera={{ position: [14, 14, -14], fov: 35, near: 0.1, far: 100000 }}
         gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }}
         onContextMenu={(e) => e.preventDefault()}
       >
@@ -430,7 +430,7 @@ export default function App() {
           <OrientationGizmo />
         </GizmoHelper>
         <ThreeStateBridge stateRef={threeStateRef} />
-        <OrbitControls ref={controlsRef} makeDefault />
+        <OrbitControls ref={controlsRef} makeDefault maxDistance={50000} />
       </Canvas>
       <MarqueeSelect threeStateRef={threeStateRef} controlsRef={controlsRef} />
     </>
