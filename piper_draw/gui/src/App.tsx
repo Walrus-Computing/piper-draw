@@ -22,7 +22,8 @@ import { ValidationToast } from "./components/ValidationToast";
 import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { SelectionHighlights } from "./components/SelectionHighlights";
 import { BuildCursor } from "./components/BuildCursor";
-import { MarqueeSelect, type ThreeState } from "./components/MarqueeSelect";
+import { SelectModePointer, type ThreeState } from "./components/SelectModePointer";
+import { DragGhost } from "./components/DragGhost";
 import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
@@ -297,10 +298,11 @@ function SelectModeHints() {
   const altKey = isMac ? "⌥ Option+" : "Alt+";
   const hints = [
     ["Click", "Select"],
-    ["Drag", "Box select"],
+    ["Drag", "Box select / Move selection"],
     [`${altKey}Drag`, "Orbit"],
     ["Right Drag", "Pan"],
     ["Shift+Click", "Add/remove"],
+    ["↑ ↓", "Nudge z ±3"],
     [`${modKey}A`, "Select all"],
     ["Delete", "Delete selected"],
     ["F", "Flip colors"],
@@ -713,6 +715,7 @@ export default function App() {
         {!photoRequest && <FoldOutCubeOverlay />}
         {!photoRequest && <InvalidBlockHighlights />}
         {!photoRequest && <SelectionHighlights />}
+        {!photoRequest && <DragGhost />}
         {!photoRequest && <BuildCursor />}
         {!photoRequest && <OpenPipeGhosts />}
         <CameraBuildSnap controlsRef={controlsRef} />
@@ -731,7 +734,7 @@ export default function App() {
         <ViewportCamera controlsRef={controlsRef} />
         <NavControlsModifier controlsRef={controlsRef} />
       </Canvas>
-      <MarqueeSelect threeStateRef={threeStateRef} controlsRef={controlsRef} />
+      <SelectModePointer threeStateRef={threeStateRef} controlsRef={controlsRef} />
     </>
   );
 }

@@ -437,4 +437,121 @@ describe("blockStore", () => {
       expect(useBlockStore.getState().history.length).toBe(histBefore);
     });
   });
+
+  describe("moveSelection", () => {
+    function selectAllCurrent() {
+      const s = useBlockStore.getState();
+      useBlockStore.setState({ selectedKeys: new Set(s.blocks.keys()) });
+    }
+
+    it("moves a single selected cube by (3,0,0) and updates selectedKeys", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      selectAllCurrent();
+      const ok = useBlockStore.getState().moveSelection({ x: 3, y: 0, z: 0 });
+      const s = useBlockStore.getState();
+      expect(ok).toBe(true);
+      expect(s.blocks.has("0,0,0")).toBe(false);
+      expect(s.blocks.get("3,0,0")?.type).toBe("XZZ");
+      expect(s.selectedKeys.has("3,0,0")).toBe(true);
+      expect(s.selectedKeys.has("0,0,0")).toBe(false);
+    });
+
+    it("moves a cube + attached pipe pair together preserving adjacency", () => {
+      // ZXZ cubes (Y=X, Z=Z) connected by an OXZ pipe (closed Y=X, Z=Z).
+      useBlockStore.setState({ cubeType: "ZXZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: null, cubeType: "XZZ" });
+      selectAllCurrent();
+      const ok = useBlockStore.getState().moveSelection({ x: 0, y: 3, z: 0 });
+      const s = useBlockStore.getState();
+      expect(ok).toBe(true);
+      expect(s.blocks.size).toBe(3);
+      expect(s.blocks.has("0,3,0")).toBe(true);
+      expect(s.blocks.has("3,3,0")).toBe(true);
+      expect(s.blocks.has("1,3,0")).toBe(true);
+      expect(s.blocks.get("1,3,0")?.type).toBe("OXZ");
+    });
+
+    it("rejects a move that overlaps a non-selected block", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      // Select only the first cube
+      useBlockStore.setState({ selectedKeys: new Set(["0,0,0"]) });
+      const ok = useBlockStore.getState().moveSelection({ x: 3, y: 0, z: 0 });
+      const s = useBlockStore.getState();
+      expect(ok).toBe(false);
+      // Both cubes should still be present at their original positions
+      expect(s.blocks.has("0,0,0")).toBe(true);
+      expect(s.blocks.has("3,0,0")).toBe(true);
+      // selectedKeys unchanged
+      expect(s.selectedKeys.has("0,0,0")).toBe(true);
+    });
+
+    it("rejects a move that creates a color conflict, and succeeds under freeBuild", () => {
+      // Cube ZXZ (Y=X,Z=Z) at (0,0,0) with pipe OXZ (Y=X,Z=Z) at (1,0,0) — a valid pair.
+      // Cube XZZ (Y=Z,Z=Z) at (6,0,0). Moving the pipe to (4,0,0) puts it next to XZZ,
+      // which mismatches on the Y axis → color conflict.
+      useBlockStore.setState({ cubeType: "ZXZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: null, cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 6, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(3);
+
+      useBlockStore.setState({ selectedKeys: new Set(["1,0,0"]) });
+      const ok = useBlockStore.getState().moveSelection({ x: 3, y: 0, z: 0 });
+      expect(ok).toBe(false);
+
+      useBlockStore.setState({ freeBuild: true });
+      const ok2 = useBlockStore.getState().moveSelection({ x: 3, y: 0, z: 0 });
+      expect(ok2).toBe(true);
+      useBlockStore.setState({ freeBuild: false });
+    });
+
+    it("delta = {0,0,0} is a no-op with no history entry", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      selectAllCurrent();
+      const beforeHist = useBlockStore.getState().history.length;
+      const ok = useBlockStore.getState().moveSelection({ x: 0, y: 0, z: 0 });
+      expect(ok).toBe(false);
+      expect(useBlockStore.getState().history.length).toBe(beforeHist);
+    });
+
+    it("undo restores old positions and selection; redo re-applies the move", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.setState({ selectedKeys: new Set(["0,0,0", "3,0,0"]) });
+      const ok = useBlockStore.getState().moveSelection({ x: 0, y: 3, z: 0 });
+      expect(ok).toBe(true);
+      expect(useBlockStore.getState().selectedKeys.has("0,3,0")).toBe(true);
+
+      useBlockStore.getState().undo();
+      const s1 = useBlockStore.getState();
+      expect(s1.blocks.has("0,0,0")).toBe(true);
+      expect(s1.blocks.has("3,0,0")).toBe(true);
+      expect(s1.blocks.has("0,3,0")).toBe(false);
+      expect(s1.selectedKeys.has("0,0,0")).toBe(true);
+      expect(s1.selectedKeys.has("3,0,0")).toBe(true);
+
+      useBlockStore.getState().redo();
+      const s2 = useBlockStore.getState();
+      expect(s2.blocks.has("0,3,0")).toBe(true);
+      expect(s2.blocks.has("3,3,0")).toBe(true);
+      expect(s2.blocks.has("0,0,0")).toBe(false);
+      expect(s2.selectedKeys.has("0,3,0")).toBe(true);
+    });
+
+    it("supports vertical moves (non-zero z) while preserving parity", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ selectedKeys: new Set(["0,0,0"]) });
+      const ok = useBlockStore.getState().moveSelection({ x: 0, y: 0, z: 3 });
+      expect(ok).toBe(true);
+      expect(useBlockStore.getState().blocks.has("0,0,3")).toBe(true);
+      expect(useBlockStore.getState().selectedKeys.has("0,0,3")).toBe(true);
+    });
+  });
 });

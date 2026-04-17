@@ -76,6 +76,7 @@ type UndoCommand =
   | { kind: "add"; key: string; block: Block }
   | { kind: "remove"; key: string; block: Block }
   | { kind: "bulk-remove"; entries: Array<{ key: string; block: Block }> }
+  | { kind: "bulk-move"; entries: Array<{ oldKey: string; oldBlock: Block; newKey: string; newBlock: Block }> }
   | { kind: "clear"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask>; savedUndetermined: Map<string, UndeterminedCubeInfo> }
   | { kind: "load"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask>; savedUndetermined: Map<string, UndeterminedCubeInfo>;
       newBlocks: Map<string, Block>; newIndex: SpatialIndex; newHiddenFaces: Map<string, FaceMask> }
@@ -107,6 +108,11 @@ interface BlockStore {
   hoveredReplace: boolean;
   selectedKeys: Set<string>;
 
+  // Drag-selection state (live during a drag of the current selection)
+  isDraggingSelection: boolean;
+  dragDelta: Position3D | null;
+  dragValid: boolean;
+
   // Build mode state
   buildCursor: Position3D | null;
   buildHistory: BuildStep[];
@@ -135,6 +141,8 @@ interface BlockStore {
   flipSelected: () => void;
   selectAll: () => void;
   selectBlocks: (keys: string[], additive: boolean) => void;
+  setDragState: (s: { isDragging: boolean; delta: Position3D | null; valid: boolean }) => void;
+  moveSelection: (delta: Position3D) => boolean;
 
   // Build mode actions
   buildMove: (direction: BuildDirection) => boolean;
@@ -246,6 +254,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   hoveredReplace: false,
   selectedKeys: new Set(),
 
+  isDraggingSelection: false,
+  dragDelta: null,
+  dragValid: true,
+
   // Build mode state
   buildCursor: null,
   buildHistory: [],
@@ -344,6 +356,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       hoveredBlockType: null,
       hoveredInvalid: false,
       hoveredInvalidReason: null,
+      isDraggingSelection: false,
+      dragDelta: null,
+      dragValid: true,
       ...(mode !== "select" ? { selectedKeys: new Set<string>() } : {}),
     });
   },
@@ -481,6 +496,32 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           history: newHistory,
           future: [cmd, ...state.future].slice(0, MAX_HISTORY),
           hoveredGridPos: null,
+        };
+      }
+
+      if (cmd.kind === "bulk-move") {
+        let blocks = state.blocks;
+        let hiddenFaces = state.hiddenFaces;
+        for (const e of cmd.entries) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, e.newKey, e.newBlock));
+        }
+        for (const e of cmd.entries) {
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, e.oldKey, e.oldBlock));
+        }
+        const newUndetermined = new Map(state.undeterminedCubes);
+        for (const e of cmd.entries) {
+          const info = newUndetermined.get(e.newKey);
+          newUndetermined.delete(e.newKey);
+          if (info) newUndetermined.set(e.oldKey, info);
+        }
+        return {
+          blocks,
+          hiddenFaces,
+          history: newHistory,
+          future: [cmd, ...state.future].slice(0, MAX_HISTORY),
+          hoveredGridPos: null,
+          selectedKeys: new Set(cmd.entries.map((e) => e.oldKey)),
+          undeterminedCubes: newUndetermined,
         };
       }
 
@@ -727,6 +768,32 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           future: newFuture,
           hoveredGridPos: null,
           selectedKeys: new Set<string>(),
+        };
+      }
+
+      if (cmd.kind === "bulk-move") {
+        let blocks = state.blocks;
+        let hiddenFaces = state.hiddenFaces;
+        for (const e of cmd.entries) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, e.oldKey, e.oldBlock));
+        }
+        for (const e of cmd.entries) {
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, e.newKey, e.newBlock));
+        }
+        const newUndetermined = new Map(state.undeterminedCubes);
+        for (const e of cmd.entries) {
+          const info = newUndetermined.get(e.oldKey);
+          newUndetermined.delete(e.oldKey);
+          if (info) newUndetermined.set(e.newKey, info);
+        }
+        return {
+          blocks,
+          hiddenFaces,
+          history: [...state.history, cmd],
+          future: newFuture,
+          hoveredGridPos: null,
+          selectedKeys: new Set(cmd.entries.map((e) => e.newKey)),
+          undeterminedCubes: newUndetermined,
         };
       }
 
@@ -1099,6 +1166,98 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
       return { selectedKeys: next };
     }),
+
+  setDragState: ({ isDragging, delta, valid }) =>
+    set((state) => {
+      if (
+        state.isDraggingSelection === isDragging &&
+        state.dragValid === valid &&
+        ((state.dragDelta == null && delta == null) ||
+          (state.dragDelta != null && delta != null &&
+            state.dragDelta.x === delta.x &&
+            state.dragDelta.y === delta.y &&
+            state.dragDelta.z === delta.z))
+      ) return state;
+      return { isDraggingSelection: isDragging, dragDelta: delta, dragValid: valid };
+    }),
+
+  moveSelection: (delta) => {
+    let succeeded = false;
+    set((state) => {
+      if (state.selectedKeys.size === 0) return state;
+      if (delta.x === 0 && delta.y === 0 && delta.z === 0) return state;
+
+      const entries: Array<{ oldKey: string; oldBlock: Block; newKey: string; newBlock: Block }> = [];
+      for (const oldKey of state.selectedKeys) {
+        const old = state.blocks.get(oldKey);
+        if (!old) continue;
+        const newPos: Position3D = { x: old.pos.x + delta.x, y: old.pos.y + delta.y, z: old.pos.z + delta.z };
+        if (!isValidPos(newPos, old.type)) return state;
+        entries.push({ oldKey, oldBlock: old, newKey: posKey(newPos), newBlock: { pos: newPos, type: old.type } });
+      }
+      if (entries.length === 0) return state;
+
+      // Remove all old blocks first so validation sees the reduced map
+      let blocks = state.blocks;
+      let hiddenFaces = state.hiddenFaces;
+      for (const e of entries) {
+        ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, e.oldKey, e.oldBlock));
+      }
+
+      // Validate each new position against the reduced world
+      for (const e of entries) {
+        if (hasBlockOverlap(e.newBlock.pos, e.newBlock.type, blocks, state.spatialIndex)) {
+          // Rollback: re-add removed blocks, restore spatial index
+          for (const r of entries) {
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.oldKey, r.oldBlock));
+          }
+          return state;
+        }
+        if (!state.freeBuild) {
+          const t = e.newBlock.type;
+          const fails =
+            (isPipeType(t) && hasPipeColorConflict(t, e.newBlock.pos, blocks)) ||
+            (!isPipeType(t) && t !== "Y" && hasCubeColorConflict(t as CubeType, e.newBlock.pos, blocks)) ||
+            hasYCubePipeAxisConflict(t, e.newBlock.pos, blocks);
+          if (fails) {
+            for (const r of entries) {
+              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.oldKey, r.oldBlock));
+            }
+            return state;
+          }
+        }
+      }
+
+      // Commit: add new blocks
+      for (const e of entries) {
+        ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, e.newKey, e.newBlock));
+      }
+
+      // Transfer undetermined info from old key -> new key
+      const newUndetermined = new Map(state.undeterminedCubes);
+      for (const e of entries) {
+        const info = newUndetermined.get(e.oldKey);
+        newUndetermined.delete(e.oldKey);
+        if (info) newUndetermined.set(e.newKey, info);
+      }
+
+      const newSelected = new Set<string>();
+      for (const e of entries) newSelected.add(e.newKey);
+
+      const cmd: UndoCommand = { kind: "bulk-move", entries };
+      succeeded = true;
+      return {
+        blocks,
+        hiddenFaces,
+        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+        selectedKeys: newSelected,
+        hoveredGridPos: null,
+        undeterminedCubes: newUndetermined,
+      };
+    });
+    return succeeded;
+  },
 
   // ---------------------------------------------------------------------------
   // Build mode actions
