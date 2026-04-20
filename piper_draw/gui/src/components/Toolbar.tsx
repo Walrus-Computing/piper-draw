@@ -87,6 +87,7 @@ export function Toolbar({
   const setCubeType = useBlockStore((s) => s.setCubeType);
   const setPipeVariant = useBlockStore((s) => s.setPipeVariant);
   const setPlacePort = useBlockStore((s) => s.setPlacePort);
+  const setPaletteDragging = useBlockStore((s) => s.setPaletteDragging);
   const cycleBlock = useBlockStore((s) => s.cycleBlock);
   const cyclePipe = useBlockStore((s) => s.cyclePipe);
   const historyLen = useBlockStore((s) => s.history.length);
@@ -398,7 +399,12 @@ export function Toolbar({
   const previewImg = (key: string) => {
     const src = previewImages.get(key);
     return src ? (
-      <img src={src} alt={key} style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} />
+      <img
+        src={src}
+        alt={key}
+        draggable={false}
+        style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }}
+      />
     ) : null;
   };
 
@@ -552,6 +558,11 @@ export function Toolbar({
           )}
           <button
             key="port"
+            onPointerDown={() => {
+              if (mode !== "edit") return;
+              setPlacePort(true);
+              setPaletteDragging(true);
+            }}
             onClick={() => {
               if (mode === "build") {
                 // In build mode, clicking Port converts the cursor cube back to a port
@@ -576,6 +587,11 @@ export function Toolbar({
           {CUBE_TYPES.map((ct) => (
             <button
               key={ct}
+              onPointerDown={() => {
+                if (mode !== "edit") return;
+                setCubeType(ct as BlockType);
+                setPaletteDragging(true);
+              }}
               onClick={() => {
                 if (mode === "build") {
                   cycleBlock(ct);
@@ -603,6 +619,11 @@ export function Toolbar({
             </button>
           ))}
           <button
+            onPointerDown={() => {
+              if (mode !== "edit") return;
+              setCubeType("Y");
+              setPaletteDragging(true);
+            }}
             onClick={() => {
               if (mode === "build") {
                 cycleBlock("Y");
@@ -637,6 +658,11 @@ export function Toolbar({
           {PIPE_VARIANTS.map((v) => (
             <button
               key={v}
+              onPointerDown={() => {
+                if (mode !== "edit") return;
+                setPipeVariant(v);
+                setPaletteDragging(true);
+              }}
               onClick={() => {
                 if (mode === "build") {
                   cyclePipe(v);

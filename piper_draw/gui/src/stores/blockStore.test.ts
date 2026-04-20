@@ -789,4 +789,69 @@ describe("blockStore", () => {
       expect(useBlockStore.getState().selectedKeys.has("0,0,3")).toBe(true);
     });
   });
+
+  describe("cycleArmedType", () => {
+    it("walks the full PLACEABLE_ORDER (Port → cubes → Y → pipes → wrap)", () => {
+      const s = useBlockStore.getState();
+      // Start at Port
+      s.setPlacePort(true);
+      expect(useBlockStore.getState().armedTool).toBe("port");
+
+      // Right through all 6 cubes
+      const cubes = ["XZZ", "ZXZ", "ZXX", "XXZ", "ZZX", "XZX"];
+      for (const ct of cubes) {
+        useBlockStore.getState().cycleArmedType(1);
+        const st = useBlockStore.getState();
+        expect(st.armedTool).toBe("cube");
+        expect(st.cubeType).toBe(ct);
+      }
+
+      // → Y
+      useBlockStore.getState().cycleArmedType(1);
+      let st = useBlockStore.getState();
+      expect(st.armedTool).toBe("cube");
+      expect(st.cubeType).toBe("Y");
+
+      // → 4 pipes
+      const pipes = ["ZX", "XZ", "ZXH", "XZH"] as const;
+      for (const v of pipes) {
+        useBlockStore.getState().cycleArmedType(1);
+        st = useBlockStore.getState();
+        expect(st.armedTool).toBe("pipe");
+        expect(st.pipeVariant).toBe(v);
+      }
+
+      // → wrap back to Port
+      useBlockStore.getState().cycleArmedType(1);
+      expect(useBlockStore.getState().armedTool).toBe("port");
+    });
+
+    it("ArrowLeft from Port wraps to last pipe (XZH)", () => {
+      useBlockStore.getState().setPlacePort(true);
+      useBlockStore.getState().cycleArmedType(-1);
+      const st = useBlockStore.getState();
+      expect(st.armedTool).toBe("pipe");
+      expect(st.pipeVariant).toBe("XZH");
+    });
+
+    it("from pointer, ArrowRight arms Port and ArrowLeft arms last pipe", () => {
+      useBlockStore.getState().setArmedTool("pointer");
+      useBlockStore.getState().cycleArmedType(1);
+      expect(useBlockStore.getState().armedTool).toBe("port");
+
+      useBlockStore.getState().setArmedTool("pointer");
+      useBlockStore.getState().cycleArmedType(-1);
+      const st = useBlockStore.getState();
+      expect(st.armedTool).toBe("pipe");
+      expect(st.pipeVariant).toBe("XZH");
+    });
+
+    it("does nothing in build mode", () => {
+      useBlockStore.setState({ mode: "build", armedTool: "cube", cubeType: "XZZ", pipeVariant: null });
+      useBlockStore.getState().cycleArmedType(1);
+      const st = useBlockStore.getState();
+      expect(st.armedTool).toBe("cube");
+      expect(st.cubeType).toBe("XZZ");
+    });
+  });
 });
