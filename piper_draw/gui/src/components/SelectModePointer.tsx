@@ -120,6 +120,11 @@ export function SelectModePointer({
 
   const [marqueeRect, setMarqueeRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
+  // Iso mode locks the camera to a 2D plane — rotation must stay disabled after a drag ends.
+  const restoreRotate = useCallback(() => {
+    return useBlockStore.getState().viewMode.kind === "persp";
+  }, []);
+
   const cancelDrag = useCallback(() => {
     const state = dragRef.current;
     if (!state) return;
@@ -132,7 +137,7 @@ export function SelectModePointer({
       useBlockStore.getState().setDragState({ isDragging: false, delta: null, valid: true });
     }
     if (controlsRef.current) {
-      controlsRef.current.enableRotate = true;
+      controlsRef.current.enableRotate = restoreRotate();
       controlsRef.current.enablePan = true;
     }
     dragRef.current = null;
@@ -141,7 +146,7 @@ export function SelectModePointer({
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
-  }, [controlsRef]);
+  }, [controlsRef, restoreRotate]);
 
   const updateDragFromLatest = useCallback(() => {
     rafRef.current = null;
@@ -338,7 +343,7 @@ export function SelectModePointer({
         // already released
       }
       if (controlsRef.current) {
-        controlsRef.current.enableRotate = true;
+        controlsRef.current.enableRotate = restoreRotate();
         controlsRef.current.enablePan = true;
       }
 
@@ -387,7 +392,7 @@ export function SelectModePointer({
         useBlockStore.getState().moveSelection(commitDelta);
       }
     },
-    [controlsRef, threeStateRef],
+    [controlsRef, threeStateRef, restoreRotate],
   );
 
   const onKeyDown = useCallback(

@@ -64,6 +64,41 @@ export const FACE_BIT_BY_INDEX: ReadonlyArray<number> = [
 export type PipeVariant = "ZX" | "XZ" | "ZXH" | "XZH";
 export const PIPE_VARIANTS: PipeVariant[] = ["ZX", "XZ", "ZXH", "XZH"];
 
+/**
+ * Toolbar-order list of placeable items (Port + 6 cubes + Y + 4 pipes).
+ * Pointer is excluded — it's a tool, not an object. Used by ArrowLeft/Right
+ * cycling in edit mode.
+ */
+export type Placeable =
+  | { kind: "port" }
+  | { kind: "cube"; cubeType: BlockType }
+  | { kind: "pipe"; variant: PipeVariant };
+
+export const PLACEABLE_ORDER: ReadonlyArray<Placeable> = [
+  { kind: "port" },
+  ...CUBE_TYPES.map((t) => ({ kind: "cube" as const, cubeType: t as BlockType })),
+  { kind: "cube" as const, cubeType: "Y" as BlockType },
+  ...PIPE_VARIANTS.map((v) => ({ kind: "pipe" as const, variant: v })),
+];
+
+/**
+ * Index of the currently armed placeable in PLACEABLE_ORDER, or -1 if the
+ * pointer tool is armed (no placeable selected).
+ */
+export function currentPlaceableIndex(
+  armedTool: "pointer" | "cube" | "pipe" | "port",
+  cubeType: BlockType,
+  pipeVariant: PipeVariant | null,
+): number {
+  if (armedTool === "pointer") return -1;
+  if (armedTool === "port") return 0;
+  if (armedTool === "pipe") {
+    if (!pipeVariant) return -1;
+    return PLACEABLE_ORDER.findIndex((p) => p.kind === "pipe" && p.variant === pipeVariant);
+  }
+  return PLACEABLE_ORDER.findIndex((p) => p.kind === "cube" && p.cubeType === cubeType);
+}
+
 export interface Block {
   pos: Position3D;
   type: BlockType;

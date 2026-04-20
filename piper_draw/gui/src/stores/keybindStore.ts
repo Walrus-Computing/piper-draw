@@ -28,7 +28,9 @@ export type EditAction =
   | "undo"
   | "redo"
   | "stepForward"
-  | "stepBack";
+  | "stepBack"
+  | "cyclePrev"
+  | "cycleNext";
 
 export type ActionForMode = {
   build: BuildAction;
@@ -53,7 +55,7 @@ export const ACTIONS: { [M in Mode]: readonly ActionForMode[M][] } = {
   edit: [
     "selectAll", "deleteSelection", "clearSelection", "flipColors", "holdToDelete",
     "rotateCcw", "rotateCw",
-    "undo", "redo", "stepForward", "stepBack",
+    "undo", "redo", "stepForward", "stepBack", "cyclePrev", "cycleNext",
   ],
 };
 
@@ -83,6 +85,8 @@ export const ACTION_LABELS: { [M in Mode]: Record<ActionForMode[M], string> } = 
     redo: "Redo",
     stepForward: "Step forward (iso)",
     stepBack: "Step back (iso)",
+    cyclePrev: "Previous block / pipe",
+    cycleNext: "Next block / pipe",
   },
 };
 
@@ -112,6 +116,8 @@ export const DEFAULT_BINDINGS: { [M in Mode]: Record<ActionForMode[M], KeyBindin
     redo: { key: "z", ctrl: true, shift: true },
     stepForward: { key: "arrowup" },
     stepBack: { key: "arrowdown" },
+    cyclePrev: { key: "arrowleft" },
+    cycleNext: { key: "arrowright" },
   },
 };
 

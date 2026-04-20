@@ -74,7 +74,7 @@ export function GridPlane() {
     // PortPlacementGhost (OpenPipeGhosts.tsx) reads hoveredGridPos and renders a
     // ghost cube at empty slots.
     if (store.armedTool === "port") {
-      const pos = snapGroundPos(e.point.x, -e.point.z, false);
+      const pos = snapForViewMode(viewMode, e.point, false);
       const key = posKey(pos);
       if (store.blocks.has(key) || store.portPositions.has(key)) {
         setHoveredGridPos(null);
@@ -126,7 +126,7 @@ export function GridPlane() {
     }
     // Port tool: place an explicit port marker at the snapped cube position.
     if (store.armedTool === "port") {
-      const pos = snapGroundPos(e.point.x, -e.point.z, false);
+      const pos = snapForViewMode(viewMode, e.point, false);
       store.addPortAt(pos);
       return;
     }

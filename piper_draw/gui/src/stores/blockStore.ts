@@ -34,6 +34,8 @@ import {
   swapPipeVariant,
   traversedPipeKey,
   flipBlockType,
+  PLACEABLE_ORDER,
+  currentPlaceableIndex,
 } from "../types";
 import { rotateBlockAroundZ } from "../utils/blockRotation";
 
@@ -132,6 +134,12 @@ interface BlockStore {
   cubeType: BlockType;
   pipeVariant: PipeVariant | null;
   /**
+   * True between pointerdown on a placeable toolbar button and the
+   * subsequent window-level pointerup. While true, the pointerup handler
+   * places a block at the current hoveredGridPos (drag-from-palette gesture).
+   */
+  paletteDragging: boolean;
+  /**
    * Transient warning message (e.g. "can't convert cube with ≥2 pipes").
    * Cleared automatically on any mode/tool change or after a few seconds.
    */
@@ -176,6 +184,9 @@ interface BlockStore {
   setCubeType: (cubeType: BlockType) => void;
   setPipeVariant: (variant: PipeVariant) => void;
   setPlacePort: (on: boolean) => void;
+  /** Cycle the armed placeable by ±1 within PLACEABLE_ORDER (edit mode only). */
+  cycleArmedType: (dir: -1 | 1) => void;
+  setPaletteDragging: (on: boolean) => void;
   convertBlockToPort: (pos: Position3D) => void;
   clearPortWarning: () => void;
   addPortAt: (pos: Position3D) => void;
@@ -372,6 +383,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   xHeld: false,
   cubeType: "XZZ",
   pipeVariant: null,
+  paletteDragging: false,
   portWarning: null,
   hoveredGridPos: null,
   hoveredBlockType: null,
@@ -506,12 +518,27 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     hoveredInvalid: false,
     hoveredInvalidReason: null,
     hoveredReplace: false,
+    ...(tool !== "pipe" ? { pipeVariant: null } : {}),
     ...(tool !== "pointer" ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null } : {}),
   }),
   setXHeld: (held) => set({ xHeld: held, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
-  setCubeType: (cubeType) => set({ cubeType, armedTool: "cube", portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
+  setCubeType: (cubeType) => set({ cubeType, armedTool: "cube", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
   setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], armedTool: "pipe", portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
-  setPlacePort: (on) => set({ armedTool: on ? "port" : "pointer", portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, ...(on ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null } : {}) }),
+  setPlacePort: (on) => set({ armedTool: on ? "port" : "pointer", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, ...(on ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null } : {}) }),
+  cycleArmedType: (dir) => {
+    const s = get();
+    if (s.mode !== "edit") return;
+    const cur = currentPlaceableIndex(s.armedTool, s.cubeType, s.pipeVariant);
+    const N = PLACEABLE_ORDER.length;
+    const next = cur === -1
+      ? (dir === 1 ? 0 : N - 1)
+      : (((cur + dir) % N) + N) % N;
+    const target = PLACEABLE_ORDER[next];
+    if (target.kind === "port") s.setPlacePort(true);
+    else if (target.kind === "cube") s.setCubeType(target.cubeType);
+    else s.setPipeVariant(target.variant);
+  },
+  setPaletteDragging: (on) => set((state) => (state.paletteDragging === on ? state : { paletteDragging: on })),
   clearPortWarning: () => set((state) => (state.portWarning == null ? state : { portWarning: null })),
   addPortAt: (pos) =>
     set((state) => {
