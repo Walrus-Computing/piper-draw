@@ -1,0 +1,39 @@
+import { useEffect, useState } from "react";
+
+// Returns a CSS scale factor that keeps an element at its natural size when
+// it fits within the viewport (minus `marginPx` on each side), and shrinks it
+// just enough to fit when it doesn't.
+export function useViewportFitScale(
+  ref: React.RefObject<HTMLElement | null>,
+  marginPx: number,
+): number {
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    let frame = 0;
+    const recompute = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const node = ref.current;
+        if (!node) return;
+        // offsetWidth is the layout (untransformed) width — independent of
+        // the scale we apply, so this measurement is stable across renders.
+        const natural = node.offsetWidth;
+        if (natural === 0) return;
+        const available = window.innerWidth - marginPx;
+        setScale(Math.min(1, available / natural));
+      });
+    };
+    const node = ref.current;
+    const ro = node ? new ResizeObserver(recompute) : null;
+    if (node && ro) ro.observe(node);
+    window.addEventListener("resize", recompute);
+    recompute();
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", recompute);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [ref, marginPx]);
+  return scale;
+}

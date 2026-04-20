@@ -640,8 +640,8 @@ export default function App() {
         title="About piper-draw"
         style={{
           position: "fixed",
-          bottom: 16,
-          left: 16,
+          bottom: 20,
+          left: 20,
           zIndex: 1,
           width: 32,
           height: 32,
