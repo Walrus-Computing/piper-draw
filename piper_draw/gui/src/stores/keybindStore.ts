@@ -106,7 +106,7 @@ export const DEFAULT_BINDINGS: { [M in Mode]: Record<ActionForMode[M], KeyBindin
     undo: { key: "q" },
     cycleBlock: { key: "c" },
     cyclePipe: { key: "r" },
-    deleteAtCursor: { key: "delete" },
+    deleteAtCursor: { key: "backspace" },
     exitBuild: { key: "escape" },
   },
   select: {
@@ -275,7 +275,7 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: "piper-draw-keybinds",
-      version: 7,
+      version: 8,
       migrate: () => ({ bindings: cloneDefaults() }),
       merge: (persisted, current) => {
         const p = persisted as Partial<KeybindState>;
