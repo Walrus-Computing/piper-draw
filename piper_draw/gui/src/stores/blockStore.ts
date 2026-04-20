@@ -30,6 +30,7 @@ import {
   CUBE_TYPES,
   PIPE_VARIANTS,
   VARIANT_AXIS_MAP,
+  PIPE_TYPE_TO_VARIANT,
   toggleHadamard,
   swapPipeVariant,
   traversedPipeKey,
@@ -109,7 +110,10 @@ type UndoCommand =
       undeterminedChanges: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> }
   | { kind: "rotate-selection";
       entries: Array<{ oldKey: string; oldBlock: Block; newKey: string; newBlock: Block }>;
-      prevSelectedKeys: string[]; nextSelectedKeys: string[] };
+      prevSelectedKeys: string[]; nextSelectedKeys: string[] }
+  | { kind: "edit-type-cycle"; key: string; pos: Position3D;
+      oldBlock: Block | null; newBlock: Block | null;
+      oldPortMarker: boolean; newPortMarker: boolean };
 
 interface BlockStore {
   blocks: Map<string, Block>;
@@ -186,6 +190,13 @@ interface BlockStore {
   setPlacePort: (on: boolean) => void;
   /** Cycle the armed placeable by ±1 within PLACEABLE_ORDER (edit mode only). */
   cycleArmedType: (dir: -1 | 1) => void;
+  /**
+   * In edit mode with a single cube/port/pipe selected and the pointer tool armed,
+   * cycle the selected item through the toolbar options that remain valid at its
+   * position. Selection is preserved (the selected-indicator follows the new type).
+   * No-op if selection is empty, multi-select, or the only valid option is current.
+   */
+  cycleSelectedType: (dir: -1 | 1) => void;
   setPaletteDragging: (on: boolean) => void;
   convertBlockToPort: (pos: Position3D) => void;
   clearPortWarning: () => void;
@@ -537,6 +548,198 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     if (target.kind === "port") s.setPlacePort(true);
     else if (target.kind === "cube") s.setCubeType(target.cubeType);
     else s.setPipeVariant(target.variant);
+  },
+  cycleSelectedType: (dir) => {
+    const state = get();
+    if (state.mode !== "edit" || state.armedTool !== "pointer") return;
+
+    // Single-pipe branch — cycle pipe variants among those that keep neighbour
+    // cubes valid, matching the set the toolbar highlights for a selected pipe.
+    if (state.selectedKeys.size === 1 && state.selectedPortPositions.size === 0) {
+      const pipeKey = state.selectedKeys.values().next().value as string;
+      const pipeBlock = state.blocks.get(pipeKey);
+      if (pipeBlock && isPipeType(pipeBlock.type)) {
+        set((s) => {
+          const oldType = pipeBlock.type as PipeType;
+          const base = oldType.replace("H", "");
+          const openAxis = base.indexOf("O") as 0 | 1 | 2;
+          const pipeCoords: [number, number, number] = [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z];
+          const currentVariant = PIPE_TYPE_TO_VARIANT[oldType];
+
+          const validVariants: PipeVariant[] = [];
+          for (const v of PIPE_VARIANTS) {
+            const candidate = VARIANT_AXIS_MAP[v][openAxis];
+            const tmp = new Map(s.blocks);
+            tmp.set(pipeKey, { pos: pipeBlock.pos, type: candidate });
+            let ok = true;
+            for (const offset of [-1, 2]) {
+              const nc: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
+              nc[openAxis] += offset;
+              const nKey = posKey({ x: nc[0], y: nc[1], z: nc[2] });
+              const neighbor = tmp.get(nKey);
+              if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
+              const opts = determineCubeOptions(neighbor.pos, tmp);
+              const currentType = neighbor.type as CubeType;
+              if (opts.determined) {
+                if (opts.type !== currentType) { ok = false; break; }
+              } else if (!opts.options.includes(currentType)) {
+                ok = false; break;
+              }
+            }
+            if (ok) validVariants.push(v);
+          }
+
+          const cycle: PipeVariant[] = [];
+          for (const v of PIPE_VARIANTS) {
+            if (v === currentVariant || validVariants.includes(v)) cycle.push(v);
+          }
+          if (cycle.length <= 1) return s;
+
+          const curIdx = cycle.indexOf(currentVariant);
+          if (curIdx === -1) return s;
+          const nextIdx = (((curIdx + dir) % cycle.length) + cycle.length) % cycle.length;
+          const nextVariant = cycle[nextIdx];
+          if (nextVariant === currentVariant) return s;
+
+          const newType = VARIANT_AXIS_MAP[nextVariant][openAxis];
+          let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
+          ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, pipeKey, pipeBlock));
+          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, pipeKey, { pos: pipeBlock.pos, type: newType }));
+
+          const cmd: UndoCommand = { kind: "pipe-cycle", pipeKey, oldType, newType };
+          return {
+            blocks,
+            hiddenFaces,
+            history: [...s.history, cmd].slice(-MAX_HISTORY),
+            future: [],
+          };
+        });
+        return;
+      }
+    }
+
+    // Cube-slot branch — single selected cube/Y OR single selected port. Cycle
+    // through the toolbar's enabled set (port slot if pipeCount<2, cube types
+    // valid per determineCubeOptions, plus Y if all attached pipes are Z-open).
+    const onePort = state.selectedKeys.size === 0 && state.selectedPortPositions.size === 1;
+    const oneCube = state.selectedKeys.size === 1 && state.selectedPortPositions.size === 0
+      && (() => {
+        const k = state.selectedKeys.values().next().value as string;
+        const b = state.blocks.get(k);
+        return !!b && !isPipeType(b.type);
+      })();
+    if (!onePort && !oneCube) return;
+
+    set((s) => {
+      let key: string;
+      let pos: Position3D;
+      let currentKind: "PORT" | CubeType | "Y";
+      let existingBlock: Block | null;
+      if (oneCube) {
+        key = s.selectedKeys.values().next().value as string;
+        const b = s.blocks.get(key);
+        if (!b || isPipeType(b.type)) return s;
+        existingBlock = b;
+        pos = b.pos;
+        currentKind = b.type as CubeType | "Y";
+      } else {
+        key = s.selectedPortPositions.values().next().value as string;
+        const [x, y, z] = key.split(",").map(Number);
+        pos = { x, y, z };
+        existingBlock = null;
+        currentKind = "PORT";
+      }
+
+      const coords: [number, number, number] = [pos.x, pos.y, pos.z];
+      let pipeCount = 0;
+      let yValid = true;
+      for (let axis = 0; axis < 3; axis++) {
+        for (const offset of [1, -2]) {
+          const nc: [number, number, number] = [coords[0], coords[1], coords[2]];
+          nc[axis] += offset;
+          const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
+          if (n && isPipeType(n.type)) {
+            const openAxis = n.type.replace("H", "").indexOf("O");
+            if (openAxis === axis) {
+              pipeCount++;
+              if (openAxis !== 2) yValid = false;
+            }
+          }
+        }
+      }
+      const result = determineCubeOptions(pos, s.blocks);
+      const cubeOpts = new Set<CubeType | "Y">(result.determined ? [result.type] : result.options);
+      if (yValid) cubeOpts.add("Y");
+      const portAllowed = pipeCount < 2;
+
+      type Opt = { kind: "port" } | { kind: "cube"; type: CubeType | "Y" };
+      const cycle: Opt[] = [];
+      if (portAllowed || currentKind === "PORT") cycle.push({ kind: "port" });
+      for (const ct of CUBE_TYPES) {
+        if (cubeOpts.has(ct) || ct === currentKind) cycle.push({ kind: "cube", type: ct });
+      }
+      if (cubeOpts.has("Y") || currentKind === "Y") cycle.push({ kind: "cube", type: "Y" });
+      if (cycle.length <= 1) return s;
+
+      const curIdx = cycle.findIndex((o) =>
+        currentKind === "PORT" ? o.kind === "port" : (o.kind === "cube" && o.type === currentKind)
+      );
+      if (curIdx === -1) return s;
+      const nextIdx = (((curIdx + dir) % cycle.length) + cycle.length) % cycle.length;
+      const target = cycle[nextIdx];
+
+      let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
+      const oldPortMarker = s.portPositions.has(key);
+      let newBlock: Block | null;
+      let newPortMarker: boolean;
+
+      if (target.kind === "port") {
+        if (existingBlock) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, key, existingBlock));
+        }
+        newBlock = null;
+        // Leave an explicit port marker so the user's intent persists even if
+        // adjacent pipes are later removed (mirrors convertBlockToPort).
+        newPortMarker = true;
+      } else {
+        if (existingBlock) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, key, existingBlock));
+        }
+        newBlock = { pos, type: target.type };
+        ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, key, newBlock));
+        // Placing a cube clears any explicit port marker at this position
+        // (mirrors addBlock's behaviour when a cube lands on a user-placed port).
+        newPortMarker = false;
+      }
+
+      const newPorts = new Set(s.portPositions);
+      if (newPortMarker) newPorts.add(key); else newPorts.delete(key);
+
+      const newSelectedKeys = new Set(s.selectedKeys);
+      const newSelectedPorts = new Set(s.selectedPortPositions);
+      if (newBlock) {
+        newSelectedKeys.add(key);
+        newSelectedPorts.delete(key);
+      } else {
+        newSelectedKeys.delete(key);
+        newSelectedPorts.add(key);
+      }
+
+      const cmd: UndoCommand = {
+        kind: "edit-type-cycle", key, pos,
+        oldBlock: existingBlock, newBlock,
+        oldPortMarker, newPortMarker,
+      };
+      return {
+        blocks,
+        hiddenFaces,
+        portPositions: newPorts,
+        selectedKeys: newSelectedKeys,
+        selectedPortPositions: newSelectedPorts,
+        history: [...s.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+      };
+    });
   },
   setPaletteDragging: (on) => set((state) => (state.paletteDragging === on ? state : { paletteDragging: on })),
   clearPortWarning: () => set((state) => (state.portWarning == null ? state : { portWarning: null })),
@@ -1056,6 +1259,26 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         };
       }
 
+      if (cmd.kind === "edit-type-cycle") {
+        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        if (cmd.newBlock) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cmd.key, cmd.newBlock));
+        }
+        if (cmd.oldBlock) {
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.key, cmd.oldBlock));
+        }
+        const newPorts = new Set(state.portPositions);
+        if (cmd.oldPortMarker) newPorts.add(cmd.key); else newPorts.delete(cmd.key);
+        return {
+          blocks,
+          hiddenFaces,
+          portPositions: newPorts,
+          history: newHistory,
+          future: [cmd, ...state.future].slice(0, MAX_HISTORY),
+          hoveredGridPos: null,
+        };
+      }
+
       if (cmd.kind === "add-port") {
         const newPorts = new Set(state.portPositions);
         newPorts.delete(cmd.key);
@@ -1371,6 +1594,26 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         return {
           blocks,
           hiddenFaces,
+          history: [...state.history, cmd],
+          future: newFuture,
+          hoveredGridPos: null,
+        };
+      }
+
+      if (cmd.kind === "edit-type-cycle") {
+        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        if (cmd.oldBlock) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cmd.key, cmd.oldBlock));
+        }
+        if (cmd.newBlock) {
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.key, cmd.newBlock));
+        }
+        const newPorts = new Set(state.portPositions);
+        if (cmd.newPortMarker) newPorts.add(cmd.key); else newPorts.delete(cmd.key);
+        return {
+          blocks,
+          hiddenFaces,
+          portPositions: newPorts,
           history: [...state.history, cmd],
           future: newFuture,
           hoveredGridPos: null,
