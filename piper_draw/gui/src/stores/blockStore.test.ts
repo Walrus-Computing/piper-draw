@@ -841,6 +841,68 @@ describe("blockStore", () => {
     });
   });
 
+  describe("insertBlocks", () => {
+    it("offsets incoming blocks past the existing scene on +X and selects them", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      const incoming = new Map([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "ZXZ" as const }],
+        ["3,0,0", { pos: { x: 3, y: 0, z: 0 }, type: "ZXZ" as const }],
+      ]);
+      useBlockStore.getState().insertBlocks(incoming);
+      const s = useBlockStore.getState();
+      // Existing block still present, new blocks appear past x=0 with a +3 gap
+      // (existingMaxX=0, incomingMinX=0, delta = ceil((0+3-0)/3)*3 = 3)
+      expect(s.blocks.has("0,0,0")).toBe(true);
+      expect(s.blocks.get("0,0,0")?.type).toBe("XZZ");
+      expect(s.blocks.get("3,0,0")?.type).toBe("ZXZ");
+      expect(s.blocks.get("6,0,0")?.type).toBe("ZXZ");
+      expect(s.selectedKeys.has("3,0,0")).toBe(true);
+      expect(s.selectedKeys.has("6,0,0")).toBe(true);
+      expect(s.selectedKeys.has("0,0,0")).toBe(false);
+    });
+
+    it("loads at parsed positions when the scene is empty", () => {
+      const incoming = new Map([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "ZXZ" as const }],
+        ["3,0,0", { pos: { x: 3, y: 0, z: 0 }, type: "ZXZ" as const }],
+      ]);
+      useBlockStore.getState().insertBlocks(incoming);
+      const s = useBlockStore.getState();
+      expect(s.blocks.size).toBe(2);
+      expect(s.blocks.get("0,0,0")?.type).toBe("ZXZ");
+      expect(s.selectedKeys.has("0,0,0")).toBe(true);
+      expect(s.selectedKeys.has("3,0,0")).toBe(true);
+    });
+
+    it("switches to edit/pointer so the selection is immediately usable", () => {
+      useBlockStore.setState({ mode: "build", armedTool: "cube" });
+      const incoming = new Map([["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "ZXZ" as const }]]);
+      useBlockStore.getState().insertBlocks(incoming);
+      const s = useBlockStore.getState();
+      expect(s.mode).toBe("edit");
+      expect(s.armedTool).toBe("pointer");
+    });
+
+    it("can be undone to restore the pre-insert scene", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      const incoming = new Map([["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "ZXZ" as const }]]);
+      useBlockStore.getState().insertBlocks(incoming);
+      expect(useBlockStore.getState().blocks.size).toBe(2);
+      useBlockStore.getState().undo();
+      const s = useBlockStore.getState();
+      expect(s.blocks.size).toBe(1);
+      expect(s.blocks.has("0,0,0")).toBe(true);
+      expect(s.blocks.get("0,0,0")?.type).toBe("XZZ");
+    });
+
+    it("is a no-op when incoming is empty", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      const histBefore = useBlockStore.getState().history.length;
+      useBlockStore.getState().insertBlocks(new Map());
+      expect(useBlockStore.getState().history.length).toBe(histBefore);
+    });
+  });
+
   describe("moveSelection", () => {
     function selectAllCurrent() {
       const s = useBlockStore.getState();

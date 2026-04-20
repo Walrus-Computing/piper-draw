@@ -208,6 +208,12 @@ interface BlockStore {
   undo: () => void;
   redo: () => void;
   loadBlocks: (blocks: Map<string, Block>) => void;
+  /**
+   * Merge `blocks` into the current scene, auto-offset along +X so there's no
+   * overlap, and leave every inserted block selected so the user can drag the
+   * group into its final position. Switches to edit/pointer. Undo-safe.
+   */
+  insertBlocks: (blocks: Map<string, Block>) => void;
   hydrateBlocks: (blocks: Map<string, Block>) => void;
   clearAll: () => void;
   canUndo: () => boolean;
@@ -1723,6 +1729,61 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         hoveredGridPos: null,
         undeterminedCubes,
         portPositions: new Set<string>(),
+      };
+    }),
+
+  insertBlocks: (incoming) =>
+    set((state) => {
+      if (incoming.size === 0) return state;
+
+      // Offset along +X so incoming sits past the existing scene's right edge,
+      // with a one-cube gap. Delta components must be multiples of 3 to keep
+      // cubes on block-slots and pipes on pipe-slots (grid period = 3).
+      let delta: Position3D = { x: 0, y: 0, z: 0 };
+      if (state.blocks.size > 0) {
+        let existingMaxX = -Infinity;
+        for (const b of state.blocks.values()) {
+          if (b.pos.x > existingMaxX) existingMaxX = b.pos.x;
+        }
+        let incomingMinX = Infinity;
+        for (const b of incoming.values()) {
+          if (b.pos.x < incomingMinX) incomingMinX = b.pos.x;
+        }
+        const raw = existingMaxX + 3 - incomingMinX;
+        delta = { x: Math.ceil(raw / 3) * 3, y: 0, z: 0 };
+      }
+
+      const mergedBlocks = new Map(state.blocks);
+      const entries: Array<{ key: string; block: Block }> = [];
+      for (const b of incoming.values()) {
+        const newPos: Position3D = {
+          x: b.pos.x + delta.x,
+          y: b.pos.y + delta.y,
+          z: b.pos.z + delta.z,
+        };
+        if (!isValidPos(newPos, b.type)) continue;
+        const newKey = posKey(newPos);
+        if (mergedBlocks.has(newKey)) continue;
+        const newBlock: Block = { pos: newPos, type: b.type };
+        mergedBlocks.set(newKey, newBlock);
+        entries.push({ key: newKey, block: newBlock });
+      }
+      if (entries.length === 0) return state;
+
+      const { spatialIndex, hiddenFaces, undeterminedCubes } = computeDerivedFromBlocks(mergedBlocks);
+      const cmd: UndoCommand = { kind: "bulk-add", entries };
+      return {
+        blocks: mergedBlocks,
+        spatialIndex,
+        hiddenFaces,
+        undeterminedCubes,
+        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+        hoveredGridPos: null,
+        selectedKeys: new Set(entries.map((e) => e.key)),
+        selectedPortPositions: new Set<string>(),
+        mode: "edit",
+        armedTool: "pointer",
       };
     }),
 

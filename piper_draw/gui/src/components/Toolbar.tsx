@@ -96,6 +96,7 @@ export function Toolbar({
   const redo = useBlockStore((s) => s.redo);
   const clearAll = useBlockStore((s) => s.clearAll);
   const loadBlocks = useBlockStore((s) => s.loadBlocks);
+  const insertBlocks = useBlockStore((s) => s.insertBlocks);
   const blocksEmpty = useBlockStore((s) => s.blocks.size === 0);
   const freeBuild = useBlockStore((s) => s.freeBuild);
   const toggleFreeBuild = useBlockStore((s) => s.toggleFreeBuild);
@@ -525,6 +526,7 @@ export function Toolbar({
       <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
         <FileMenu
           loadBlocks={loadBlocks}
+          insertBlocks={insertBlocks}
           clearAll={clearAll}
           onResetCamera={onResetCamera}
           blocksEmpty={blocksEmpty}
@@ -967,11 +969,13 @@ function SelectionInspector({
 
 function FileMenu({
   loadBlocks,
+  insertBlocks,
   clearAll,
   onResetCamera,
   blocksEmpty,
 }: {
   loadBlocks: (blocks: Map<string, import("../types").Block>) => void;
+  insertBlocks: (blocks: Map<string, import("../types").Block>) => void;
   clearAll: () => void;
   onResetCamera: () => void;
   blocksEmpty: boolean;
@@ -1007,15 +1011,16 @@ function FileMenu({
     }
   };
 
-  const pickTemplate = async (entry: TemplateEntry) => {
+  const pickTemplate = async (entry: TemplateEntry, action: "load" | "insert") => {
     setLoadingFile(entry.filename);
     try {
       const blocks = await loadTemplateBlocks(entry.filename);
-      loadBlocks(blocks);
+      if (action === "insert") insertBlocks(blocks);
+      else loadBlocks(blocks);
       setOpen(false);
       setTemplatesOpen(false);
     } catch (err) {
-      alert(`Failed to load template: ${err instanceof Error ? err.message : String(err)}`);
+      alert(`Failed to ${action} template: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoadingFile(null);
     }
@@ -1062,9 +1067,20 @@ function FileMenu({
               triggerDaeImport(loadBlocks);
               setOpen(false);
             }}
+            title="Load a .dae file (replaces current scene)"
             style={item(false)}
           >
             Import…
+          </button>
+          <button
+            onClick={() => {
+              triggerDaeImport(insertBlocks);
+              setOpen(false);
+            }}
+            title="Insert a .dae file next to current scene; inserted blocks stay selected so you can drag them into place"
+            style={item(false)}
+          >
+            Insert…
           </button>
           <button
             onClick={() => {
@@ -1121,20 +1137,35 @@ function FileMenu({
               {templatesError && <div style={{ padding: 6, color: "#c0392b", fontSize: 12 }}>{templatesError}</div>}
               {!templatesError && templates === null && <div style={{ padding: 6, fontSize: 12, color: "#666" }}>Loading…</div>}
               {templates?.map((t) => (
-                <button
-                  key={t.filename}
-                  onClick={() => pickTemplate(t)}
-                  disabled={loadingFile !== null}
-                  title={`${t.description} (${t.filename})`}
-                  style={{
-                    ...btnStyle(false),
-                    textAlign: "left",
-                    padding: "6px 10px",
-                    opacity: loadingFile && loadingFile !== t.filename ? 0.5 : 1,
-                  }}
-                >
-                  {loadingFile === t.filename ? `${t.name}…` : t.name}
-                </button>
+                <div key={t.filename} style={{ display: "flex", gap: 2 }}>
+                  <button
+                    onClick={() => pickTemplate(t, "load")}
+                    disabled={loadingFile !== null}
+                    title={`Load (replace scene): ${t.description} (${t.filename})`}
+                    style={{
+                      ...btnStyle(false),
+                      textAlign: "left",
+                      padding: "6px 10px",
+                      flex: 1,
+                      opacity: loadingFile && loadingFile !== t.filename ? 0.5 : 1,
+                    }}
+                  >
+                    {loadingFile === t.filename ? `${t.name}…` : t.name}
+                  </button>
+                  <button
+                    onClick={() => pickTemplate(t, "insert")}
+                    disabled={loadingFile !== null}
+                    title={`Insert next to current scene (selected for placement): ${t.name}`}
+                    style={{
+                      ...btnStyle(false),
+                      padding: "6px 8px",
+                      opacity: loadingFile && loadingFile !== t.filename ? 0.5 : 1,
+                      fontWeight: "bold",
+                    }}
+                  >
+                    +
+                  </button>
+                </div>
               ))}
               {templates && (
                 <div style={{ padding: "4px 6px 2px", fontSize: 10, color: "#888" }}>
