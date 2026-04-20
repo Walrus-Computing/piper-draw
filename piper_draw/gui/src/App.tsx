@@ -567,10 +567,50 @@ export default function App() {
             store.flipSelected();
           }
           return;
+        case "cyclePrev":
+          e.preventDefault();
+          store.cycleArmedType(-1);
+          return;
+        case "cycleNext":
+          e.preventDefault();
+          store.cycleArmedType(1);
+          return;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Drag-from-palette: on toolbar button pointerdown, paletteDragging is set
+  // true. The cursor-over-canvas pointermove already updates hoveredGridPos
+  // (via GridPlane). On pointerup, place at that position if valid — using
+  // the same dispatch as GridPlane.handleClick (addPortAt vs addBlock).
+  // Also clear the flag on cancel/blur so a hijacked gesture (e.g. native
+  // drag, alt-tab) can't leave the next click stuck placing blocks.
+  useEffect(() => {
+    const onUp = () => {
+      const s = useBlockStore.getState();
+      if (!s.paletteDragging) return;
+      s.setPaletteDragging(false);
+      const pos = s.hoveredGridPos;
+      if (!pos || s.hoveredInvalid) return;
+      if (s.armedTool === "port") s.addPortAt(pos);
+      else if (s.armedTool === "cube" || s.armedTool === "pipe") s.addBlock(pos);
+    };
+    const onCancel = () => {
+      const s = useBlockStore.getState();
+      if (s.paletteDragging) s.setPaletteDragging(false);
+    };
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("dragend", onCancel);
+    window.addEventListener("blur", onCancel);
+    return () => {
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("dragend", onCancel);
+      window.removeEventListener("blur", onCancel);
+    };
   }, []);
 
   // Hold-to-delete modifier (default X): while held in edit mode, clicks
