@@ -111,7 +111,7 @@ export const DEFAULT_BINDINGS: { [M in Mode]: Record<ActionForMode[M], KeyBindin
   },
   select: {
     selectAll: { key: "a", ctrl: true },
-    deleteSelection: { key: "delete" },
+    deleteSelection: { key: "backspace" },
     clearSelection: { key: "escape" },
     flipColors: { key: "f" },
     undo: { key: "z", ctrl: true },
@@ -275,7 +275,7 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: "piper-draw-keybinds",
-      version: 8,
+      version: 9,
       migrate: () => ({ bindings: cloneDefaults() }),
       merge: (persisted, current) => {
         const p = persisted as Partial<KeybindState>;
