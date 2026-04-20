@@ -111,6 +111,8 @@ export function SelectModePointer({
   controlsRef: React.RefObject<any>;
 }) {
   const mode = useBlockStore((s) => s.mode);
+  const armedTool = useBlockStore((s) => s.armedTool);
+  const isSelectActive = mode === "edit" && armedTool === "pointer";
 
   const dragRef = useRef<DragState>(null);
   const rafRef = useRef<number | null>(null);
@@ -199,7 +201,8 @@ export function SelectModePointer({
 
   const onPointerDown = useCallback(
     (e: PointerEvent) => {
-      if (mode !== "select") return;
+      if (!isSelectActive) return;
+      if (useBlockStore.getState().xHeld) return;
       if (e.button !== 0) return;
       if (e.altKey) return;
       const target = e.target as HTMLElement;
@@ -232,7 +235,7 @@ export function SelectModePointer({
         // Some browsers reject capture during certain input phases
       }
     },
-    [mode, threeStateRef],
+    [isSelectActive, threeStateRef],
   );
 
   const onPointerMove = useCallback(
@@ -348,7 +351,8 @@ export function SelectModePointer({
       if (state.kind === "marquee") {
         setMarqueeRect(null);
         dragRef.current = null;
-        if (useBlockStore.getState().mode !== "select") return;
+        const curSt = useBlockStore.getState();
+        if (curSt.mode !== "edit" || curSt.armedTool !== "pointer") return;
 
         const ts = threeStateRef.current;
         if (!ts) return;
@@ -408,14 +412,14 @@ export function SelectModePointer({
       }
 
       // Standalone nudge: no active drag, but a selection exists → move it by ±3 in z.
-      if (mode !== "select") return;
+      if (!isSelectActive) return;
       const store = useBlockStore.getState();
       if (store.selectedKeys.size === 0) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       store.moveSelection({ x: 0, y: 0, z: e.key === "ArrowUp" ? 3 : -3 });
     },
-    [cancelDrag, mode, scheduleFrame],
+    [cancelDrag, isSelectActive, scheduleFrame],
   );
 
   const onBlur = useCallback(() => {
@@ -437,12 +441,13 @@ export function SelectModePointer({
     };
   }, [onPointerDown, onPointerMove, onPointerUp, onKeyDown, onBlur]);
 
-  // Cancel in-flight drag when mode changes away from select. Subscribing to
-  // the store directly (instead of watching `mode` in a deps array) avoids the
-  // set-state-in-effect cascading-render lint warning.
+  // Cancel in-flight drag when the pointer tool is no longer active (mode
+  // switched away from edit, or armedTool switched to a placement tool).
   useEffect(() => {
     return useBlockStore.subscribe((state, prev) => {
-      if (prev.mode === "select" && state.mode !== "select" && dragRef.current != null) {
+      const wasActive = prev.mode === "edit" && prev.armedTool === "pointer";
+      const isActive = state.mode === "edit" && state.armedTool === "pointer";
+      if (wasActive && !isActive && dragRef.current != null) {
         cancelDrag();
       }
     });

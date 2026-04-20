@@ -10,6 +10,7 @@ export function NavControlsModifier({
   controlsRef: React.RefObject<any>;
 }) {
   const mode = useBlockStore((s) => s.mode);
+  const armedTool = useBlockStore((s) => s.armedTool);
   const navStyle = useKeybindStore((s) => s.navStyle);
 
   useEffect(() => {
@@ -20,7 +21,8 @@ export function NavControlsModifier({
     const apply = (alt: boolean) => {
       const controls = controlsRef.current;
       if (!controls || !controls.mouseButtons) return;
-      if (mode === "select") {
+      // Pointer tool takes left-drag for marquee/move; disable camera left-drag.
+      if (mode === "edit" && armedTool === "pointer") {
         controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
         return;
       }
@@ -59,7 +61,7 @@ export function NavControlsModifier({
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, [mode, navStyle, controlsRef]);
+  }, [mode, armedTool, navStyle, controlsRef]);
 
   return null;
 }

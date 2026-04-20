@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { isMac } from "../components/keyLabels";
 
-export type Mode = "select" | "place" | "delete" | "build";
+export type Mode = "edit" | "build";
 
 export type BuildAction =
   | "moveForward"
@@ -17,27 +17,23 @@ export type BuildAction =
   | "deleteAtCursor"
   | "exitBuild";
 
-export type SelectAction =
+export type EditAction =
   | "selectAll"
   | "deleteSelection"
   | "clearSelection"
   | "flipColors"
+  | "holdToDelete"
   | "undo"
   | "redo"
   | "stepForward"
   | "stepBack";
 
-export type PlaceAction = "undo" | "redo" | "stepForward" | "stepBack";
-export type DeleteAction = "undo" | "redo" | "stepForward" | "stepBack";
-
 export type ActionForMode = {
   build: BuildAction;
-  select: SelectAction;
-  place: PlaceAction;
-  delete: DeleteAction;
+  edit: EditAction;
 };
 
-export type AnyAction = BuildAction | SelectAction | PlaceAction | DeleteAction;
+export type AnyAction = BuildAction | EditAction;
 
 export type KeyBinding = {
   key: string;     // e.key.toLowerCase()
@@ -52,9 +48,10 @@ export const ACTIONS: { [M in Mode]: readonly ActionForMode[M][] } = {
     "moveUp", "moveDown",
     "undo", "cycleBlock", "cyclePipe", "deleteAtCursor", "exitBuild",
   ],
-  select: ["selectAll", "deleteSelection", "clearSelection", "flipColors", "undo", "redo", "stepForward", "stepBack"],
-  place: ["undo", "redo", "stepForward", "stepBack"],
-  delete: ["undo", "redo", "stepForward", "stepBack"],
+  edit: [
+    "selectAll", "deleteSelection", "clearSelection", "flipColors", "holdToDelete",
+    "undo", "redo", "stepForward", "stepBack",
+  ],
 };
 
 export const ACTION_LABELS: { [M in Mode]: Record<ActionForMode[M], string> } = {
@@ -71,23 +68,12 @@ export const ACTION_LABELS: { [M in Mode]: Record<ActionForMode[M], string> } = 
     deleteAtCursor: "Delete block at cursor",
     exitBuild: "Exit build",
   },
-  select: {
+  edit: {
     selectAll: "Select all",
     deleteSelection: "Delete selected",
-    clearSelection: "Clear selection",
+    clearSelection: "Clear selection / disarm tool",
     flipColors: "Flip colors",
-    undo: "Undo",
-    redo: "Redo",
-    stepForward: "Step forward (iso)",
-    stepBack: "Step back (iso)",
-  },
-  place: {
-    undo: "Undo",
-    redo: "Redo",
-    stepForward: "Step forward (iso)",
-    stepBack: "Step back (iso)",
-  },
-  delete: {
+    holdToDelete: "Hold to delete on click",
     undo: "Undo",
     redo: "Redo",
     stepForward: "Step forward (iso)",
@@ -109,23 +95,12 @@ export const DEFAULT_BINDINGS: { [M in Mode]: Record<ActionForMode[M], KeyBindin
     deleteAtCursor: { key: "backspace" },
     exitBuild: { key: "escape" },
   },
-  select: {
+  edit: {
     selectAll: { key: "a", ctrl: true },
     deleteSelection: { key: "backspace" },
     clearSelection: { key: "escape" },
     flipColors: { key: "f" },
-    undo: { key: "z", ctrl: true },
-    redo: { key: "z", ctrl: true, shift: true },
-    stepForward: { key: "arrowup" },
-    stepBack: { key: "arrowdown" },
-  },
-  place: {
-    undo: { key: "z", ctrl: true },
-    redo: { key: "z", ctrl: true, shift: true },
-    stepForward: { key: "arrowup" },
-    stepBack: { key: "arrowdown" },
-  },
-  delete: {
+    holdToDelete: { key: "x" },
     undo: { key: "z", ctrl: true },
     redo: { key: "z", ctrl: true, shift: true },
     stepForward: { key: "arrowup" },
@@ -228,9 +203,7 @@ interface KeybindState {
 function cloneDefaults(): BindingsByMode {
   return {
     build: { ...DEFAULT_BINDINGS.build },
-    select: { ...DEFAULT_BINDINGS.select },
-    place: { ...DEFAULT_BINDINGS.place },
-    delete: { ...DEFAULT_BINDINGS.delete },
+    edit: { ...DEFAULT_BINDINGS.edit },
   };
 }
 
@@ -275,7 +248,7 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: "piper-draw-keybinds",
-      version: 9,
+      version: 10,
       migrate: () => ({ bindings: cloneDefaults() }),
       merge: (persisted, current) => {
         const p = persisted as Partial<KeybindState>;

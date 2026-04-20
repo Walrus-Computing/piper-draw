@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useBlockStore, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
+import { useKeybindStore, type Mode as KeybindMode, type NavStyle } from "../stores/keybindStore";
 import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
@@ -62,16 +63,29 @@ const blockBtnStyle = (active: boolean, disabled?: boolean) => ({
 // Toolbar component
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function Toolbar({ onResetCamera, controlsRef, toolbarRef, fpsRef }: { onResetCamera: () => void; controlsRef: React.RefObject<any>; toolbarRef: React.RefObject<HTMLDivElement | null>; fpsRef: React.RefObject<HTMLSpanElement | null> }) {
+export function Toolbar({
+  onResetCamera,
+  controlsRef,
+  toolbarRef,
+  fpsRef,
+  onOpenKeybindEditor,
+}: {
+  onResetCamera: () => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  controlsRef: React.RefObject<any>;
+  toolbarRef: React.RefObject<HTMLDivElement | null>;
+  fpsRef: React.RefObject<HTMLSpanElement | null>;
+  onOpenKeybindEditor: (mode: KeybindMode) => void;
+}) {
   const scale = useViewportFitScale(toolbarRef, VIEWPORT_FIT_MARGIN_PX);
   const mode = useBlockStore((s) => s.mode);
   const setMode = useBlockStore((s) => s.setMode);
+  const armedTool = useBlockStore((s) => s.armedTool);
+  const setArmedTool = useBlockStore((s) => s.setArmedTool);
   const cubeType = useBlockStore((s) => s.cubeType);
   const pipeVariant = useBlockStore((s) => s.pipeVariant);
   const setCubeType = useBlockStore((s) => s.setCubeType);
   const setPipeVariant = useBlockStore((s) => s.setPipeVariant);
-  const placePort = useBlockStore((s) => s.placePort);
   const setPlacePort = useBlockStore((s) => s.setPlacePort);
   const cycleBlock = useBlockStore((s) => s.cycleBlock);
   const cyclePipe = useBlockStore((s) => s.cyclePipe);
@@ -168,7 +182,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef, fpsRef }: { on
   // types could replace it given the adjacent pipe constraints. Used to grey out
   // invalid cube buttons in the toolbar.
   const selectedPortValidTypesStr = useBlockStore((s): string | null => {
-    if (s.mode !== "select") return null;
+    if (s.mode !== "edit" || s.armedTool !== "pointer") return null;
     if (s.selectedKeys.size > 0) return null;
     if (s.selectedPortPositions.size !== 1) return null;
     const portKey = s.selectedPortPositions.values().next().value as string;
@@ -336,23 +350,9 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef, fpsRef }: { on
         boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
       }}
     >
-      {/* Mode buttons */}
+      {/* Mode segmented control */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
-        <button onClick={() => setMode("place")} style={btnStyle(mode === "place")}>
-          Place
-        </button>
-        <button onClick={() => setMode("select")} style={btnStyle(mode === "select")}>
-          Select
-        </button>
-        <button onClick={() => setMode("delete")} style={btnStyle(mode === "delete")}>
-          Delete
-        </button>
-        <button onClick={() => setMode("build")} style={btnStyle(mode === "build")}>
-          Build
-        </button>
-        <button onClick={onResetCamera} style={btnStyle(false)}>
-          Origin
-        </button>
+        <ModeSegmented mode={mode} setMode={setMode} />
       </div>
 
       {/* View buttons: 3D (perspective + free orbit) and Iso (axis-locked elevation) */}
@@ -398,9 +398,12 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef, fpsRef }: { on
             </button>
           </div>
         )}
+        <button onClick={onResetCamera} style={btnStyle(false)} title="Recenter the camera on the origin">
+          Origin
+        </button>
       </div>
 
-      {/* Undo / Redo / Clear */}
+      {/* History + Verify */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
         <button
           onClick={undo}
@@ -416,34 +419,6 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef, fpsRef }: { on
         >
           Redo
         </button>
-        <button
-          onClick={() => {
-            if (!window.confirm("Are you sure you want to delete the whole diagram?")) return;
-            clearAll();
-            onResetCamera();
-          }}
-          disabled={blocksEmpty}
-          style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
-        >
-          Clear
-        </button>
-        {selectedCount > 0 && (
-          <button
-            onClick={deleteSelected}
-            style={{ ...btnStyle(false), borderColor: "#dc3545", color: "#dc3545" }}
-          >
-            Delete {selectedCount}
-          </button>
-        )}
-        {selectedCount > 0 && (
-          <button
-            onClick={flipSelected}
-            title="Swap X↔Z colors on all selected blocks"
-            style={{ ...btnStyle(false), borderColor: "#4a9eff", color: "#4a9eff" }}
-          >
-            Flip {selectedCount}
-          </button>
-        )}
         <button
           onClick={runValidation}
           disabled={blocksEmpty || validationStatus === "loading"}
@@ -465,52 +440,43 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef, fpsRef }: { on
         >
           {validationStatus === "loading" ? "Verifying..." : "Verify (tqec)"}
         </button>
-        <button
-          onClick={toggleFreeBuild}
-          title="Disable color-matching checks when placing blocks"
-          style={{
-            ...btnStyle(false),
-            fontSize: "10px",
-            padding: "2px 6px",
-            borderColor: freeBuild ? "#e67e22" : "#ccc",
-            background: freeBuild ? "#fdebd0" : "#fff",
-            color: freeBuild ? "#a04000" : "#333",
-          }}
-        >
-          Free Build {freeBuild ? "ON" : "OFF"}
-        </button>
       </div>
 
-      {/* Import / Export */}
+      {/* File menu + Settings */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
-        <button onClick={() => triggerDaeImport(loadBlocks)} style={btnStyle(false)}>
-          Import
-        </button>
-        <button
-          onClick={() => downloadDae(useBlockStore.getState().blocks)}
-          disabled={blocksEmpty}
-          style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
-        >
-          Export
-        </button>
-        <button
-          onClick={() => useBlockStore.getState().requestPhoto()}
-          disabled={blocksEmpty}
-          title="Save current view as PNG"
-          style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
-        >
-          Photo
-        </button>
-        <TemplatePicker onLoad={loadBlocks} />
+        <FileMenu
+          loadBlocks={loadBlocks}
+          clearAll={clearAll}
+          onResetCamera={onResetCamera}
+          blocksEmpty={blocksEmpty}
+        />
+        <SettingsMenu
+          freeBuild={freeBuild}
+          toggleFreeBuild={toggleFreeBuild}
+          onOpenKeybindEditor={onOpenKeybindEditor}
+        />
       </div>
 
       {/* Separator */}
       <div style={{ width: 1, background: "#ddd" }} />
 
-      {/* Blocks group (Port + ZXCubes + Y) */}
+      {/* Blocks group (Pointer + Port + ZXCubes + Y) */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <span style={groupLabelStyle}>Blocks</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
+          {mode === "edit" && (
+            <button
+              key="pointer"
+              onClick={() => setArmedTool("pointer")}
+              title="Select and move blocks"
+              style={blockBtnStyle(armedTool === "pointer")}
+            >
+              Pointer
+              <div style={previewWrapStyle}>
+                <PointerIcon />
+              </div>
+            </button>
+          )}
           <button
             key="port"
             onClick={() => {
@@ -521,11 +487,10 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef, fpsRef }: { on
                 return;
               }
               setPlacePort(true);
-              setMode("place");
             }}
-            title="Convert a cube back into a port (removes cubes with 0–1 attached pipes)"
+            title="Place or convert to a port"
             style={blockBtnStyle(
-              (placePort && mode === "place") ||
+              (mode === "edit" && armedTool === "port") ||
               (mode === "build" && buildCursorOnPort),
               mode === "build" && !freeBuild && !buildCursorPortAllowed,
             )}
@@ -542,10 +507,9 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef, fpsRef }: { on
                   return;
                 }
                 setCubeType(ct as BlockType);
-                setMode("place");
               }}
               style={blockBtnStyle(
-                (!placePort && cubeType === ct && mode === "place") ||
+                (mode === "edit" && armedTool === "cube" && cubeType === ct) ||
                 (mode === "build" && buildCursorBlockType === ct),
                 // Never disable the cube type currently sitting at the build cursor —
                 // it's the placed type and showing it as highlighted + greyed at the
@@ -566,10 +530,9 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef, fpsRef }: { on
                 return;
               }
               setCubeType("Y");
-              setMode("place");
             }}
             style={blockBtnStyle(
-              (!placePort && cubeType === "Y" && mode === "place") ||
+              (mode === "edit" && armedTool === "cube" && cubeType === "Y") ||
               (mode === "build" && buildCursorBlockType === "Y"),
               (mode === "build" && !freeBuild && buildCursorBlockType !== "Y"
                 && buildValidTypes != null && !buildValidTypes.has("Y" as CubeType)) ||
@@ -598,10 +561,9 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef, fpsRef }: { on
                   return;
                 }
                 setPipeVariant(v);
-                setMode("place");
               }}
               style={blockBtnStyle(
-                (pipeVariant === v && mode === "place") ||
+                (mode === "edit" && armedTool === "pipe" && pipeVariant === v) ||
                 (mode === "build" && buildActivePipeVariant === v),
                 // Never disable the currently-active pipe variant — it's always
                 // valid by construction (it's what's placed), and showing it as
@@ -649,6 +611,17 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef, fpsRef }: { on
           <FpsDisplay spanRef={fpsRef} />
         </div>
       </div>
+
+      {selectedCount > 0 && mode === "edit" && (
+        <>
+          <div style={{ width: 1, background: "#ddd" }} />
+          <SelectionInspector
+            count={selectedCount}
+            onDelete={deleteSelected}
+            onFlip={flipSelected}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -800,15 +773,309 @@ function PositionEditor({ pos, onCommit }: { pos: Position3D; onCommit: (p: Posi
 }
 
 // ---------------------------------------------------------------------------
-// Template picker — lists bundled .dae files generated from tqec.gallery
+// Mode segmented control — Edit | Build pill
 // ---------------------------------------------------------------------------
 
-function TemplatePicker({ onLoad }: { onLoad: (blocks: Map<string, import("../types").Block>) => void }) {
+function ModeSegmented({
+  mode,
+  setMode,
+}: {
+  mode: "edit" | "build";
+  setMode: (m: "edit" | "build") => void;
+}) {
+  const segStyle = (active: boolean): React.CSSProperties => ({
+    padding: "4px 12px",
+    fontSize: "13px",
+    fontFamily: "sans-serif",
+    cursor: "pointer",
+    border: "none",
+    background: active ? "#4a9eff" : "transparent",
+    color: active ? "#fff" : "#555",
+    fontWeight: active ? 600 : "normal",
+    borderRadius: 3,
+    transition: "background 0.1s, color 0.1s",
+  });
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        border: "2px solid #4a9eff",
+        borderRadius: 6,
+        overflow: "hidden",
+        padding: 2,
+        background: "#fff",
+      }}
+    >
+      <button onClick={() => setMode("edit")} style={segStyle(mode === "edit")}>
+        Edit
+      </button>
+      <button onClick={() => setMode("build")} style={segStyle(mode === "build")}>
+        Build
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SelectionInspector — Flip / Delete actions for the current selection
+// ---------------------------------------------------------------------------
+
+function SelectionInspector({
+  count,
+  onDelete,
+  onFlip,
+}: {
+  count: number;
+  onDelete: () => void;
+  onFlip: () => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
+      <span style={groupLabelStyle}>Selection ({count})</span>
+      <button
+        onClick={onFlip}
+        title="Swap X↔Z colors on all selected blocks"
+        style={{ ...btnStyle(false), borderColor: "#4a9eff", color: "#4a9eff" }}
+      >
+        Flip
+      </button>
+      <button
+        onClick={onDelete}
+        style={{ ...btnStyle(false), borderColor: "#dc3545", color: "#dc3545" }}
+      >
+        Delete
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FileMenu — Import / Export / Photo / Templates / Clear dropdown
+// ---------------------------------------------------------------------------
+
+function FileMenu({
+  loadBlocks,
+  clearAll,
+  onResetCamera,
+  blocksEmpty,
+}: {
+  loadBlocks: (blocks: Map<string, import("../types").Block>) => void;
+  clearAll: () => void;
+  onResetCamera: () => void;
+  blocksEmpty: boolean;
+}) {
   const [open, setOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [templates, setTemplates] = useState<TemplateEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [loadingFile, setLoadingFile] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) {
+        setOpen(false);
+        setTemplatesOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const toggleTemplates = async () => {
+    const next = !templatesOpen;
+    setTemplatesOpen(next);
+    if (next && templates === null && templatesError === null) {
+      try {
+        setTemplates(await fetchTemplateManifest());
+      } catch (err) {
+        setTemplatesError(err instanceof Error ? err.message : String(err));
+      }
+    }
+  };
+
+  const pickTemplate = async (entry: TemplateEntry) => {
+    setLoadingFile(entry.filename);
+    try {
+      const blocks = await loadTemplateBlocks(entry.filename);
+      loadBlocks(blocks);
+      setOpen(false);
+      setTemplatesOpen(false);
+    } catch (err) {
+      alert(`Failed to load template: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setLoadingFile(null);
+    }
+  };
+
+  const item = (disabled: boolean): React.CSSProperties => ({
+    ...btnStyle(false),
+    textAlign: "left",
+    padding: "4px 10px",
+    opacity: disabled ? 0.4 : 1,
+    cursor: disabled ? "default" : "pointer",
+    whiteSpace: "nowrap",
+  });
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{ ...btnStyle(open), whiteSpace: "nowrap", width: "100%" }}
+        title="Import / Export / Templates / Clear"
+      >
+        File ▾
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            background: "#fff",
+            border: "1px solid #ccc",
+            borderRadius: 4,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            padding: 4,
+            minWidth: 140,
+            zIndex: 1000,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          <button
+            onClick={() => {
+              triggerDaeImport(loadBlocks);
+              setOpen(false);
+            }}
+            style={item(false)}
+          >
+            Import…
+          </button>
+          <button
+            onClick={() => {
+              downloadDae(useBlockStore.getState().blocks);
+              setOpen(false);
+            }}
+            disabled={blocksEmpty}
+            style={item(blocksEmpty)}
+          >
+            Export
+          </button>
+          <button
+            onClick={() => {
+              useBlockStore.getState().requestPhoto();
+              setOpen(false);
+            }}
+            disabled={blocksEmpty}
+            title="Save current view as PNG"
+            style={item(blocksEmpty)}
+          >
+            Screenshot
+          </button>
+          <button
+            onClick={toggleTemplates}
+            style={{
+              ...item(false),
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              background: templatesOpen ? "#e8f0fe" : "#fff",
+            }}
+          >
+            Templates <span style={{ opacity: 0.6, marginLeft: 6 }}>{templatesOpen ? "▾" : "▸"}</span>
+          </button>
+          {templatesOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: "100%",
+                marginLeft: 4,
+                background: "#fff",
+                border: "1px solid #ccc",
+                borderRadius: 4,
+                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                padding: 4,
+                minWidth: 220,
+                zIndex: 1001,
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+              }}
+            >
+              {templatesError && <div style={{ padding: 6, color: "#c0392b", fontSize: 12 }}>{templatesError}</div>}
+              {!templatesError && templates === null && <div style={{ padding: 6, fontSize: 12, color: "#666" }}>Loading…</div>}
+              {templates?.map((t) => (
+                <button
+                  key={t.filename}
+                  onClick={() => pickTemplate(t)}
+                  disabled={loadingFile !== null}
+                  title={`${t.description} (${t.filename})`}
+                  style={{
+                    ...btnStyle(false),
+                    textAlign: "left",
+                    padding: "6px 10px",
+                    opacity: loadingFile && loadingFile !== t.filename ? 0.5 : 1,
+                  }}
+                >
+                  {loadingFile === t.filename ? `${t.name}…` : t.name}
+                </button>
+              ))}
+              {templates && (
+                <div style={{ padding: "4px 6px 2px", fontSize: 10, color: "#888" }}>
+                  From <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a>
+                </div>
+              )}
+            </div>
+          )}
+          <div style={{ height: 1, background: "#eee", margin: "4px 0" }} />
+          <button
+            onClick={() => {
+              if (!window.confirm("Are you sure you want to delete the whole diagram?")) return;
+              clearAll();
+              onResetCamera();
+              setOpen(false);
+            }}
+            disabled={blocksEmpty}
+            style={{ ...item(blocksEmpty), color: "#dc3545" }}
+          >
+            Clear all
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SettingsMenu — Free Build, navigation style, keybind editor entry
+// ---------------------------------------------------------------------------
+
+const NAV_STYLE_LABELS: Record<NavStyle, string> = {
+  pan: "Drag to pan",
+  rotate: "Drag to rotate",
+};
+
+function SettingsMenu({
+  freeBuild,
+  toggleFreeBuild,
+  onOpenKeybindEditor,
+}: {
+  freeBuild: boolean;
+  toggleFreeBuild: () => void;
+  onOpenKeybindEditor: (mode: KeybindMode) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const navStyle = useKeybindStore((s) => s.navStyle);
+  const setNavStyle = useKeybindStore((s) => s.setNavStyle);
+  const cameraFollowsBuild = useKeybindStore((s) => s.cameraFollowsBuild);
+  const toggleCameraFollowsBuild = useKeybindStore((s) => s.toggleCameraFollowsBuild);
+  const axisAbsoluteWasd = useKeybindStore((s) => s.axisAbsoluteWasd);
+  const toggleAxisAbsoluteWasd = useKeybindStore((s) => s.toggleAxisAbsoluteWasd);
 
   useEffect(() => {
     if (!open) return;
@@ -819,79 +1086,111 @@ function TemplatePicker({ onLoad }: { onLoad: (blocks: Map<string, import("../ty
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  const toggle = async () => {
-    const next = !open;
-    setOpen(next);
-    if (next && templates === null) {
-      try {
-        setTemplates(await fetchTemplateManifest());
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    }
-  };
-
-  const pick = async (entry: TemplateEntry) => {
-    setLoadingFile(entry.filename);
-    try {
-      const blocks = await loadTemplateBlocks(entry.filename);
-      onLoad(blocks);
-      setOpen(false);
-    } catch (err) {
-      alert(`Failed to load template: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setLoadingFile(null);
-    }
-  };
-
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
-      <button onClick={toggle} style={btnStyle(open)} title="Load a bundled template diagram from tqec.gallery">
-        Templates ▾
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Settings"
+        style={{ ...btnStyle(open || freeBuild), whiteSpace: "nowrap", width: "100%" }}
+      >
+        ⚙ Settings
       </button>
       {open && (
         <div
           style={{
             position: "absolute",
             top: "calc(100% + 4px)",
-            right: 0,
+            left: 0,
             background: "#fff",
             border: "1px solid #ccc",
             borderRadius: 4,
             boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-            padding: 4,
-            minWidth: 220,
+            padding: 8,
+            width: 320,
             zIndex: 1000,
             display: "flex",
             flexDirection: "column",
-            gap: 2,
+            gap: 8,
+            fontFamily: "sans-serif",
+            fontSize: 12,
           }}
         >
-          {error && <div style={{ padding: 6, color: "#c0392b", fontSize: 12 }}>{error}</div>}
-          {!error && templates === null && <div style={{ padding: 6, fontSize: 12, color: "#666" }}>Loading…</div>}
-          {templates?.map((t) => (
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={freeBuild} onChange={toggleFreeBuild} style={{ marginTop: 2 }} />
+            <span>
+              Ignore color rules
+              <div style={{ fontSize: 10, color: "#888", whiteSpace: "nowrap" }}>
+                (“Free Build” — skips color-matching checks)
+              </div>
+            </span>
+          </label>
+
+          <div style={{ height: 1, background: "#eee" }} />
+
+          <div>
+            <div style={{ fontWeight: 600, color: "#555", marginBottom: 4 }}>Navigation style</div>
+            {(["pan", "rotate"] as NavStyle[]).map((v) => (
+              <label key={v} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "2px 0" }}>
+                <input
+                  type="radio"
+                  name="navstyle"
+                  checked={navStyle === v}
+                  onChange={() => setNavStyle(v)}
+                />
+                {NAV_STYLE_LABELS[v]}
+              </label>
+            ))}
+          </div>
+
+          <div style={{ height: 1, background: "#eee" }} />
+
+          <div>
+            <div style={{ fontWeight: 600, color: "#555", marginBottom: 4 }}>Build mode</div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "2px 0" }}>
+              <input type="checkbox" checked={cameraFollowsBuild} onChange={toggleCameraFollowsBuild} />
+              <span title="When off, the camera stays put while you build with the keyboard">
+                Camera follows build cursor
+              </span>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "2px 0" }}>
+              <input type="checkbox" checked={axisAbsoluteWasd} onChange={toggleAxisAbsoluteWasd} />
+              <span title="When on, W/S = ±X and A/D = ±Y regardless of camera angle">
+                Axis-locked WASD
+              </span>
+            </label>
+          </div>
+
+          <div style={{ height: 1, background: "#eee" }} />
+
+          <div>
+            <div style={{ fontWeight: 600, color: "#555", marginBottom: 4 }}>Keybindings</div>
             <button
-              key={t.filename}
-              onClick={() => pick(t)}
-              disabled={loadingFile !== null}
-              title={`${t.description} (${t.filename})`}
-              style={{
-                ...btnStyle(false),
-                textAlign: "left",
-                padding: "6px 10px",
-                opacity: loadingFile && loadingFile !== t.filename ? 0.5 : 1,
-              }}
+              onClick={() => { onOpenKeybindEditor("edit"); setOpen(false); }}
+              style={{ ...btnStyle(false), padding: "4px 8px", width: "100%" }}
             >
-              {loadingFile === t.filename ? `${t.name}…` : t.name}
+              Edit keybindings…
             </button>
-          ))}
-          {templates && (
-            <div style={{ padding: "4px 6px 2px", fontSize: 10, color: "#888" }}>
-              From <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a>
-            </div>
-          )}
+          </div>
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Small inline icon for the Pointer tool button
+// ---------------------------------------------------------------------------
+
+function PointerIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M3 2 L3 12 L6 9.5 L8 13.5 L10 12.5 L8 8.5 L12 8 Z"
+        fill="#333"
+        stroke="#333"
+        strokeWidth="0.5"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }

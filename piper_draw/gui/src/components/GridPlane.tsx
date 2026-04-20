@@ -62,13 +62,18 @@ export function GridPlane() {
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
-    if (mode !== "place") { setHoveredGridPos(null); return; }
+    if (mode !== "edit") { setHoveredGridPos(null); return; }
 
     const store = useBlockStore.getState();
+    // No grid-plane preview when nothing is armed, or while X-held delete is active.
+    if (store.xHeld || store.armedTool === "pointer") {
+      setHoveredGridPos(null);
+      return;
+    }
     // Port tool: snap to the nearest cube slot for hover preview. The dedicated
     // PortPlacementGhost (OpenPipeGhosts.tsx) reads hoveredGridPos and renders a
     // ghost cube at empty slots.
-    if (store.placePort) {
+    if (store.armedTool === "port") {
       const pos = snapGroundPos(e.point.x, -e.point.z, false);
       const key = posKey(pos);
       if (store.blocks.has(key) || store.portPositions.has(key)) {
@@ -110,15 +115,17 @@ export function GridPlane() {
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     if (e.delta > 2) return; // ignore drags
-    if (mode === "select") {
-      useBlockStore.getState().clearSelection();
-      return;
-    }
-    if (mode !== "place") return;
+    if (mode !== "edit") return;
 
     const store = useBlockStore.getState();
+    // X-held delete on empty grid is a no-op.
+    if (store.xHeld) return;
+    if (store.armedTool === "pointer") {
+      store.clearSelection();
+      return;
+    }
     // Port tool: place an explicit port marker at the snapped cube position.
-    if (store.placePort) {
+    if (store.armedTool === "port") {
       const pos = snapGroundPos(e.point.x, -e.point.z, false);
       store.addPortAt(pos);
       return;
@@ -131,8 +138,6 @@ export function GridPlane() {
   const handlePointerLeave = () => {
     setHoveredGridPos(null);
   };
-
-  if (mode === "delete") return null;
 
   // Mesh orientation matches the active plane: floor in persp, slice plane in iso.
   const rotation: [number, number, number] = viewMode.kind === "persp"
@@ -154,19 +159,6 @@ export function GridPlane() {
           const adjusted = enforceBlockDepth(viewMode, pos);
           useBlockStore.getState().moveBuildCursor(adjusted);
         }}
-        onPointerLeave={handlePointerLeave}
-      >
-        <planeGeometry args={[PLANE_SIZE, PLANE_SIZE]} />
-        <meshBasicMaterial visible={false} side={THREE.DoubleSide} />
-      </mesh>
-    );
-  }
-  if (mode === "select") {
-    return (
-      <mesh
-        ref={meshRef}
-        rotation={rotation}
-        onClick={handleClick}
         onPointerLeave={handlePointerLeave}
       >
         <planeGeometry args={[PLANE_SIZE, PLANE_SIZE]} />

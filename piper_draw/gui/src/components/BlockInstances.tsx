@@ -220,10 +220,19 @@ function TypedInstances({
     const b = blocksRef.current;
     if (e.instanceId == null || e.instanceId >= b.length) return;
     const store = useBlockStore.getState();
-    if (store.mode === "delete" || store.mode === "select" || store.mode === "build") {
+    // X-held delete preview: show a red hover on the block itself, no ghost.
+    if (store.xHeld && store.mode === "edit") {
+      store.setHoveredGridPos(b[e.instanceId].pos, b[e.instanceId].type);
+      return;
+    }
+    const armed = store.armedTool;
+    if (
+      store.mode === "build" ||
+      (store.mode === "edit" && armed === "pointer")
+    ) {
       // Read the actual block type from the instance, not the group prop
       store.setHoveredGridPos(b[e.instanceId].pos, b[e.instanceId].type);
-    } else if (store.placePort) {
+    } else if (store.mode === "edit" && armed === "port") {
       // Port-conversion tool: no ghost preview on existing blocks — the click
       // either removes the cube or does nothing (and sets a warning).
       store.setHoveredGridPos(null);
@@ -297,6 +306,11 @@ function TypedInstances({
     if (e.instanceId == null || e.instanceId >= b.length) return;
     const store = useBlockStore.getState();
     if (store.isDraggingSelection) return;
+    // X-held single-click delete (edit mode only) short-circuits everything.
+    if (store.xHeld && store.mode === "edit") {
+      store.removeBlock(b[e.instanceId].pos);
+      return;
+    }
     if (store.mode === "build") {
       // In build mode, clicking a cube moves the cursor there
       const clicked = b[e.instanceId];
@@ -305,16 +319,15 @@ function TypedInstances({
       }
       return;
     }
-    if (store.mode === "select") {
+    const armed = store.armedTool;
+    if (armed === "pointer") {
       store.selectBlock(b[e.instanceId].pos, e.nativeEvent.shiftKey);
       return;
     }
-    if (store.mode === "delete") {
-      store.removeBlock(b[e.instanceId].pos);
-    } else {
+    {
       // Port-conversion tool: click on a cube to remove it (leaving a port
       // if a pipe was attached). Never falls through to pipe-placement.
-      if (store.placePort) {
+      if (armed === "port") {
         store.convertBlockToPort(b[e.instanceId].pos);
         return;
       }
