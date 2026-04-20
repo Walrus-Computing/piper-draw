@@ -178,17 +178,33 @@ export function Toolbar({
   });
   const buildValidTypes = buildValidTypesStr != null ? new Set(buildValidTypesStr.split(",").filter(Boolean)) : null;
 
-  // When exactly one port is selected (and no real blocks), compute which cube
-  // types could replace it given the adjacent pipe constraints. Used to grey out
-  // invalid cube buttons in the toolbar.
-  const selectedPortValidTypesStr = useBlockStore((s): string | null => {
+  // When exactly one cube-slot thing is selected in edit mode (a single port OR a
+  // single cube/Y block), compute info used to grey out and highlight toolbar
+  // entries: the currently placed type, whether port-conversion is still legal,
+  // and which cube types remain valid replacements at that position.
+  // Encoded as "currentType;portAllowedFlag;valid1,valid2,..." to keep the
+  // selector returning a primitive (avoids new-object-per-render re-renders).
+  // currentType is "PORT" for a selected port, or the BlockType string ("XZZ", "Y", …).
+  const selectedCubeSlotInfoStr = useBlockStore((s): string | null => {
     if (s.mode !== "edit" || s.armedTool !== "pointer") return null;
-    if (s.selectedKeys.size > 0) return null;
-    if (s.selectedPortPositions.size !== 1) return null;
-    const portKey = s.selectedPortPositions.values().next().value as string;
-    const [x, y, z] = portKey.split(",").map(Number);
-    const portPos: Position3D = { x, y, z };
-    const coords: [number, number, number] = [portPos.x, portPos.y, portPos.z];
+    let pos: Position3D;
+    let currentType: string;
+    if (s.selectedKeys.size === 0 && s.selectedPortPositions.size === 1) {
+      const k = s.selectedPortPositions.values().next().value as string;
+      const [x, y, z] = k.split(",").map(Number);
+      pos = { x, y, z };
+      currentType = "PORT";
+    } else if (s.selectedKeys.size === 1 && s.selectedPortPositions.size === 0) {
+      const k = s.selectedKeys.values().next().value as string;
+      const b = s.blocks.get(k);
+      if (!b || isPipeType(b.type)) return null;
+      pos = b.pos;
+      currentType = b.type;
+    } else {
+      return null;
+    }
+    const coords: [number, number, number] = [pos.x, pos.y, pos.z];
+    let pipeCount = 0;
     let yValid = true;
     for (let axis = 0; axis < 3; axis++) {
       for (const offset of [1, -2]) {
@@ -197,18 +213,75 @@ export function Toolbar({
         const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
         if (n && isPipeType(n.type)) {
           const openAxis = n.type.replace("H", "").indexOf("O");
-          if (openAxis === axis && openAxis !== 2) yValid = false;
+          if (openAxis === axis) {
+            pipeCount++;
+            if (openAxis !== 2) yValid = false;
+          }
         }
       }
     }
-    const result = determineCubeOptions(portPos, s.blocks);
+    const result = determineCubeOptions(pos, s.blocks);
     const opts: string[] = result.determined ? [result.type] : [...result.options];
     if (yValid) opts.push("Y");
-    return opts.join(",");
+    return `${currentType};${pipeCount < 2 ? "1" : "0"};${opts.join(",")}`;
   });
-  const selectedPortValidTypes = selectedPortValidTypesStr != null
-    ? new Set(selectedPortValidTypesStr.split(",").filter(Boolean))
-    : null;
+  const selectedCubeSlotInfo = (() => {
+    if (selectedCubeSlotInfoStr == null) return null;
+    const [currentType, portAllowedFlag, validStr] = selectedCubeSlotInfoStr.split(";");
+    return {
+      currentType,
+      portAllowed: portAllowedFlag === "1",
+      validTypes: new Set(validStr.split(",").filter(Boolean)),
+    };
+  })();
+
+  // When exactly one pipe is selected in edit mode, compute (a) its current
+  // toolbar variant (for highlighting) and (b) which other variants would still
+  // be valid at that position — i.e. swapping to that variant keeps every
+  // committed neighbour cube within its valid CUBE_TYPES set. Mirrors the
+  // build-mode pipe-validity logic in `buildValidPipeVariantsStr`.
+  const selectedPipeInfoStr = useBlockStore((s): string | null => {
+    if (s.mode !== "edit" || s.armedTool !== "pointer") return null;
+    if (s.selectedKeys.size !== 1 || s.selectedPortPositions.size !== 0) return null;
+    const k = s.selectedKeys.values().next().value as string;
+    const pipeBlock = s.blocks.get(k);
+    if (!pipeBlock || !isPipeType(pipeBlock.type)) return null;
+    const currentVariant = PIPE_TYPE_TO_VARIANT[pipeBlock.type as PipeType];
+    const base = (pipeBlock.type as string).replace("H", "");
+    const openAxis = base.indexOf("O") as 0 | 1 | 2;
+    const pipeCoords: [number, number, number] = [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z];
+    const valid: string[] = [];
+    for (const v of PIPE_VARIANTS) {
+      const candidate = VARIANT_AXIS_MAP[v][openAxis];
+      const tmp = new Map(s.blocks);
+      tmp.set(k, { pos: pipeBlock.pos, type: candidate });
+      let ok = true;
+      for (const offset of [-1, 2]) {
+        const nc: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
+        nc[openAxis] += offset;
+        const nKey = posKey({ x: nc[0], y: nc[1], z: nc[2] });
+        const neighbor = tmp.get(nKey);
+        if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
+        const opts = determineCubeOptions(neighbor.pos, tmp);
+        const currentType = neighbor.type;
+        if (opts.determined) {
+          if (opts.type !== currentType) { ok = false; break; }
+        } else if (!opts.options.includes(currentType as CubeType)) {
+          ok = false; break;
+        }
+      }
+      if (ok) valid.push(v);
+    }
+    return `${currentVariant};${valid.join(",")}`;
+  });
+  const selectedPipeInfo = (() => {
+    if (selectedPipeInfoStr == null) return null;
+    const [currentVariant, validStr] = selectedPipeInfoStr.split(";");
+    return {
+      currentVariant: currentVariant as PipeVariant,
+      validVariants: new Set(validStr.split(",").filter(Boolean)),
+    };
+  })();
   // Find the adjacent pipe connecting cursor to an ambiguous endpoint (for R cycling).
   // An endpoint is "ambiguous" when the pipe's color on that side isn't uniquely fixed:
   //   - the slot is a port (no cube) — any cube type could land there
@@ -491,8 +564,10 @@ export function Toolbar({
             title="Place or convert to a port"
             style={blockBtnStyle(
               (mode === "edit" && armedTool === "port") ||
-              (mode === "build" && buildCursorOnPort),
-              mode === "build" && !freeBuild && !buildCursorPortAllowed,
+              (mode === "build" && buildCursorOnPort) ||
+              (mode === "edit" && selectedCubeSlotInfo?.currentType === "PORT"),
+              (mode === "build" && !freeBuild && !buildCursorPortAllowed) ||
+              (mode === "edit" && selectedCubeSlotInfo != null && !selectedCubeSlotInfo.portAllowed),
             )}
           >
             Port
@@ -510,13 +585,17 @@ export function Toolbar({
               }}
               style={blockBtnStyle(
                 (mode === "edit" && armedTool === "cube" && cubeType === ct) ||
-                (mode === "build" && buildCursorBlockType === ct),
-                // Never disable the cube type currently sitting at the build cursor —
-                // it's the placed type and showing it as highlighted + greyed at the
-                // same time is a visual contradiction (mirrors the pipe-button rule).
+                (mode === "build" && buildCursorBlockType === ct) ||
+                (mode === "edit" && selectedCubeSlotInfo?.currentType === ct),
+                // Never disable the cube type currently sitting at the build cursor or
+                // selected — it's the placed type and showing it as highlighted +
+                // greyed at the same time is a visual contradiction (mirrors the
+                // pipe-button rule).
                 (mode === "build" && !freeBuild && buildCursorBlockType !== ct
                   && buildValidTypes != null && !buildValidTypes.has(ct)) ||
-                (selectedPortValidTypes != null && !selectedPortValidTypes.has(ct)),
+                (mode === "edit" && selectedCubeSlotInfo != null
+                  && selectedCubeSlotInfo.currentType !== ct
+                  && !selectedCubeSlotInfo.validTypes.has(ct)),
               )}
             >
               {ct}
@@ -533,10 +612,13 @@ export function Toolbar({
             }}
             style={blockBtnStyle(
               (mode === "edit" && armedTool === "cube" && cubeType === "Y") ||
-              (mode === "build" && buildCursorBlockType === "Y"),
+              (mode === "build" && buildCursorBlockType === "Y") ||
+              (mode === "edit" && selectedCubeSlotInfo?.currentType === "Y"),
               (mode === "build" && !freeBuild && buildCursorBlockType !== "Y"
                 && buildValidTypes != null && !buildValidTypes.has("Y" as CubeType)) ||
-              (selectedPortValidTypes != null && !selectedPortValidTypes.has("Y")),
+              (mode === "edit" && selectedCubeSlotInfo != null
+                && selectedCubeSlotInfo.currentType !== "Y"
+                && !selectedCubeSlotInfo.validTypes.has("Y")),
             )}
           >
             Y
@@ -564,12 +646,16 @@ export function Toolbar({
               }}
               style={blockBtnStyle(
                 (mode === "edit" && armedTool === "pipe" && pipeVariant === v) ||
-                (mode === "build" && buildActivePipeVariant === v),
+                (mode === "build" && buildActivePipeVariant === v) ||
+                (mode === "edit" && selectedPipeInfo?.currentVariant === v),
                 // Never disable the currently-active pipe variant — it's always
                 // valid by construction (it's what's placed), and showing it as
                 // highlighted + greyed at the same time is a visual contradiction.
-                mode === "build" && !freeBuild && buildActivePipeVariant !== v
-                  && (buildValidPipeVariants == null || !buildValidPipeVariants.has(v)),
+                (mode === "build" && !freeBuild && buildActivePipeVariant !== v
+                  && (buildValidPipeVariants == null || !buildValidPipeVariants.has(v))) ||
+                (mode === "edit" && selectedPipeInfo != null
+                  && selectedPipeInfo.currentVariant !== v
+                  && !selectedPipeInfo.validVariants.has(v)),
               )}
             >
               {v}
