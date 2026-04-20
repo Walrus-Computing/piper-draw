@@ -39,6 +39,7 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
       ["Scroll", "Zoom"],
       [bindingToLabel(b.selectAll), "Select all"],
       [bindingToLabel(b.flipColors), "Flip colors"],
+      [`${bindingToLabel(b.rotateCcw)}/${bindingToLabel(b.rotateCw)}`, "Rotate CCW/CW (Z)"],
       [`Hold ${bindingToLabel(b.holdToDelete)}`, "Click-to-delete"],
       [bindingToLabel(b.undo), "Undo"],
       [bindingToLabel(b.redo), "Redo"],

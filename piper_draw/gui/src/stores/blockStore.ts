@@ -38,6 +38,7 @@ import {
   PLACEABLE_ORDER,
   currentPlaceableIndex,
 } from "../types";
+import { rotateBlockAroundZ } from "../utils/blockRotation";
 
 export type Mode = "edit" | "build";
 export type ArmedTool = "pointer" | "cube" | "pipe" | "port";
@@ -107,6 +108,9 @@ type UndoCommand =
   | { kind: "remove-port"; key: string }
   | { kind: "bulk-replace"; entries: Array<{ key: string; oldBlock: Block; newBlock: Block }>;
       undeterminedChanges: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> }
+  | { kind: "rotate-selection";
+      entries: Array<{ oldKey: string; oldBlock: Block; newKey: string; newBlock: Block }>;
+      prevSelectedKeys: string[]; nextSelectedKeys: string[] }
   | { kind: "edit-type-cycle"; key: string; pos: Position3D;
       oldBlock: Block | null; newBlock: Block | null;
       oldPortMarker: boolean; newPortMarker: boolean };
@@ -159,6 +163,10 @@ interface BlockStore {
    * markers until a cube is placed there or they're promoted.
    */
   portPositions: Set<string>;
+  /** Pivot used by rotateSelected, cached across subsequent rotations of the same
+   * selection so that 4×CCW returns to identity even when the selection bbox is
+   * not cube-grid-aligned. Cleared whenever the selection itself changes. */
+  selectionPivot: Position3D | null;
 
   // Drag-selection state (live during a drag of the current selection)
   isDraggingSelection: boolean;
@@ -208,6 +216,7 @@ interface BlockStore {
   clearSelection: () => void;
   deleteSelected: () => void;
   flipSelected: () => void;
+  rotateSelected: (direction: "cw" | "ccw", pivotOverride?: Position3D | null) => { ok: true } | { ok: false; reason: string };
   selectAll: () => void;
   selectBlocks: (keys: string[], additive: boolean) => void;
   togglePortSelection: (pos: Position3D, additive: boolean) => void;
@@ -395,6 +404,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   selectedKeys: new Set(),
   selectedPortPositions: new Set(),
   portPositions: new Set(),
+  selectionPivot: null,
 
   isDraggingSelection: false,
   dragDelta: null,
@@ -450,6 +460,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         selectedKeys: new Set<string>(),
         selectedPortPositions: new Set<string>(),
         xHeld: false,
+        selectionPivot: null,
       });
       return;
     }
@@ -492,6 +503,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         selectedKeys: new Set<string>(),
         selectedPortPositions: new Set<string>(),
         xHeld: false,
+        selectionPivot: null,
       });
       return;
     }
@@ -506,6 +518,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       dragDelta: null,
       dragValid: true,
       xHeld: false,
+      selectionPivot: null,
     });
   },
   setArmedTool: (tool) => set({
@@ -517,12 +530,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     hoveredInvalidReason: null,
     hoveredReplace: false,
     ...(tool !== "pipe" ? { pipeVariant: null } : {}),
-    ...(tool !== "pointer" ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>() } : {}),
+    ...(tool !== "pointer" ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null } : {}),
   }),
   setXHeld: (held) => set({ xHeld: held, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
-  setCubeType: (cubeType) => set({ cubeType, armedTool: "cube", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>() }),
-  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], armedTool: "pipe", portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>() }),
-  setPlacePort: (on) => set({ armedTool: on ? "port" : "pointer", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, ...(on ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>() } : {}) }),
+  setCubeType: (cubeType) => set({ cubeType, armedTool: "cube", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
+  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], armedTool: "pipe", portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
+  setPlacePort: (on) => set({ armedTool: on ? "port" : "pointer", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, ...(on ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null } : {}) }),
   cycleArmedType: (dir) => {
     const s = get();
     if (s.mode !== "edit") return;
@@ -1055,6 +1068,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           future: [cmd, ...state.future].slice(0, MAX_HISTORY),
           hoveredGridPos: null,
           selectedKeys: new Set(cmd.entries.map((e) => e.oldKey)),
+          selectionPivot: null,
           undeterminedCubes: newUndetermined,
         };
       }
@@ -1306,6 +1320,28 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         };
       }
 
+      if (cmd.kind === "rotate-selection") {
+        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        for (const entry of cmd.entries) {
+          const cur = blocks.get(entry.newKey);
+          if (cur) {
+            ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, entry.newKey, cur));
+          }
+        }
+        for (const entry of cmd.entries) {
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, entry.oldKey, entry.oldBlock));
+        }
+        return {
+          blocks,
+          hiddenFaces,
+          history: newHistory,
+          future: [cmd, ...state.future].slice(0, MAX_HISTORY),
+          hoveredGridPos: null,
+          selectedKeys: new Set(cmd.prevSelectedKeys),
+          selectionPivot: null,
+        };
+      }
+
       // cmd.kind === "clear" — restore saved state, rebuild spatial index
       const newIndex = buildSpatialIndex(cmd.savedBlocks);
       return {
@@ -1359,6 +1395,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           future: newFuture,
           hoveredGridPos: null,
           selectedKeys: new Set<string>(),
+          selectionPivot: null,
         };
       }
 
@@ -1398,6 +1435,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           future: newFuture,
           hoveredGridPos: null,
           selectedKeys: new Set(cmd.entries.map((e) => e.newKey)),
+          selectionPivot: null,
           undeterminedCubes: newUndetermined,
         };
       }
@@ -1623,6 +1661,28 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         };
       }
 
+      if (cmd.kind === "rotate-selection") {
+        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        for (const entry of cmd.entries) {
+          const cur = blocks.get(entry.oldKey);
+          if (cur) {
+            ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, entry.oldKey, cur));
+          }
+        }
+        for (const entry of cmd.entries) {
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, entry.newKey, entry.newBlock));
+        }
+        return {
+          blocks,
+          hiddenFaces,
+          history: [...state.history, cmd],
+          future: newFuture,
+          hoveredGridPos: null,
+          selectedKeys: new Set(cmd.nextSelectedKeys),
+          selectionPivot: null,
+        };
+      }
+
       // cmd.kind === "clear" — save current state, then clear
       const savedCmd: UndoCommand = {
         kind: "clear",
@@ -1678,6 +1738,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         selectedKeys: new Set<string>(),
         selectedPortPositions: new Set<string>(),
         portPositions: new Set<string>(),
+        selectionPivot: null,
         undeterminedCubes: new Map(),
       };
     }),
@@ -1701,6 +1762,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         selectedKeys: new Set<string>(),
         selectedPortPositions: new Set<string>(),
         portPositions: new Set<string>(),
+        selectionPivot: null,
         undeterminedCubes: new Map(),
       };
     }),
@@ -1721,13 +1783,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       return {
         selectedKeys: next,
         selectedPortPositions: additive ? state.selectedPortPositions : new Set<string>(),
+        selectionPivot: null,
       };
     }),
 
   clearSelection: () =>
     set((state) => {
       if (state.selectedKeys.size === 0 && state.selectedPortPositions.size === 0) return state;
-      return { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>() };
+      return { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null };
     }),
 
   togglePortSelection: (pos, additive) =>
@@ -1743,6 +1806,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       return {
         selectedPortPositions: next,
         selectedKeys: additive ? state.selectedKeys : new Set<string>(),
+        selectionPivot: null,
       };
     }),
 
@@ -1790,6 +1854,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         future: [],
         selectedKeys: new Set<string>(),
         selectedPortPositions: new Set<string>(),
+        selectionPivot: null,
         hoveredGridPos: null,
         undeterminedCubes: newUndetermined,
       };
@@ -1861,10 +1926,127 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       };
     }),
 
+  rotateSelected: (direction, pivotOverride) => {
+    const state = get();
+    if (state.selectedKeys.size === 0) return { ok: true };
+
+    // Determine pivot. Priority:
+    //   1. Explicit override (user hovered a selected block while pressing R).
+    //   2. Cached selectionPivot from a prior rotation of the same selection —
+    //      this is what makes 4×CCW return to identity even when the selection
+    //      bbox isn't cube-grid-aligned (bbox swaps X/Y spans on rotation, so
+    //      recomputing each time would drift).
+    //   3. Single-block selection: that block's position.
+    //   4. Multi-block selection: bbox XY center, snapped to the cube grid.
+    let pivot: Position3D;
+    if (pivotOverride) {
+      pivot = {
+        x: Math.round(pivotOverride.x / 3) * 3,
+        y: Math.round(pivotOverride.y / 3) * 3,
+        z: pivotOverride.z,
+      };
+    } else if (state.selectionPivot) {
+      pivot = state.selectionPivot;
+    } else if (state.selectedKeys.size === 1) {
+      const onlyKey = state.selectedKeys.values().next().value as string;
+      const onlyBlock = state.blocks.get(onlyKey);
+      if (!onlyBlock) return { ok: true };
+      pivot = {
+        x: Math.round(onlyBlock.pos.x / 3) * 3,
+        y: Math.round(onlyBlock.pos.y / 3) * 3,
+        z: onlyBlock.pos.z,
+      };
+    } else {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      let zSample = 0;
+      for (const key of state.selectedKeys) {
+        const block = state.blocks.get(key);
+        if (!block) continue;
+        if (block.pos.x < minX) minX = block.pos.x;
+        if (block.pos.y < minY) minY = block.pos.y;
+        if (block.pos.x > maxX) maxX = block.pos.x;
+        if (block.pos.y > maxY) maxY = block.pos.y;
+        zSample = block.pos.z;
+      }
+      pivot = {
+        x: Math.round(((minX + maxX) / 2) / 3) * 3,
+        y: Math.round(((minY + maxY) / 2) / 3) * 3,
+        z: zSample,
+      };
+    }
+
+    // Build entries; validate grid and collisions before mutating.
+    const entries: Array<{ oldKey: string; oldBlock: Block; newKey: string; newBlock: Block }> = [];
+    const newKeys = new Set<string>();
+    try {
+      for (const oldKey of state.selectedKeys) {
+        const oldBlock = state.blocks.get(oldKey);
+        if (!oldBlock) continue;
+        const newBlock = rotateBlockAroundZ(oldBlock, pivot, direction);
+        if (!isValidPos(newBlock.pos, newBlock.type)) {
+          return { ok: false, reason: "Rotation produced an invalid grid position" };
+        }
+        const newKey = posKey(newBlock.pos);
+        if (newKeys.has(newKey)) {
+          return { ok: false, reason: "Rotation produced overlapping positions" };
+        }
+        newKeys.add(newKey);
+        entries.push({ oldKey, oldBlock, newKey, newBlock });
+      }
+    } catch (e) {
+      return { ok: false, reason: e instanceof Error ? e.message : "Rotation failed" };
+    }
+
+    // Collision: any new key not in the old selection that already has a block
+    for (const newKey of newKeys) {
+      if (state.selectedKeys.has(newKey)) continue;
+      if (state.blocks.has(newKey)) {
+        return { ok: false, reason: "Rotation would overlap an existing block" };
+      }
+    }
+
+    set((s) => {
+      let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
+      // Remove all old blocks first so collisions on mixed remove/add don't trip
+      for (const entry of entries) {
+        const existing = blocks.get(entry.oldKey);
+        if (existing) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, entry.oldKey, existing));
+        }
+      }
+      for (const entry of entries) {
+        ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, entry.newKey, entry.newBlock));
+      }
+      // Rotation invalidates undetermined build-mode state for rotated cubes.
+      const newUndetermined = new Map(s.undeterminedCubes);
+      for (const entry of entries) newUndetermined.delete(entry.oldKey);
+
+      const prevSelectedKeys = Array.from(s.selectedKeys);
+      const nextSelectedKeys = entries.map((e) => e.newKey);
+      const cmd: UndoCommand = {
+        kind: "rotate-selection",
+        entries,
+        prevSelectedKeys,
+        nextSelectedKeys,
+      };
+      return {
+        blocks,
+        hiddenFaces,
+        history: [...s.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+        selectedKeys: new Set(nextSelectedKeys),
+        selectionPivot: pivot,
+        hoveredGridPos: null,
+        undeterminedCubes: newUndetermined,
+      };
+    });
+    return { ok: true };
+  },
+
   selectAll: () =>
     set((state) => {
       if (state.blocks.size === 0) return state;
-      return { selectedKeys: new Set(state.blocks.keys()) };
+      return { selectedKeys: new Set(state.blocks.keys()), selectionPivot: null };
     }),
 
   selectBlocks: (keys, additive) =>
@@ -1873,7 +2055,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       for (const key of keys) {
         if (state.blocks.has(key)) next.add(key);
       }
-      return { selectedKeys: next };
+      return { selectedKeys: next, selectionPivot: null };
     }),
 
   setDragState: ({ isDragging, delta, valid }) =>

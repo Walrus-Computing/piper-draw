@@ -22,6 +22,8 @@ interface ValidationStore {
   dismiss: () => void;
   dismissError: (index: number) => void;
   selectError: (key: string | null) => void;
+  /** Show an ephemeral warning toast (used for actions like rotation that abort). */
+  reportEphemeralError: (message: string) => void;
 }
 
 let requestVersion = 0;
@@ -87,6 +89,17 @@ export const useValidationStore = create<ValidationStore>((set, get) => ({
   },
 
   selectError: (key) => set({ selectedErrorKey: key }),
+
+  reportEphemeralError: (message) => {
+    // Bump the request version so any in-flight validation ignores its result.
+    ++requestVersion;
+    set({
+      status: "error",
+      errors: [{ position: { x: NaN, y: NaN, z: NaN }, message }],
+      invalidKeys: new Set(),
+      selectedErrorKey: null,
+    });
+  },
 }));
 
 // ---------------------------------------------------------------------------
