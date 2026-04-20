@@ -554,7 +554,7 @@ export function Toolbar({
             title="Select and move blocks"
             style={blockBtnStyle(mode === "edit" && armedTool === "pointer")}
           >
-            Pointer
+            Select
             <div style={previewWrapStyle}>
               <PointerIcon />
             </div>
