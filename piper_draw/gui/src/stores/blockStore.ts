@@ -1389,7 +1389,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         } else {
           // Displayed type can't pipe here. Only fall back when remaining options agree.
           const pipeSet = new Set(validForDir.map(opt => inferPipeType(opt, direction.tqecAxis)));
-          if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first");
+          if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with C first");
           srcType = validForDir[0];
         }
         sourceDetermination = {
@@ -1412,7 +1412,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const bestScore = charMatchCount(ranked[0], srcType);
           const bestTied = ranked.filter(ct => charMatchCount(ct, srcType) === bestScore);
           const pipeSet = new Set(bestTied.map(ct => inferPipeType(ct, direction.tqecAxis)));
-          if (pipeSet.size > 1) return reject("Ambiguous pipe type — cycle with R first");
+          if (pipeSet.size > 1) return reject("Cube colors don't match — cannot build in this direction");
           sourceRetype = { key: srcKey, prevType: srcType };
           srcType = ranked[0];
         }
