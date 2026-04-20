@@ -823,8 +823,16 @@ function pipeEndBasis(base: string, hadamard: boolean, openAxis: number, axis: n
 
 /**
  * Check whether a pipe placement conflicts with adjacent cube colors.
- * For each of the pipe's two closed TQEC axes, the pipe's basis character
- * must match any adjacent cube's basis character on the same axis.
+ *
+ * For each of the pipe's two endpoints:
+ *  - If a real cube exists, the pipe's basis on the two closed axes must match
+ *    the cube's basis on those axes (strict check).
+ *  - If the position is a port (no real cube), the pipe is allowed iff some
+ *    cube type at that position would satisfy both the new pipe's basis AND
+ *    any other pipes already attached at the port. This lets the user wire up
+ *    a port whose type is still flexible — auto-promotion picks a canonical
+ *    type that satisfies all pipes.
+ *
  * For Hadamard pipes, the far end (offset +2) uses swapped colors.
  * Returns true if there IS a conflict (placement should be rejected).
  */
@@ -849,13 +857,31 @@ export function hasPipeColorConflict(
   for (const offset of [-1, 2]) {
     const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
     nCoords[openAxis] += offset;
-    const neighbor = blocks.get(posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] }));
+    const neighborPos: Position3D = { x: nCoords[0], y: nCoords[1], z: nCoords[2] };
+    const neighbor = blocks.get(posKey(neighborPos));
 
-    if (!neighbor) continue;
+    const swapped = offset === 2;
+
+    if (!neighbor) {
+      // Port endpoint: check if any cube type satisfies both existing pipe
+      // constraints at this position AND the new pipe's basis requirements.
+      const opts = determineCubeOptions(neighborPos, blocks);
+      const candidates: readonly CubeType[] = opts.determined ? [opts.type] : opts.options;
+      if (candidates.length === 0) return true;
+      const anyMatches = candidates.some(ct => {
+        for (let axis = 0; axis < 3; axis++) {
+          if (axis === openAxis) continue;
+          if (pipeEndBasis(base, hadamard, openAxis, axis, swapped) !== ct[axis]) return false;
+        }
+        return true;
+      });
+      if (!anyMatches) return true;
+      continue;
+    }
+
     if (neighbor.type === "Y") continue;
     if (isPipeType(neighbor.type)) continue;
 
-    const swapped = offset === 2;
     for (let axis = 0; axis < 3; axis++) {
       if (axis === openAxis) continue;
       if (pipeEndBasis(base, hadamard, openAxis, axis, swapped) !== neighbor.type[axis]) return true;
@@ -993,6 +1019,23 @@ export function computePipePos(cursorPos: Position3D, dir: BuildDirection): Posi
 }
 
 /**
+ * Given the previous and destination cursor positions of a single build step,
+ * return the posKey of the pipe the step traversed. prev and dest differ by
+ * exactly ±3 along one axis; the pipe sits at prev±{1,2} in that slot.
+ */
+export function traversedPipeKey(prev: Position3D, dest: Position3D): string {
+  const dx = dest.x - prev.x, dy = dest.y - prev.y, dz = dest.z - prev.z;
+  const axis = dx !== 0 ? 0 : dy !== 0 ? 1 : 2;
+  const delta = axis === 0 ? dx : axis === 1 ? dy : dz;
+  const offset = delta > 0 ? 1 : -2;
+  const pipe = { x: prev.x, y: prev.y, z: prev.z };
+  if (axis === 0) pipe.x += offset;
+  else if (axis === 1) pipe.y += offset;
+  else pipe.z += offset;
+  return posKey(pipe);
+}
+
+/**
  * Swap the two closed-axis characters of a pipe base type.
  * E.g. "OXZ" → "OZX", "ZOX" → "XOZ", "XZO" → "ZXO".
  */
@@ -1039,7 +1082,7 @@ export function inferPipeType(srcType: CubeType, tqecAxis: 0 | 1 | 2): PipeType 
  */
 export function determineCubeOptions(
   cubePos: Position3D,
-  blocks: Map<string, Block>,
+  blocks: BlocksLookup,
 ): { determined: true; type: CubeType } | { determined: false; options: CubeType[] } {
   const constraints: (string | null)[] = [null, null, null];
   const coords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
@@ -1083,6 +1126,68 @@ export function determineCubeOptions(
 
   if (valid.length === 1) return { determined: true, type: valid[0] };
   return { determined: false, options: [...valid] };
+}
+
+/**
+ * Return posKeys of pipes whose open-axis endpoint lies at cubePos.
+ * Used by the cube → port conversion (must have ≤1) and by the cascade-delete
+ * path (deleting a junction cube also removes its attached pipes).
+ */
+export function getAttachedPipeKeys(
+  cubePos: Position3D,
+  blocks: Map<string, Block>,
+): string[] {
+  const keys: string[] = [];
+  const coords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
+  for (let axis = 0; axis < 3; axis++) {
+    for (const pipeOffset of [1, -2]) {
+      const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
+      nCoords[axis] += pipeOffset;
+      const k = posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
+      const neighbor = blocks.get(k);
+      if (!neighbor || !isPipeType(neighbor.type)) continue;
+      const base = neighbor.type.replace("H", "");
+      if (base.indexOf("O") === axis) keys.push(k);
+    }
+  }
+  return keys;
+}
+
+/**
+ * Count the number of pipes whose open-axis endpoint lies at cubePos.
+ * Used to decide when a port position has "enough" pipes to auto-promote to a cube.
+ */
+export function countAttachedPipes(
+  cubePos: Position3D,
+  blocks: Map<string, Block>,
+): number {
+  return getAttachedPipeKeys(cubePos, blocks).length;
+}
+
+/**
+ * Pick a canonical CubeType for a port position, or null if it should remain a port.
+ *
+ * Rules:
+ *   - Fewer than 2 attached pipes: return null (still a port).
+ *   - 2+ pipes that uniquely constrain: return that type.
+ *   - 2+ pipes with multiple valid options (colinear-pipe ambiguity, e.g. XZZ vs XZX
+ *     when both Z faces are hidden by Z-pipes): pick the first valid CUBE_TYPES entry.
+ *     This may differ from a hand-authored TQEC graph — see CLAUDE.md "Canonicalisation
+ *     assumption" for the rationale.
+ *   - 2+ pipes with conflicting constraints (no valid options): return null.
+ */
+export function canonicalCubeForPort(
+  cubePos: Position3D,
+  blocks: Map<string, Block>,
+): CubeType | null {
+  if (countAttachedPipes(cubePos, blocks) < 2) return null;
+  const result = determineCubeOptions(cubePos, blocks);
+  if (result.determined) return result.type;
+  if (result.options.length === 0) return null;
+  for (const ct of CUBE_TYPES) {
+    if (result.options.includes(ct)) return ct;
+  }
+  return null;
 }
 
 /**

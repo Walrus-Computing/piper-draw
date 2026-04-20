@@ -65,6 +65,19 @@ export function GridPlane() {
     if (mode !== "place") { setHoveredGridPos(null); return; }
 
     const store = useBlockStore.getState();
+    // Port tool: snap to the nearest cube slot for hover preview. The dedicated
+    // PortPlacementGhost (OpenPipeGhosts.tsx) reads hoveredGridPos and renders a
+    // ghost cube at empty slots.
+    if (store.placePort) {
+      const pos = snapGroundPos(e.point.x, -e.point.z, false);
+      const key = posKey(pos);
+      if (store.blocks.has(key) || store.portPositions.has(key)) {
+        setHoveredGridPos(null);
+      } else {
+        setHoveredGridPos(pos);
+      }
+      return;
+    }
     const forPipe = store.pipeVariant !== null;
     const pos = snapForViewMode(viewMode, e.point, forPipe);
 
@@ -104,6 +117,12 @@ export function GridPlane() {
     if (mode !== "place") return;
 
     const store = useBlockStore.getState();
+    // Port tool: place an explicit port marker at the snapped cube position.
+    if (store.placePort) {
+      const pos = snapGroundPos(e.point.x, -e.point.z, false);
+      store.addPortAt(pos);
+      return;
+    }
     const forPipe = store.pipeVariant !== null;
     const pos = snapForViewMode(viewMode, e.point, forPipe);
     addBlock(pos);

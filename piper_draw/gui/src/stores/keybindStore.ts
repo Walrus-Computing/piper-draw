@@ -14,6 +14,7 @@ export type BuildAction =
   | "undo"
   | "cycleBlock"
   | "cyclePipe"
+  | "deleteAtCursor"
   | "exitBuild";
 
 export type SelectAction =
@@ -49,7 +50,7 @@ export const ACTIONS: { [M in Mode]: readonly ActionForMode[M][] } = {
   build: [
     "moveForward", "moveBack", "moveLeft", "moveRight",
     "moveUp", "moveDown",
-    "undo", "cycleBlock", "cyclePipe", "exitBuild",
+    "undo", "cycleBlock", "cyclePipe", "deleteAtCursor", "exitBuild",
   ],
   select: ["selectAll", "deleteSelection", "clearSelection", "flipColors", "undo", "redo", "stepForward", "stepBack"],
   place: ["undo", "redo", "stepForward", "stepBack"],
@@ -67,6 +68,7 @@ export const ACTION_LABELS: { [M in Mode]: Record<ActionForMode[M], string> } = 
     undo: "Undo step",
     cycleBlock: "Cycle block",
     cyclePipe: "Cycle pipe",
+    deleteAtCursor: "Delete block at cursor",
     exitBuild: "Exit build",
   },
   select: {
@@ -104,11 +106,12 @@ export const DEFAULT_BINDINGS: { [M in Mode]: Record<ActionForMode[M], KeyBindin
     undo: { key: "q" },
     cycleBlock: { key: "c" },
     cyclePipe: { key: "r" },
+    deleteAtCursor: { key: "backspace" },
     exitBuild: { key: "escape" },
   },
   select: {
     selectAll: { key: "a", ctrl: true },
-    deleteSelection: { key: "delete" },
+    deleteSelection: { key: "backspace" },
     clearSelection: { key: "escape" },
     flipColors: { key: "f" },
     undo: { key: "z", ctrl: true },
@@ -272,7 +275,7 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: "piper-draw-keybinds",
-      version: 7,
+      version: 9,
       migrate: () => ({ bindings: cloneDefaults() }),
       merge: (persisted, current) => {
         const p = persisted as Partial<KeybindState>;

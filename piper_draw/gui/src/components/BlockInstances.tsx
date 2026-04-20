@@ -43,7 +43,8 @@ const dimmedEdgeLineMaterial = new THREE.LineBasicMaterial({
   depthWrite: false,
 });
 
-function resolvePipeTypeFromFace(
+// eslint-disable-next-line react-refresh/only-export-components
+export function resolvePipeTypeFromFace(
   srcPos: Position3D,
   srcType: BlockType,
   normal: THREE.Vector3,
@@ -222,6 +223,10 @@ function TypedInstances({
     if (store.mode === "delete" || store.mode === "select" || store.mode === "build") {
       // Read the actual block type from the instance, not the group prop
       store.setHoveredGridPos(b[e.instanceId].pos, b[e.instanceId].type);
+    } else if (store.placePort) {
+      // Port-conversion tool: no ghost preview on existing blocks — the click
+      // either removes the cube or does nothing (and sets a warning).
+      store.setHoveredGridPos(null);
     } else {
       // Place mode: check if we can replace the hovered block itself
       const hovered = b[e.instanceId];
@@ -307,6 +312,12 @@ function TypedInstances({
     if (store.mode === "delete") {
       store.removeBlock(b[e.instanceId].pos);
     } else {
+      // Port-conversion tool: click on a cube to remove it (leaving a port
+      // if a pipe was attached). Never falls through to pipe-placement.
+      if (store.placePort) {
+        store.convertBlockToPort(b[e.instanceId].pos);
+        return;
+      }
       // Place mode: try replacing the clicked block if the selected type
       // is valid at the clicked block's position
       const clicked = b[e.instanceId];
@@ -356,7 +367,6 @@ function TypedInstances({
 export function BlockInstances() {
   const blocks = useBlockStore((s) => s.blocks);
   const hiddenFaces = useBlockStore((s) => s.hiddenFaces);
-  const undeterminedCubes = useBlockStore((s) => s.undeterminedCubes);
   const viewMode = useBlockStore((s) => s.viewMode);
 
   const grouped = useMemo(() => {
@@ -368,7 +378,6 @@ export function BlockInstances() {
     };
     const map = new Map<string, Group>();
     for (const block of blocks.values()) {
-      if (undeterminedCubes.has(posKey(block.pos))) continue;
       const hf = hiddenFaces.get(posKey(block.pos)) ?? 0;
       const dimmed = viewMode.kind === "iso" && !posInActiveSlice(viewMode, block.pos);
       const key = `${block.type}:${hf}:${dimmed ? 1 : 0}`;
@@ -385,7 +394,7 @@ export function BlockInstances() {
       }
     }
     return map;
-  }, [blocks, hiddenFaces, undeterminedCubes, viewMode]);
+  }, [blocks, hiddenFaces, viewMode]);
 
   return (
     <>

@@ -19,12 +19,16 @@ import {
 import type { ThreeAxis } from "../utils/isoFoldOut";
 
 /**
- * All block types to render previews for, including pipe canonical forms.
+ * All block types to render previews for, including pipe canonical forms and
+ * the `Port` entry (a plain ghost cube — no per-face colours, so iso fold-out
+ * variants reuse the same ghost preview).
+ *
  * `isoZBlockType` (pipes only) overrides `blockType` in iso-z mode so that
  * the preview shows a horizontal pipe (lying in the xy plane) as seen from
  * above, matching how the pipe will actually be placed in that mode.
  */
-const PREVIEW_TYPES: { key: string; blockType: BlockType; isoZBlockType?: BlockType }[] = [
+const PREVIEW_TYPES: { key: string; blockType: BlockType | null; isoZBlockType?: BlockType }[] = [
+  { key: "Port", blockType: null },
   ...CUBE_TYPES.map((ct) => ({ key: ct, blockType: ct as BlockType })),
   { key: "Y", blockType: "Y" as BlockType },
   ...(["ZX", "XZ", "ZXH", "XZH"] as PipeVariant[]).map((v) => ({
@@ -41,6 +45,14 @@ const HALF = 0.5;
 
 const vertexColorMaterial = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
 const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
+/** Ghost-cube material for the PORT preview — matches OpenPipeGhosts.tsx styling. */
+const portGhostMaterial = new THREE.MeshBasicMaterial({
+  color: 0xdddddd,
+  transparent: true,
+  opacity: 0.35,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
 
 const foldFaceMatCache = new Map<number, THREE.MeshBasicMaterial>();
 function foldFaceMaterial(color: THREE.Color): THREE.MeshBasicMaterial {
@@ -200,7 +212,27 @@ export function usePreviewImages(controlsRef: React.RefObject<any>) {
     // Pre-build entries: each block has a "persp" variant; cubes additionally
     // have iso-x / iso-y / iso-z fold-out variants. Non-cube types share the
     // regular entry across variants, except pipes use isoZBlockType for iso-z.
+    // The Port entry (blockType === null) is a plain ghost cube with no per-face
+    // colours; the same entry is reused for every variant since there's nothing
+    // to fold out.
     for (const { key, blockType, isoZBlockType } of PREVIEW_TYPES) {
+      if (blockType === null) {
+        const geo = new THREE.BoxGeometry(1, 1, 1);
+        const mesh = new THREE.Mesh(geo, portGhostMaterial);
+        const edgeGeo = new THREE.EdgesGeometry(geo);
+        const edges = new THREE.LineSegments(edgeGeo, edgeMaterial);
+        const portEntry: PreviewEntry = {
+          obj: mesh,
+          edges,
+          center: new THREE.Vector3(0, 0, 0),
+          radius: Math.sqrt(3) / 2,
+        };
+        meshesRef.current.set(variantKey(key, "persp"), portEntry);
+        for (const v of FOLD_VARIANTS) {
+          meshesRef.current.set(variantKey(key, v), portEntry);
+        }
+        continue;
+      }
       const isCube = (CUBE_TYPES as readonly string[]).includes(blockType);
       const regular = buildRegularEntry(blockType);
       meshesRef.current.set(variantKey(key, "persp"), regular);
