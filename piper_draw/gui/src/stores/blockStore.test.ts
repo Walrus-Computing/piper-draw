@@ -420,29 +420,27 @@ describe("blockStore", () => {
   });
 
   describe("setPlacePort", () => {
-    it("clears pipeVariant when turned on", () => {
-      useBlockStore.setState({ pipeVariant: "ZX" });
+    it("arms the port tool when turned on", () => {
       useBlockStore.getState().setPlacePort(true);
-      expect(useBlockStore.getState().placePort).toBe(true);
-      expect(useBlockStore.getState().pipeVariant).toBeNull();
+      expect(useBlockStore.getState().armedTool).toBe("port");
     });
 
-    it("is cleared by setCubeType", () => {
+    it("is superseded by setCubeType", () => {
       useBlockStore.getState().setPlacePort(true);
       useBlockStore.getState().setCubeType("ZXZ");
-      expect(useBlockStore.getState().placePort).toBe(false);
+      expect(useBlockStore.getState().armedTool).toBe("cube");
     });
 
-    it("is cleared by setPipeVariant", () => {
+    it("is superseded by setPipeVariant", () => {
       useBlockStore.getState().setPlacePort(true);
       useBlockStore.getState().setPipeVariant("ZX");
-      expect(useBlockStore.getState().placePort).toBe(false);
+      expect(useBlockStore.getState().armedTool).toBe("pipe");
     });
 
-    it("is cleared when leaving place mode", () => {
+    it("disarms back to pointer when turned off", () => {
       useBlockStore.getState().setPlacePort(true);
-      useBlockStore.getState().setMode("delete");
-      expect(useBlockStore.getState().placePort).toBe(false);
+      useBlockStore.getState().setPlacePort(false);
+      expect(useBlockStore.getState().armedTool).toBe("pointer");
     });
   });
 
@@ -529,19 +527,19 @@ describe("blockStore", () => {
   });
 
   describe("setMode clears selection", () => {
-    it("clears selection when switching to place mode", () => {
+    it("clears selection when switching from edit to build", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
-      useBlockStore.setState({ mode: "select" });
       useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
-      useBlockStore.getState().setMode("place");
+      expect(useBlockStore.getState().selectedKeys.size).toBe(1);
+      useBlockStore.getState().setMode("build");
       expect(useBlockStore.getState().selectedKeys.size).toBe(0);
     });
 
-    it("clears selection when switching to delete mode", () => {
+    it("clears selection when arming a placement tool from pointer", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
-      useBlockStore.setState({ mode: "select" });
       useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
-      useBlockStore.getState().setMode("delete");
+      expect(useBlockStore.getState().selectedKeys.size).toBe(1);
+      useBlockStore.getState().setCubeType("XZZ");
       expect(useBlockStore.getState().selectedKeys.size).toBe(0);
     });
   });

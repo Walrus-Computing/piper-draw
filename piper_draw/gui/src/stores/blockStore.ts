@@ -36,7 +36,8 @@ import {
   flipBlockType,
 } from "../types";
 
-export type Mode = "place" | "delete" | "select" | "build";
+export type Mode = "edit" | "build";
+export type ArmedTool = "pointer" | "cube" | "pipe" | "port";
 
 const MAX_HISTORY = 100;
 
@@ -111,13 +112,21 @@ interface BlockStore {
   history: UndoCommand[];
   future: UndoCommand[];
   mode: Mode;
+  /**
+   * The currently armed tool in edit mode. "pointer" behaves like the old
+   * select mode (click selects, drag moves/marquees). A type tool ("cube" /
+   * "pipe" / "port") behaves like the old place mode and uses the matching
+   * `cubeType` / `pipeVariant` / port intent.
+   */
+  armedTool: ArmedTool;
+  /**
+   * True while the delete-modifier key (default X) is held. Short-circuits
+   * hover/click handling to preview and perform single-click deletion in
+   * edit mode, regardless of the currently armed tool.
+   */
+  xHeld: boolean;
   cubeType: BlockType;
   pipeVariant: PipeVariant | null;
-  /**
-   * When true, place-mode clicks on a cube convert it to a port (remove the cube).
-   * Mutually exclusive with `pipeVariant`; setting either tool clears the other.
-   */
-  placePort: boolean;
   /**
    * Transient warning message (e.g. "can't convert cube with ≥2 pipes").
    * Cleared automatically on any mode/tool change or after a few seconds.
@@ -154,6 +163,8 @@ interface BlockStore {
   lastBuildAxis: number | null;
 
   setMode: (mode: Mode) => void;
+  setArmedTool: (tool: ArmedTool) => void;
+  setXHeld: (held: boolean) => void;
   setCubeType: (cubeType: BlockType) => void;
   setPipeVariant: (variant: PipeVariant) => void;
   setPlacePort: (on: boolean) => void;
@@ -347,10 +358,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   hiddenFaces: new Map(),
   history: [],
   future: [],
-  mode: "place",
+  mode: "edit",
+  armedTool: "cube",
+  xHeld: false,
   cubeType: "XZZ",
   pipeVariant: null,
-  placePort: false,
   portWarning: null,
   hoveredGridPos: null,
   hoveredBlockType: null,
@@ -414,6 +426,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         hoveredInvalidReason: null,
         selectedKeys: new Set<string>(),
         selectedPortPositions: new Set<string>(),
+        xHeld: false,
       });
       return;
     }
@@ -455,6 +468,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         hoveredInvalidReason: null,
         selectedKeys: new Set<string>(),
         selectedPortPositions: new Set<string>(),
+        xHeld: false,
       });
       return;
     }
@@ -468,13 +482,23 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       isDraggingSelection: false,
       dragDelta: null,
       dragValid: true,
-      ...(mode !== "place" ? { placePort: false, portWarning: null } : {}),
-      ...(mode !== "select" ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>() } : {}),
+      xHeld: false,
     });
   },
-  setCubeType: (cubeType) => set({ cubeType, pipeVariant: null, placePort: false, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
-  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], placePort: false, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
-  setPlacePort: (on) => set({ placePort: on, pipeVariant: on ? null : get().pipeVariant, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
+  setArmedTool: (tool) => set({
+    armedTool: tool,
+    portWarning: null,
+    hoveredGridPos: null,
+    hoveredBlockType: null,
+    hoveredInvalid: false,
+    hoveredInvalidReason: null,
+    hoveredReplace: false,
+    ...(tool !== "pointer" ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>() } : {}),
+  }),
+  setXHeld: (held) => set({ xHeld: held, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
+  setCubeType: (cubeType) => set({ cubeType, armedTool: "cube", portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>() }),
+  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], armedTool: "pipe", portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>() }),
+  setPlacePort: (on) => set({ armedTool: on ? "port" : "pointer", portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, ...(on ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>() } : {}) }),
   clearPortWarning: () => set((state) => (state.portWarning == null ? state : { portWarning: null })),
   addPortAt: (pos) =>
     set((state) => {

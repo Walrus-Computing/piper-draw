@@ -107,12 +107,13 @@ function GhostBlockInner() {
   const hoveredReplace = useBlockStore((s) => s.hoveredReplace);
   const blocks = useBlockStore((s) => s.blocks);
   const spatialIndex = useBlockStore((s) => s.spatialIndex);
-  const placePort = useBlockStore((s) => s.placePort);
+  const armedTool = useBlockStore((s) => s.armedTool);
+  const xHeld = useBlockStore((s) => s.xHeld);
   const viewMode = useBlockStore((s) => s.viewMode);
 
   // Port placement preview: render a port-style white ghost at the snapped
   // cube position. No type-dependent coloring, no hidden-face mask.
-  if (placePort && mode === "place") {
+  if (armedTool === "port" && mode === "edit" && !xHeld) {
     const [x, y, z] = tqecToThree(hoveredGridPos, "XZZ");
     return (
       <group position={[x, y, z]}>
@@ -136,7 +137,7 @@ function GhostBlockInner() {
 
   const zo = activeType === "Y" ? yBlockZOffset(hoveredGridPos, blocks) : 0;
   const [x, y, z] = tqecToThree(hoveredGridPos, activeType, zo);
-  const isDelete = mode === "delete";
+  const isDelete = xHeld && mode === "edit";
   const isInvalid = !isDelete && hoveredInvalid;
   const isReplace = !isDelete && hoveredReplace;
 
@@ -220,6 +221,11 @@ function GhostBlockInner() {
 export function GhostBlock() {
   const hasHover = useBlockStore((s) => s.hoveredGridPos !== null);
   const mode = useBlockStore((s) => s.mode);
-  if (!hasHover || mode === "select" || mode === "build") return null;
+  const armedTool = useBlockStore((s) => s.armedTool);
+  const xHeld = useBlockStore((s) => s.xHeld);
+  if (!hasHover || mode === "build") return null;
+  // In edit mode, only show a ghost when a placement tool is armed (or X-held
+  // delete preview). Pointer mode has no ghost — hover just highlights.
+  if (mode === "edit" && !xHeld && armedTool === "pointer") return null;
   return <GhostBlockInner />;
 }
