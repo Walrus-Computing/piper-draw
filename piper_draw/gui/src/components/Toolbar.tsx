@@ -146,6 +146,26 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
     if (s.mode !== "build" || !s.buildCursor) return false;
     return !s.blocks.has(posKey(s.buildCursor));
   });
+  // True when the cursor position has ≥2 attached pipes — i.e. it can't be
+  // converted back to a port without first removing a pipe. Used to dim the
+  // Port button in build mode so users don't click it expecting a no-op.
+  const buildCursorPortAllowed = useBlockStore((s) => {
+    if (s.mode !== "build" || !s.buildCursor) return true;
+    const coords: [number, number, number] = [s.buildCursor.x, s.buildCursor.y, s.buildCursor.z];
+    let pipeCount = 0;
+    for (let axis = 0; axis < 3; axis++) {
+      for (const offset of [1, -2]) {
+        const nc: [number, number, number] = [coords[0], coords[1], coords[2]];
+        nc[axis] += offset;
+        const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
+        if (n && isPipeType(n.type)) {
+          const openAxis = n.type.replace("H", "").indexOf("O");
+          if (openAxis === axis) pipeCount++;
+        }
+      }
+    }
+    return pipeCount < 2;
+  });
   // Returns a stable string of valid cube types (comma-separated) to avoid
   // infinite re-renders from creating new Set objects in the selector.
   const buildValidTypesStr = useBlockStore((s): string | null => {
@@ -487,6 +507,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
             style={blockBtnStyle(
               (placePort && mode === "place") ||
               (mode === "build" && buildCursorOnPort),
+              mode === "build" && !freeBuild && !buildCursorPortAllowed,
             )}
           >
             Port
@@ -506,7 +527,11 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
               style={blockBtnStyle(
                 (!placePort && cubeType === ct && mode === "place") ||
                 (mode === "build" && buildCursorBlockType === ct),
-                (mode === "build" && !freeBuild && buildValidTypes != null && !buildValidTypes.has(ct)) ||
+                // Never disable the cube type currently sitting at the build cursor —
+                // it's the placed type and showing it as highlighted + greyed at the
+                // same time is a visual contradiction (mirrors the pipe-button rule).
+                (mode === "build" && !freeBuild && buildCursorBlockType !== ct
+                  && buildValidTypes != null && !buildValidTypes.has(ct)) ||
                 (selectedPortValidTypes != null && !selectedPortValidTypes.has(ct)),
               )}
             >
@@ -526,7 +551,8 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
             style={blockBtnStyle(
               (!placePort && cubeType === "Y" && mode === "place") ||
               (mode === "build" && buildCursorBlockType === "Y"),
-              (mode === "build" && !freeBuild && buildValidTypes != null && !buildValidTypes.has("Y" as CubeType)) ||
+              (mode === "build" && !freeBuild && buildCursorBlockType !== "Y"
+                && buildValidTypes != null && !buildValidTypes.has("Y" as CubeType)) ||
               (selectedPortValidTypes != null && !selectedPortValidTypes.has("Y")),
             )}
           >
@@ -557,7 +583,11 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
               style={blockBtnStyle(
                 (pipeVariant === v && mode === "place") ||
                 (mode === "build" && buildActivePipeVariant === v),
-                mode === "build" && !freeBuild && (buildValidPipeVariants == null || !buildValidPipeVariants.has(v)),
+                // Never disable the currently-active pipe variant — it's always
+                // valid by construction (it's what's placed), and showing it as
+                // highlighted + greyed at the same time is a visual contradiction.
+                mode === "build" && !freeBuild && buildActivePipeVariant !== v
+                  && (buildValidPipeVariants == null || !buildValidPipeVariants.has(v)),
               )}
             >
               {v}
