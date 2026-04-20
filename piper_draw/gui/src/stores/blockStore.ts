@@ -1952,14 +1952,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     set((s) => {
       let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
       const newUndetermined = new Map(s.undeterminedCubes);
-      let originCubeEntry: BuildStep["originCube"];
 
-      // Place origin cube on empty canvas (always determined — no ghost)
-      if (isEmptyOrigin) {
-        const originBlock: Block = { pos: cursor, type: srcType };
-        ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, srcKey, originBlock));
-        originCubeEntry = { key: srcKey, block: originBlock };
-      }
+      // Intentionally do NOT place a cube at an empty origin. The slot stays a
+      // port (explicit or implicit at the pipe endpoint). syncPortsAndPromote
+      // below will promote it to a canonical cube only if the new pipe pushes
+      // its attachment count to ≥2.
 
       if (!state.freeBuild) {
         // Apply source determination (commit undetermined source to chosen type)
@@ -1983,17 +1980,6 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       // Place pipe
       const pipeBlock: Block = { pos: pipePos, type: pipeType };
       ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, pipeKey, pipeBlock));
-
-      // Check if origin cube should be undetermined (placed before the pipe was known)
-      let originUndetermined: UndeterminedCubeInfo | undefined;
-      if (isEmptyOrigin && !state.freeBuild) {
-        const originOptions = determineCubeOptions(cursor, blocks);
-        if (!originOptions.determined && originOptions.options.length > 1) {
-          const idx = Math.max(0, originOptions.options.indexOf(srcType));
-          originUndetermined = { options: [...originOptions.options], currentIndex: idx };
-          newUndetermined.set(srcKey, originUndetermined);
-        }
-      }
 
       // Apply dest type change if existing cube needs re-typing
       if (destTypeChange) {
@@ -2043,10 +2029,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         destCursorPos: destPos,
         pipe: { key: pipeKey, block: pipeBlock },
         cube: cubeAdded,
-        originCube: originCubeEntry,
         sourceDetermination,
         sourceRetype,
-        originUndetermined,
         destUndetermined,
         destTypeChange,
         destDetermination,
