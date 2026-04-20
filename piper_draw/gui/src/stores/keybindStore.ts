@@ -23,6 +23,8 @@ export type EditAction =
   | "clearSelection"
   | "flipColors"
   | "holdToDelete"
+  | "rotateCcw"
+  | "rotateCw"
   | "undo"
   | "redo"
   | "stepForward"
@@ -50,6 +52,7 @@ export const ACTIONS: { [M in Mode]: readonly ActionForMode[M][] } = {
   ],
   edit: [
     "selectAll", "deleteSelection", "clearSelection", "flipColors", "holdToDelete",
+    "rotateCcw", "rotateCw",
     "undo", "redo", "stepForward", "stepBack",
   ],
 };
@@ -74,6 +77,8 @@ export const ACTION_LABELS: { [M in Mode]: Record<ActionForMode[M], string> } = 
     clearSelection: "Clear selection / disarm tool",
     flipColors: "Flip colors",
     holdToDelete: "Hold to delete on click",
+    rotateCcw: "Rotate CCW (Z)",
+    rotateCw: "Rotate CW (Z)",
     undo: "Undo",
     redo: "Redo",
     stepForward: "Step forward (iso)",
@@ -101,6 +106,8 @@ export const DEFAULT_BINDINGS: { [M in Mode]: Record<ActionForMode[M], KeyBindin
     clearSelection: { key: "escape" },
     flipColors: { key: "f" },
     holdToDelete: { key: "x" },
+    rotateCcw: { key: "r" },
+    rotateCw: { key: "r", shift: true },
     undo: { key: "z", ctrl: true },
     redo: { key: "z", ctrl: true, shift: true },
     stepForward: { key: "arrowup" },
@@ -248,7 +255,7 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: "piper-draw-keybinds",
-      version: 10,
+      version: 11,
       migrate: () => ({ bindings: cloneDefaults() }),
       merge: (persisted, current) => {
         const p = persisted as Partial<KeybindState>;

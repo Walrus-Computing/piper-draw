@@ -39,7 +39,8 @@ import {
   type KeyBinding,
   type Mode,
 } from "./stores/keybindStore";
-import { wasdToBuildDirection, tqecToThree, type Block, type ViewMode } from "./types";
+import { useValidationStore } from "./stores/validationStore";
+import { wasdToBuildDirection, tqecToThree, posKey, type Block, type ViewMode } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
 import { downloadPng } from "./utils/photoExport";
@@ -567,6 +568,18 @@ export default function App() {
             store.flipSelected();
           }
           return;
+        case "rotateCcw":
+        case "rotateCw": {
+          if (store.selectedKeys.size === 0) return;
+          e.preventDefault();
+          const hovered = store.hoveredGridPos;
+          const pivotOverride = hovered && store.selectedKeys.has(posKey(hovered)) ? hovered : null;
+          const result = store.rotateSelected(action === "rotateCw" ? "cw" : "ccw", pivotOverride);
+          if (!result.ok) {
+            useValidationStore.getState().reportEphemeralError(`Rotation aborted: ${result.reason}`);
+          }
+          return;
+        }
       }
     };
     window.addEventListener("keydown", handler);
