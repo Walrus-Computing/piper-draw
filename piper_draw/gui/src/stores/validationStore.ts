@@ -113,51 +113,58 @@ function parseKey(key: string): Position3D | null {
   return { x, y, z };
 }
 
-let prevBlocks = useBlockStore.getState().blocks;
-useBlockStore.subscribe((s) => {
-  if (s.blocks === prevBlocks) return;
-  const oldBlocks = prevBlocks;
-  prevBlocks = s.blocks;
+/**
+ * Subscribes to blockStore and invalidates or re-runs validation when affected
+ * cubes change. Returns an unsubscribe function — intended to be wired up once
+ * at app start (see `useAutoRevalidate`).
+ */
+export function installAutoRevalidate(): () => void {
+  let prevBlocks = useBlockStore.getState().blocks;
+  return useBlockStore.subscribe((s) => {
+    if (s.blocks === prevBlocks) return;
+    const oldBlocks = prevBlocks;
+    prevBlocks = s.blocks;
 
-  const store = useValidationStore.getState();
-  if (store.status === "idle" || store.status === "loading") return;
+    const store = useValidationStore.getState();
+    if (store.status === "idle" || store.status === "loading") return;
 
-  // For non-invalid statuses (valid, error), dismiss on any change
-  if (store.status !== "invalid" || store.invalidKeys.size === 0) {
-    useValidationStore.getState().dismiss();
-    return;
-  }
-
-  // Find which posKeys changed (added, removed, or type changed)
-  const changedKeys = new Set<string>();
-  for (const [key, block] of s.blocks) {
-    const old = oldBlocks.get(key);
-    if (!old || old.type !== block.type) {
-      changedKeys.add(key);
+    // For non-invalid statuses (valid, error), dismiss on any change
+    if (store.status !== "invalid" || store.invalidKeys.size === 0) {
+      store.dismiss();
+      return;
     }
-  }
-  for (const key of oldBlocks.keys()) {
-    if (!s.blocks.has(key)) {
-      changedKeys.add(key);
-    }
-  }
-  if (changedKeys.size === 0) return;
 
-  // Build affected set: changed keys + their neighbors
-  const affectedKeys = new Set<string>();
-  for (const key of changedKeys) {
-    affectedKeys.add(key);
-    const pos = parseKey(key);
-    if (pos) {
-      for (const [dx, dy, dz] of NEIGHBOR_OFFSETS) {
-        affectedKeys.add(posKey({ x: pos.x + dx, y: pos.y + dy, z: pos.z + dz }));
+    // Find which posKeys changed (added, removed, or type changed)
+    const changedKeys = new Set<string>();
+    for (const [key, block] of s.blocks) {
+      const old = oldBlocks.get(key);
+      if (!old || old.type !== block.type) {
+        changedKeys.add(key);
       }
     }
-  }
+    for (const key of oldBlocks.keys()) {
+      if (!s.blocks.has(key)) {
+        changedKeys.add(key);
+      }
+    }
+    if (changedKeys.size === 0) return;
 
-  // If any change overlaps with an error position, re-run verification
-  const touchesError = [...store.invalidKeys].some((k) => affectedKeys.has(k));
-  if (touchesError) {
-    useValidationStore.getState().validate();
-  }
-});
+    // Build affected set: changed keys + their neighbors
+    const affectedKeys = new Set<string>();
+    for (const key of changedKeys) {
+      affectedKeys.add(key);
+      const pos = parseKey(key);
+      if (pos) {
+        for (const [dx, dy, dz] of NEIGHBOR_OFFSETS) {
+          affectedKeys.add(posKey({ x: pos.x + dx, y: pos.y + dy, z: pos.z + dz }));
+        }
+      }
+    }
+
+    // If any change overlaps with an error position, re-run verification
+    const touchesError = [...store.invalidKeys].some((k) => affectedKeys.has(k));
+    if (touchesError) {
+      store.validate();
+    }
+  });
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 
@@ -29,9 +29,17 @@ import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
 import { BuildModeHints } from "./components/BuildModeHints";
 import { EditModeHints } from "./components/EditModeHints";
-import { KeybindEditor } from "./components/KeybindEditor";
-import { HelpPanel } from "./components/HelpPanel";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+
+// Heavy, rarely-open panels — code-split from the main bundle.
+const KeybindEditor = lazy(() =>
+  import("./components/KeybindEditor").then((m) => ({ default: m.KeybindEditor })),
+);
+const HelpPanel = lazy(() =>
+  import("./components/HelpPanel").then((m) => ({ default: m.HelpPanel })),
+);
 import { useBlockStore } from "./stores/blockStore";
+import { installAutoRevalidate } from "./stores/validationStore";
 import {
   useKeybindStore,
   actionForKey,
@@ -51,99 +59,12 @@ import {
   isoTargetThree,
   isoUpThree,
 } from "./utils/isoView";
+import { makeGridMaterial } from "./shaders/gridShader";
 
 const GRID_SNAP = 3;
 
 const AUTOSAVE_KEY = "piper-draw:autosave:v1";
 const AUTOSAVE_DEBOUNCE_MS = 500;
-
-/**
- * Shader-based grid mesh: dark grey cells at block positions (mod 3 ≡ 0),
- * light grey cells at pipe positions (mod 3 ≡ 1), with light edges on each cell.
- * Uses two world-space basis vectors as uniforms so the same shader can render
- * the floor (TQEC X/Y) or any iso-view plane.
- */
-function makeGridMaterial(): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    uniforms: {
-      // World-space directions whose dot products with vWorldPos give the two
-      // in-plane TQEC coordinates used for the mod-3 checkerboard.
-      axisU: { value: new THREE.Vector3(1, 0, 0) },   // TQEC X
-      axisV: { value: new THREE.Vector3(0, 0, -1) },  // TQEC Y
-      // Center used for the distance fade (orbit target along the in-plane axes).
-      fadeCenter: { value: new THREE.Vector3(0, 0, 0) },
-    },
-    vertexShader: `
-      varying vec3 vWorldPos;
-      void main() {
-        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
-        gl_Position = projectionMatrix * viewMatrix * vec4(vWorldPos, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform vec3 axisU;
-      uniform vec3 axisV;
-      uniform vec3 fadeCenter;
-      varying vec3 vWorldPos;
-      float pmod(float a, float b) { return a - b * floor(a / b); }
-      void main() {
-        float tx = dot(axisU, vWorldPos);
-        float ty = dot(axisV, vWorldPos);
-        float mx = pmod(floor(tx), 3.0);
-        float my = pmod(floor(ty), 3.0);
-
-        bool xBlock = mx < 0.5;
-        bool yBlock = my < 0.5;
-        bool xPipe = mx > 0.5;
-        bool yPipe = my > 0.5;
-
-        bool isBlock = xBlock && yBlock;
-        bool isPipe = (xPipe && yBlock) || (xBlock && yPipe);
-
-        if (!isBlock && !isPipe) discard;
-
-        float fx = fract(tx);
-        float fy = fract(ty);
-        float edgeWidth = 0.03;
-
-        float edgeX, edgeY;
-        if (isPipe && xPipe) {
-          float px = pmod(tx, 3.0) - 1.0;
-          edgeX = min(px, 2.0 - px);
-        } else {
-          edgeX = min(fx, 1.0 - fx);
-        }
-        if (isPipe && yPipe) {
-          float py = pmod(ty, 3.0) - 1.0;
-          edgeY = min(py, 2.0 - py);
-        } else {
-          edgeY = min(fy, 1.0 - fy);
-        }
-
-        float edgeDist = min(edgeX, edgeY);
-        bool onEdge = edgeDist < edgeWidth;
-
-        if (onEdge) {
-          gl_FragColor = vec4(0.85, 0.85, 0.85, 0.35);
-        } else if (isBlock) {
-          gl_FragColor = vec4(0.45, 0.45, 0.45, 0.18);
-        } else {
-          gl_FragColor = vec4(0.65, 0.65, 0.65, 0.12);
-        }
-
-        // Fade by distance from center along in-plane axes only.
-        vec3 d = vWorldPos - fadeCenter;
-        float du = dot(axisU, d);
-        float dv = dot(axisV, d);
-        float dist = sqrt(du * du + dv * dv);
-        float fade = 1.0 - smoothstep(100.0, 300.0, dist);
-        gl_FragColor.a *= fade;
-      }
-    `,
-  });
-}
 
 const gridMaterial = makeGridMaterial();
 
@@ -169,9 +90,30 @@ function CheckerboardGrid() {
     }
   }, [viewMode]);
 
+  // Camera/target state we compare against each frame to decide whether the
+  // grid mesh actually needs repositioning. Skipping unchanged frames spares
+  // the dot products, trig, and uniform writes when the user is idle.
+  const prevCamPos = useRef(new THREE.Vector3(NaN, NaN, NaN));
+  const prevCamQuat = useRef(new THREE.Quaternion(NaN, NaN, NaN, NaN));
+  const prevOrbitTarget = useRef(new THREE.Vector3(NaN, NaN, NaN));
+  const prevViewModeKey = useRef<string>("");
+
   useFrame(({ camera }) => {
     const mesh = ref.current;
     if (!mesh) return;
+
+    const vmKey = viewMode.kind === "persp" ? "persp" : `iso:${viewMode.axis}:${viewMode.slice}`;
+    const ot: THREE.Vector3 | undefined = controls?.target;
+    const camUnchanged =
+      camera.position.equals(prevCamPos.current) &&
+      camera.quaternion.equals(prevCamQuat.current);
+    const targetUnchanged = ot ? ot.equals(prevOrbitTarget.current) : true;
+    if (camUnchanged && targetUnchanged && prevViewModeKey.current === vmKey) return;
+    prevCamPos.current.copy(camera.position);
+    prevCamQuat.current.copy(camera.quaternion);
+    if (ot) prevOrbitTarget.current.copy(ot);
+    prevViewModeKey.current = vmKey;
+
     const u = gridMaterial.uniforms;
     if (viewMode.kind === "persp") {
       if (cameraGroundPoint(camera, target.current)) {
@@ -183,7 +125,6 @@ function CheckerboardGrid() {
       return;
     }
     // Iso mode: align mesh with active slice plane; follow orbit target along in-plane axes.
-    const ot: THREE.Vector3 | undefined = controls?.target;
     const axis = viewMode.axis;
     const slice = viewMode.slice;
     if (axis === "x") {
@@ -626,6 +567,8 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => installAutoRevalidate(), []);
+
   useEffect(() => {
     let timeout: ReturnType<typeof setTimeout> | null = null;
     const flush = (blocks: Map<string, Block>) => {
@@ -704,13 +647,18 @@ export default function App() {
       >
         ?
       </button>
-      {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
+      <Suspense fallback={null}>
+        {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
+      </Suspense>
       <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />
       <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />
-      {keybindEditorMode && (
-        <KeybindEditor initialMode={keybindEditorMode} onClose={() => setKeybindEditorMode(null)} />
-      )}
+      <Suspense fallback={null}>
+        {keybindEditorMode && (
+          <KeybindEditor initialMode={keybindEditorMode} onClose={() => setKeybindEditorMode(null)} />
+        )}
+      </Suspense>
       <PlacementWarning toolbarRef={toolbarRef} />
+      <ErrorBoundary>
       <Canvas
         gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping, preserveDrawingBuffer: true }}
         onContextMenu={(e) => e.preventDefault()}
@@ -741,6 +689,7 @@ export default function App() {
         <ViewportCamera controlsRef={controlsRef} />
         <NavControlsModifier controlsRef={controlsRef} />
       </Canvas>
+      </ErrorBoundary>
       <SelectModePointer threeStateRef={threeStateRef} controlsRef={controlsRef} />
     </>
   );

@@ -10,7 +10,7 @@ dependencies = [
     "stim>=1.15.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
-    "tqec @ git+https://github.com/tqec/tqec.git",
+    "tqec @ git+https://github.com/tqec/tqec.git@bdeb26de5b160e2a1818dd9562448d2cfbc4007b",
 ]
 
 [dependency-groups]
@@ -19,7 +19,7 @@ dev = [
     "pytest-randomly>=4.0.1",
     "ipython>=9.12.0",
     "matplotlib>=3.10.8",
-    "tqec @ git+https://github.com/tqec/tqec.git",
+    "tqec @ git+https://github.com/tqec/tqec.git@bdeb26de5b160e2a1818dd9562448d2cfbc4007b",
 ]
 
 [tool.setuptools.packages.find]
