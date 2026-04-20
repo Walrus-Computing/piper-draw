@@ -11,6 +11,7 @@ export type BuildAction =
   | "undo"
   | "cycleBlock"
   | "cyclePipe"
+  | "deleteAtCursor"
   | "exitBuild";
 
 export type KeyBinding = {
@@ -28,6 +29,7 @@ export const BUILD_ACTIONS: BuildAction[] = [
   "undo",
   "cycleBlock",
   "cyclePipe",
+  "deleteAtCursor",
   "exitBuild",
 ];
 
@@ -41,6 +43,7 @@ export const ACTION_LABELS: Record<BuildAction, string> = {
   undo: "Undo step",
   cycleBlock: "Cycle block",
   cyclePipe: "Cycle pipe",
+  deleteAtCursor: "Delete block at cursor",
   exitBuild: "Exit build",
 };
 
@@ -70,6 +73,7 @@ export const DEFAULT_BINDINGS: Record<BuildAction, KeyBinding> = {
   undo: { key: "q", displayLabel: "Q" },
   cycleBlock: { key: "c", displayLabel: "C" },
   cyclePipe: { key: "r", displayLabel: "R" },
+  deleteAtCursor: { key: "delete", displayLabel: "Delete" },
   exitBuild: { key: "escape", displayLabel: "Esc" },
 };
 
@@ -129,7 +133,7 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: "piper-draw-keybinds",
-      version: 4,
+      version: 5,
       migrate: () => {
         // Always reset on version change to pick up renamed/added actions
         return { bindings: { ...DEFAULT_BINDINGS } };

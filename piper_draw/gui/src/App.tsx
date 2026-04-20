@@ -347,6 +347,9 @@ export default function App() {
             case "cyclePipe":
               store.cyclePipe();
               return;
+            case "deleteAtCursor":
+              store.deleteAtBuildCursor();
+              return;
             case "exitBuild":
               store.setMode("place");
               return;

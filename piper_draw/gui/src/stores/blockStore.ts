@@ -50,6 +50,8 @@ const PIPE_VARIANT_CANONICAL: Record<PipeVariant, BlockType> = {
 /** Captures one keyboard-build step for atomic undo. */
 export type BuildStep = {
   prevCursorPos: Position3D;
+  /** Cursor destination after the step (set on redo). */
+  destCursorPos: Position3D;
   /** Pipe placed (null if pipe already existed). */
   pipe: { key: string; block: Block } | null;
   /** Cube placed at destination (null if cube already existed). */
@@ -72,6 +74,8 @@ export type BuildStep = {
   destTypeChange?: { key: string; prevType: CubeType; newType: CubeType };
   /** If an existing undetermined destination became determined during this step. */
   destDetermination?: { key: string; prevUndeterminedInfo: UndeterminedCubeInfo };
+  /** Cubes inserted by syncPortsAndPromote because the new pipe pushed a port to ≥2 attachments. */
+  autoPromoted?: Array<{ key: string; block: Block; wasUserPort: boolean }>;
 };
 
 type UndoCommand =
@@ -87,7 +91,7 @@ type UndoCommand =
       retyped?: Array<{ cubeKey: string; oldType: CubeType; newType: CubeType;
         oldUndetermined?: UndeterminedCubeInfo; newUndetermined?: UndeterminedCubeInfo }> }
   | { kind: "cube-cycle"; cubeKey: string; cubePos: Position3D;
-      oldPlacedType: CubeType | "Y" | null; newPlacedType: CubeType | "Y";
+      oldPlacedType: CubeType | "Y" | null; newPlacedType: CubeType | "Y" | null;
       oldPipes?: Array<{ key: string; oldType: PipeType; newType: PipeType }>;
       oldUndetermined?: UndeterminedCubeInfo; newUndetermined?: UndeterminedCubeInfo }
   | { kind: "replace"; key: string; oldBlock: Block; newBlock: Block }
@@ -167,8 +171,9 @@ interface BlockStore {
   // Build mode actions
   buildMove: (direction: BuildDirection) => boolean;
   undoBuildStep: () => void;
-  cycleBlock: () => void;
-  cyclePipe: () => void;
+  cycleBlock: (target?: CubeType | "Y" | null) => void;
+  cyclePipe: (target?: PipeVariant) => void;
+  deleteAtBuildCursor: () => void;
   moveBuildCursor: (pos: Position3D) => void;
   clearCameraSnap: () => void;
 
@@ -731,6 +736,22 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const step = cmd.step;
         let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
         const newUndetermined = new Map(state.undeterminedCubes);
+        let nextPortPositions = state.portPositions;
+
+        // Roll back any auto-promoted cubes first (they were inserted last in buildMove
+        // so they must be removed first to keep the spatial index consistent).
+        if (step.autoPromoted && step.autoPromoted.length > 0) {
+          for (const ap of step.autoPromoted) {
+            const cur = blocks.get(ap.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, ap.key, cur));
+            newUndetermined.delete(ap.key);
+          }
+          const userPortKeys = step.autoPromoted.filter(ap => ap.wasUserPort).map(ap => ap.key);
+          if (userPortKeys.length > 0) {
+            nextPortPositions = new Set(state.portPositions);
+            for (const k of userPortKeys) nextPortPositions.add(k);
+          }
+        }
 
         // Remove dest cube
         if (step.cube) {
@@ -792,6 +813,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           buildCursor: state.mode === "build" ? step.prevCursorPos : state.buildCursor,
           buildHistory: newBuildHistory,
           undeterminedCubes: newUndetermined,
+          portPositions: nextPortPositions,
         };
       }
 
@@ -1039,6 +1061,20 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, step.cube.key, step.cube.block));
           if (step.destUndetermined) newUndetermined.set(step.cube.key, step.destUndetermined);
         }
+        // Re-apply auto-promoted port → cube replacements
+        let nextPortPositionsRedo = state.portPositions;
+        if (step.autoPromoted && step.autoPromoted.length > 0) {
+          for (const ap of step.autoPromoted) {
+            if (!blocks.has(ap.key)) {
+              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, ap.key, ap.block));
+            }
+          }
+          const userPortKeys = step.autoPromoted.filter(ap => ap.wasUserPort).map(ap => ap.key);
+          if (userPortKeys.length > 0) {
+            nextPortPositionsRedo = new Set(state.portPositions);
+            for (const k of userPortKeys) nextPortPositionsRedo.delete(k);
+          }
+        }
 
         const newBuildHistory = [...state.buildHistory, step];
 
@@ -1048,9 +1084,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           history: [...state.history, cmd],
           future: newFuture,
           hoveredGridPos: null,
-          buildCursor: step.cube ? step.cube.block.pos : state.buildCursor,
+          buildCursor: step.destCursorPos,
           buildHistory: newBuildHistory,
           undeterminedCubes: newUndetermined,
+          portPositions: nextPortPositionsRedo,
         };
       }
 
@@ -1086,8 +1123,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (cubeBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, cubeBlock));
         }
-        // Re-add new cube
-        ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, { pos: cmd.cubePos, type: cmd.newPlacedType }));
+        // Re-add new cube (unless cycling ended at the port slot)
+        if (cmd.newPlacedType) {
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, { pos: cmd.cubePos, type: cmd.newPlacedType }));
+        }
         if (cmd.oldPipes) {
           for (const pu of cmd.oldPipes) {
             const pb = blocks.get(pu.key);
@@ -1342,65 +1381,21 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       return false;
     };
 
-    // If pipe already exists, move cursor to destination (traverse) or
-    // fill in a missing cube (e.g. cube was deleted leaving an open pipe end).
+    // If pipe already exists, just move the cursor onto the destination.
+    // The destination may be a cube (we land on it) or an open port (cursor
+    // sits on the port ghost — the user can extend the build from there).
     const existingPipe = state.blocks.get(pipeKey);
     if (existingPipe) {
       const existingDest = state.blocks.get(destKey);
-      if (existingDest && !isPipeType(existingDest.type)) {
-        const azimuth = cameraAzimuthForDirection(direction);
-        set({
-          buildCursor: destPos,
-          cameraSnapTarget: { azimuth, targetPos: destPos },
-          lastBuildAxis: direction.tqecAxis,
-          hoveredInvalidReason: null,
-        });
-        return true;
-      }
-      if (!existingDest) {
-        // Pipe exists but destination cube is missing — place a cube to fill the gap.
-        if (!isValidPos(destPos, "XZZ")) return reject("Invalid destination position");
-        if (hasBlockOverlap(destPos, "XZZ", state.blocks, state.spatialIndex)) return reject("Destination would overlap existing blocks");
-        set((s) => {
-          let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
-          const newUndetermined = new Map(s.undeterminedCubes);
-          const destOptions = determineCubeOptions(destPos, blocks);
-          let destType: CubeType;
-          let destUndetermined: UndeterminedCubeInfo | undefined;
-          if (destOptions.determined) {
-            destType = destOptions.type;
-          } else if (destOptions.options.length > 0) {
-            destType = destOptions.options[0];
-          } else {
-            // Fallback — pick type from source if available
-            const src = blocks.get(srcKey);
-            destType = (src && !isPipeType(src.type) && src.type !== "Y" ? src.type : "XZZ") as CubeType;
-          }
-          const destBlock: Block = { pos: destPos, type: destType };
-          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, destKey, destBlock));
-          const step: BuildStep = {
-            prevCursorPos: cursor,
-            pipe: null,
-            cube: { key: destKey, block: destBlock },
-            destUndetermined,
-          };
-          const azimuth = cameraAzimuthForDirection(direction);
-          return {
-            blocks,
-            hiddenFaces,
-            buildCursor: destPos,
-            buildHistory: [...s.buildHistory, step],
-            undeterminedCubes: newUndetermined,
-            cameraSnapTarget: { azimuth, targetPos: destPos },
-            lastBuildAxis: direction.tqecAxis,
-            history: [...s.history, { kind: "build-step" as const, step }].slice(-MAX_HISTORY),
-            future: [],
-            hoveredInvalidReason: null,
-          };
-        });
-        return true;
-      }
-      return reject();
+      if (existingDest && isPipeType(existingDest.type)) return reject();
+      const azimuth = cameraAzimuthForDirection(direction);
+      set({
+        buildCursor: destPos,
+        cameraSnapTarget: { azimuth, targetPos: destPos },
+        lastBuildAxis: direction.tqecAxis,
+        hoveredInvalidReason: null,
+      });
+      return true;
     }
 
     const srcBlock = state.blocks.get(srcKey);
@@ -1424,9 +1419,20 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
     } else {
       if (isEmptyOrigin) {
-        // First step on empty canvas — pick a valid cube type for this build axis
-        const validOrigin = CUBE_TYPES.filter(ct => inferPipeType(ct, direction.tqecAxis) !== null);
-        if (validOrigin.length === 0) return false;
+        // Empty origin covers two cases:
+        //   (a) first step on an empty canvas — no adjacent pipes, any type works
+        //   (b) cursor is sitting on an implicit port (open pipe endpoint) — the
+        //       existing pipe(s) constrain which cube types are legal here
+        // Use determineCubeOptions to get the constrained candidate set, then
+        // pick the first option that can also pipe on the new build direction.
+        const opts = determineCubeOptions(cursor, state.blocks);
+        const candidates: readonly CubeType[] = opts.determined
+          ? [opts.type]
+          : opts.options.length > 0
+            ? opts.options
+            : CUBE_TYPES;
+        const validOrigin = candidates.filter(ct => inferPipeType(ct, direction.tqecAxis) !== null);
+        if (validOrigin.length === 0) return reject("Cannot build in this direction from here");
         srcType = validOrigin[0];
       } else if (srcBlock!.type === "Y" || isPipeType(srcBlock!.type)) {
         return false;
@@ -1633,36 +1639,35 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         newUndetermined.delete(destKey);
       }
 
-      // Handle destination
-      let cubeAdded: BuildStep["cube"] = null;
-      let destUndetermined: UndeterminedCubeInfo | undefined;
+      // Handle destination: leave it as an implicit port (open pipe endpoint).
+      // The port auto-promotes to a real cube only when a second pipe attaches,
+      // via syncPortsAndPromote. If the destination already had a cube, we've
+      // already applied any necessary destTypeChange above — nothing to do here.
+      const cubeAdded: BuildStep["cube"] = null;
+      const destUndetermined: UndeterminedCubeInfo | undefined = undefined;
 
-      if (!existingDest) {
-        // Determine destination cube type
-        let destType: CubeType;
-        if (state.freeBuild) {
-          // In free build mode, use same type as source — no inference from pipes
-          destType = srcType;
-        } else {
-          const destOptions = determineCubeOptions(destPos, blocks);
-          if (destOptions.determined) {
-            destType = destOptions.type;
-          } else if (destOptions.options.length > 0) {
-            destType = destOptions.options[0];
-            destUndetermined = { options: [...destOptions.options], currentIndex: 0 };
-            newUndetermined.set(destKey, destUndetermined);
-          } else {
-            // Shouldn't happen — pipe was valid
-            destType = srcType;
-          }
+      // Auto-promote any port endpoint that the new pipe pushed to ≥2 attachments.
+      // This is what makes "build into a slot constrained by existing pipes" land on
+      // a real cube instead of leaving the cursor on a port.
+      let nextPortPositions = s.portPositions;
+      let autoPromoted: BuildStep["autoPromoted"];
+      const sync = syncPortsAndPromote(blocks, s.spatialIndex, hiddenFaces, s.portPositions);
+      if (sync.addedEntries.length > 0) {
+        blocks = sync.blocks;
+        hiddenFaces = sync.hiddenFaces;
+        const promotedSet = new Set(sync.promotedPortKeys);
+        autoPromoted = sync.addedEntries.map(e => ({
+          key: e.key, block: e.block, wasUserPort: promotedSet.has(e.key),
+        }));
+        if (sync.promotedPortKeys.length > 0) {
+          nextPortPositions = new Set(s.portPositions);
+          for (const k of sync.promotedPortKeys) nextPortPositions.delete(k);
         }
-        const destBlock: Block = { pos: destPos, type: destType };
-        ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, destKey, destBlock));
-        cubeAdded = { key: destKey, block: destBlock };
       }
 
       const step: BuildStep = {
         prevCursorPos: cursor,
+        destCursorPos: destPos,
         pipe: { key: pipeKey, block: pipeBlock },
         cube: cubeAdded,
         originCube: originCubeEntry,
@@ -1672,6 +1677,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         destUndetermined,
         destTypeChange,
         destDetermination,
+        autoPromoted,
       };
 
       const azimuth = cameraAzimuthForDirection(direction);
@@ -1682,6 +1688,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         buildCursor: destPos,
         buildHistory: [...s.buildHistory, step],
         undeterminedCubes: newUndetermined,
+        portPositions: nextPortPositions,
         cameraSnapTarget: { azimuth, targetPos: destPos },
         lastBuildAxis: direction.tqecAxis,
         history: [...s.history, { kind: "build-step" as const, step }].slice(-MAX_HISTORY),
@@ -1703,6 +1710,21 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
       const newUndetermined = new Map(s.undeterminedCubes);
+      let nextPortPositions = s.portPositions;
+
+      // Roll back any auto-promoted cubes first.
+      if (step.autoPromoted && step.autoPromoted.length > 0) {
+        for (const ap of step.autoPromoted) {
+          const cur = blocks.get(ap.key);
+          if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, ap.key, cur));
+          newUndetermined.delete(ap.key);
+        }
+        const userPortKeys = step.autoPromoted.filter(ap => ap.wasUserPort).map(ap => ap.key);
+        if (userPortKeys.length > 0) {
+          nextPortPositions = new Set(s.portPositions);
+          for (const k of userPortKeys) nextPortPositions.add(k);
+        }
+      }
 
       // Remove destination cube if we placed it
       if (step.cube) {
@@ -1780,6 +1802,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           buildCursor: step.prevCursorPos,
           buildHistory: newBuildHistory,
           undeterminedCubes: newUndetermined,
+          portPositions: nextPortPositions,
           cameraSnapTarget: { azimuth: null, targetPos: step.prevCursorPos },
           lastBuildAxis: null,
           history: newHistory,
@@ -1794,6 +1817,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         buildCursor: step.prevCursorPos,
         buildHistory: newBuildHistory,
         undeterminedCubes: newUndetermined,
+        portPositions: nextPortPositions,
         cameraSnapTarget: { azimuth: null, targetPos: step.prevCursorPos },
         lastBuildAxis: null,
         hoveredGridPos: null,
@@ -1801,7 +1825,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     });
   },
 
-  cycleBlock: () =>
+  cycleBlock: (target) =>
     set((state) => {
       if (state.mode !== "build" || !state.buildCursor) return state;
       const cursor = state.buildCursor;
@@ -1831,7 +1855,6 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       if (state.freeBuild) {
         cubeOptions = [...CUBE_TYPES, "Y"];
       } else {
-        if (pipeCount > 1) return state;
         cubeOptions = pipeCount === 0
           ? [...CUBE_TYPES]
           : (() => {
@@ -1842,30 +1865,31 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
       if (cubeOptions.length === 0) return state;
 
-      // Cycle: undetermined → type1 → type2 → ... → Y (if valid) → undetermined
-      // "undetermined" is represented by null in the cycle list.
-      // When at undetermined, the block stays as-is but is in undeterminedCubes.
-      const cycle: (CubeType | "Y" | null)[] = [null, ...cubeOptions];
+      // Port (null) is a cycle slot only at positions where it's a stable state
+      // (0 or 1 attached pipes). With ≥2 pipes the port would auto-promote, so
+      // exclude port from the cycle and offer only real cube options.
+      const portAllowed = pipeCount < 2;
+      const cycle: (CubeType | "Y" | null)[] = portAllowed
+        ? [null, ...cubeOptions]
+        : [...cubeOptions];
 
-      // Find current position in cycle
       const existingBlock = state.blocks.get(cursorKey);
-      const isUndetermined = state.undeterminedCubes.has(cursorKey);
-      const existingType = existingBlock && !isPipeType(existingBlock.type)
+      const existingType: CubeType | "Y" | null = existingBlock && !isPipeType(existingBlock.type)
         ? existingBlock.type as CubeType | "Y" : null;
 
-      let currentIdx: number;
-      if (!existingBlock || isUndetermined) {
-        // No block or undetermined → position 0 (undetermined)
-        currentIdx = 0;
+      let placeType: CubeType | "Y" | null;
+      if (target !== undefined) {
+        // Explicit target (e.g. toolbar click in build mode) must be a valid option.
+        if (!cycle.includes(target)) return state;
+        placeType = target;
       } else {
-        // Determined block → find in cycle
-        currentIdx = cycle.indexOf(existingType);
-        if (currentIdx < 0) currentIdx = 0;
+        const currentIdx = cycle.indexOf(existingType);
+        const nextIdx = (currentIdx + 1) % cycle.length;
+        placeType = cycle[nextIdx];
       }
 
-      const nextIdx = (currentIdx + 1) % cycle.length;
-      const nextType = cycle[nextIdx];
-      const isNextUndetermined = nextIdx === 0;
+      // No-op if nothing changes (e.g., no cube options and we'd stay at port).
+      if (existingType === placeType) return state;
 
       let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
       const oldUndetermined = state.undeterminedCubes.get(cursorKey);
@@ -1876,23 +1900,22 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cursorKey, existingBlock));
       }
 
-      // Determine what block to place
-      let placeType: CubeType | "Y";
-      if (isNextUndetermined) {
-        // Cycling back to undetermined — place first valid CubeType as placeholder
-        const firstCube = cubeOptions.find((t): t is CubeType => t !== "Y");
-        if (!firstCube) return state; // only Y is valid, can't be undetermined
-        placeType = firstCube;
-      } else {
-        placeType = nextType!;
+      // If cycling to the port slot, there's no new cube to place — the open
+      // pipe endpoint (or portPositions marker) will render the port ghost.
+      const newBlock: Block | null = placeType !== null ? { pos: cursor, type: placeType } : null;
+      if (newBlock) {
+        ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock));
       }
 
-      const newBlock: Block = { pos: cursor, type: placeType };
-      ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock));
-
-      // Update adjacent pipes to match new cube type (skip for Y — Y doesn't change pipes)
+      // Update adjacent pipes to match new cube type (skip for Y or port — neither changes pipes)
       // In free build mode, skip pipe retyping entirely — just change the cube
-      if (placeType !== "Y" && !state.freeBuild) {
+      if (newBlock && placeType !== "Y" && !state.freeBuild) {
+        const revert = () => {
+          ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock));
+          if (existingBlock) {
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, existingBlock));
+          }
+        };
         for (let axis = 0; axis < 3; axis++) {
           for (const pipeOffset of [1, -2]) {
             const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
@@ -1906,13 +1929,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
             const openAxis = base.indexOf("O");
             if (openAxis !== axis) continue;
 
-            const newPipe = inferPipeType(placeType, axis as 0 | 1 | 2);
+            const newPipe = inferPipeType(placeType as CubeType, axis as 0 | 1 | 2);
             if (!newPipe) {
-              // Can't create valid pipe — reject cycle, revert
-              ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock));
-              if (existingBlock) {
-                ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, existingBlock));
-              }
+              revert();
               return state;
             }
             const newPipeType = hadamard ? (newPipe + "H") as PipeType : newPipe;
@@ -1922,11 +1941,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
             const tmpBlocks = new Map(blocks);
             tmpBlocks.set(nKey, { pos: neighbor.pos, type: newPipeType });
             if (hasPipeColorConflict(newPipeType, neighbor.pos, tmpBlocks)) {
-              // Conflict — reject cycle, revert
-              ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock));
-              if (existingBlock) {
-                ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, existingBlock));
-              }
+              revert();
               return state;
             }
             pipeUpdates.push({ key: nKey, oldType: neighbor.type as PipeType, newType: newPipeType });
@@ -1941,27 +1956,15 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         }
       }
 
-      // Update undetermined state — recompute from current blocks (pipes may have changed)
+      // Clear any leftover undetermined entry — cycling always commits to a specific state.
       const newUndetermined = new Map(state.undeterminedCubes);
-      let newUndeterminedInfo: UndeterminedCubeInfo | undefined;
-      if (isNextUndetermined) {
-        const freshOpts = determineCubeOptions(cursor, blocks);
-        const freshCubeOpts = freshOpts.determined ? [] : freshOpts.options;
-        if (freshCubeOpts.length > 1) {
-          newUndeterminedInfo = { options: [...freshCubeOpts], currentIndex: 0 };
-          newUndetermined.set(cursorKey, newUndeterminedInfo);
-        } else {
-          newUndetermined.delete(cursorKey);
-        }
-      } else {
-        newUndetermined.delete(cursorKey);
-      }
+      newUndetermined.delete(cursorKey);
 
       const cmd: UndoCommand = {
         kind: "cube-cycle", cubeKey: cursorKey, cubePos: cursor,
         oldPlacedType: existingType, newPlacedType: placeType,
         oldPipes: pipeUpdates.length > 0 ? pipeUpdates : undefined,
-        oldUndetermined, newUndetermined: newUndeterminedInfo,
+        oldUndetermined, newUndetermined: undefined,
       };
       return {
         blocks,
@@ -1972,17 +1975,26 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       };
     }),
 
-  cyclePipe: () => {
+  cyclePipe: (target) => {
     const state = get();
     if (state.mode !== "build" || !state.buildCursor) return;
 
     const cursor = state.buildCursor;
     const cursorCoords: [number, number, number] = [cursor.x, cursor.y, cursor.z];
 
-    // Find adjacent pipes where either end (cursor or far cube) is undetermined
-    // In free build mode, any adjacent pipe is eligible for cycling
+    // Find adjacent pipes where either end is an "ambiguous" slot whose cube
+    // type isn't uniquely fixed (a port, or a multi-option cube). Cycling this
+    // pipe means committing the neighbor to a different choice from its options.
+    // In free build mode, any adjacent pipe is eligible for cycling.
     const cursorKey = posKey(cursor);
-    const cursorUndetermined = state.undeterminedCubes.has(cursorKey);
+    const isAmbiguousEnd = (key: string): boolean => {
+      const b = state.blocks.get(key);
+      if (!b) return true;
+      if (isPipeType(b.type) || b.type === "Y") return false;
+      const opts = determineCubeOptions(b.pos, state.blocks);
+      return !opts.determined && opts.options.length > 1;
+    };
+    const cursorAmbiguous = isAmbiguousEnd(cursorKey);
     const candidatePipes: { key: string; block: Block }[] = [];
     for (let axis = 0; axis < 3; axis++) {
       for (const offset of [1, -2]) {
@@ -1996,11 +2008,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (state.freeBuild) {
           candidatePipes.push({ key: pk, block: pipe });
         } else {
-          // Check if the far cube is undetermined
           const fc: [number, number, number] = [cursorCoords[0], cursorCoords[1], cursorCoords[2]];
           fc[axis] += offset === 1 ? 3 : -3;
           const farKey = posKey({ x: fc[0], y: fc[1], z: fc[2] });
-          if (cursorUndetermined || state.undeterminedCubes.has(farKey)) {
+          if (cursorAmbiguous || isAmbiguousEnd(farKey)) {
             candidatePipes.push({ key: pk, block: pipe });
           }
         }
@@ -2043,62 +2054,35 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const nKey = posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
           const neighbor = tmpBlocks.get(nKey);
           if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
+          // Committed cube neighbours constrain the pipe: the cube's current type
+          // must remain a valid option after the candidate pipe is in place.
           const options = determineCubeOptions(neighbor.pos, tmpBlocks);
-          if (!options.determined && options.options.length === 0) { valid = false; break; }
+          const currentType = neighbor.type as CubeType;
+          if (options.determined) {
+            if (options.type !== currentType) { valid = false; break; }
+          } else if (!options.options.includes(currentType)) {
+            valid = false; break;
+          }
         }
         if (valid) validPipes.push(candidate);
       }
     }
 
-    if (validPipes.length <= 1) return;
-
-    // Cycle to the next valid pipe type
-    const currentIdx = validPipes.indexOf(oldPipeType);
-    const newPipeType = validPipes[(currentIdx + 1) % validPipes.length];
+    // Pick the target pipe type — explicit (toolbar click) or next-in-cycle (R key).
+    let newPipeType: PipeType;
+    if (target !== undefined) {
+      const candidate = VARIANT_AXIS_MAP[target][openAxis];
+      if (!validPipes.includes(candidate)) return;
+      newPipeType = candidate;
+    } else {
+      if (validPipes.length <= 1) return;
+      const currentIdx = validPipes.indexOf(oldPipeType);
+      newPipeType = validPipes[(currentIdx + 1) % validPipes.length];
+    }
     if (newPipeType === oldPipeType) return;
 
-    // --- Dry-run pass: validate all neighbors using a temp blocks map ---
-    // No spatial index mutations happen here.
-    // In free build mode, skip validation and don't auto-retype neighbors.
-    const tmpBlocks = new Map(state.blocks);
-    tmpBlocks.set(pipeKey, { pos: pipeBlock.pos, type: newPipeType });
-
-    type RetypeEntry = { key: string; pos: Position3D; oldType: CubeType; newType: CubeType;
-      oldUndetermined?: UndeterminedCubeInfo; newUndetermined?: UndeterminedCubeInfo };
-    const planned: RetypeEntry[] = [];
-
-    if (!state.freeBuild) {
-      for (const offset of [-1, 2]) {
-        const nCoords: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
-        nCoords[openAxis] += offset;
-        const nKey = posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
-        const neighbor = tmpBlocks.get(nKey);
-        if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
-
-        const cubeInfo = state.undeterminedCubes.get(nKey);
-        const newOptions = determineCubeOptions(neighbor.pos, tmpBlocks);
-        const currentType = neighbor.type as CubeType;
-
-        if (newOptions.determined) {
-          if (newOptions.type !== currentType) {
-            planned.push({ key: nKey, pos: neighbor.pos, oldType: currentType, newType: newOptions.type,
-              oldUndetermined: cubeInfo, newUndetermined: undefined });
-          }
-        } else if (newOptions.options.length > 0) {
-          if (!newOptions.options.includes(currentType)) {
-            const newInfo = cubeInfo ? { options: [...newOptions.options], currentIndex: 0 } : undefined;
-            planned.push({ key: nKey, pos: neighbor.pos, oldType: currentType, newType: newOptions.options[0],
-              oldUndetermined: cubeInfo, newUndetermined: newInfo });
-          }
-          // else: current type still valid, no retype needed
-        } else {
-          // No valid type — reject Hadamard toggle. No mutations happened.
-          return;
-        }
-      }
-    }
-
-    // --- All validated, now apply actual mutations ---
+    // Filter above already guarantees committed neighbour cubes remain valid
+    // under newPipeType, so we never retype neighbours here.
     set((s) => {
       let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
       const newUndetermined = new Map(s.undeterminedCubes);
@@ -2108,27 +2092,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       const newPipeBlock: Block = { pos: pipeBlock.pos, type: newPipeType };
       ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, pipeKey, newPipeBlock));
 
-      // Apply planned retypes
-      const retyped: Array<{ cubeKey: string; oldType: CubeType; newType: CubeType;
-        oldUndetermined?: UndeterminedCubeInfo; newUndetermined?: UndeterminedCubeInfo }> = [];
-      for (const p of planned) {
-        const cur = blocks.get(p.key);
-        if (cur) {
-          ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, p.key, cur));
-          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, p.key, { pos: p.pos, type: p.newType }));
-        }
-        if (p.newUndetermined) newUndetermined.set(p.key, p.newUndetermined);
-        else if (p.oldUndetermined) newUndetermined.delete(p.key);
-        retyped.push({ cubeKey: p.key, oldType: p.oldType, newType: p.newType,
-          oldUndetermined: p.oldUndetermined, newUndetermined: p.newUndetermined });
-      }
-
-      // Update undetermined info for neighbors that didn't need retyping but are undetermined
+      // Refresh undetermined info for the two neighbour cubes (their option set
+      // may have shrunk now that the adjacent pipe is committed to a type).
       for (const offset of [-1, 2]) {
         const nCoords: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
         nCoords[openAxis] += offset;
         const nKey = posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
-        if (planned.some(p => p.key === nKey)) continue; // already handled
         const cubeInfo = newUndetermined.get(nKey);
         if (!cubeInfo) continue;
         const neighbor = blocks.get(nKey);
@@ -2142,8 +2111,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         }
       }
 
-      const cmd: UndoCommand = { kind: "pipe-cycle", pipeKey, oldType: oldPipeType, newType: newPipeType,
-        retyped: retyped.length > 0 ? retyped : undefined };
+      const cmd: UndoCommand = { kind: "pipe-cycle", pipeKey, oldType: oldPipeType, newType: newPipeType };
       return {
         blocks,
         hiddenFaces,
@@ -2152,6 +2120,16 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         future: [],
       };
     });
+  },
+
+  deleteAtBuildCursor: () => {
+    const state = get();
+    if (state.mode !== "build" || !state.buildCursor) return;
+    const key = posKey(state.buildCursor);
+    if (!state.blocks.has(key)) return;
+    // Delegate to removeBlock for cascade-delete handling and undo bookkeeping.
+    // The global Ctrl-Z reverts it; Q (undoBuildStep) does not, by design.
+    get().removeBlock(state.buildCursor);
   },
 
   moveBuildCursor: (pos) =>
