@@ -237,7 +237,7 @@ function PortSelectionHighlight({ threePos }: { threePos: [number, number, numbe
 }
 
 /**
- * Non-interactive ghost cube (for delete/build modes).
+ * Non-interactive ghost cube (for delete tool / Keyboard Build mode).
  */
 function StaticGhost({ threePos }: { threePos: [number, number, number] }) {
   return (
@@ -260,7 +260,7 @@ function StaticGhost({ threePos }: { threePos: [number, number, number] }) {
  * Renders white semi-transparent ghost cubes ("ports") at open pipe endpoints.
  * - Place mode: hovering shows placement preview; clicking places the block.
  * - Select mode: clicking adds the port to `selectedPortPositions` (shift-click = additive).
- * - Delete/build mode: static ghost, no interaction.
+ * - Delete tool / Keyboard Build mode: static ghost, no interaction.
  */
 export function OpenPipeGhosts() {
   const blocks = useBlockStore((s) => s.blocks);
@@ -275,7 +275,7 @@ export function OpenPipeGhosts() {
     const result: Array<{ key: string; pos: Position3D; threePos: [number, number, number] }> = [];
 
     // Ghost cubes at open pipe endpoints (positions with no block).
-    // In build mode, skip the cursor position — BuildCursor renders it with a pulse.
+    // In Keyboard Build mode, skip the cursor position — BuildCursor renders it with a pulse.
     const cursorKey = buildCursor ? posKey(buildCursor) : null;
     for (const pos of getAllPortPositions(blocks, portPositions)) {
       const key = posKey(pos);

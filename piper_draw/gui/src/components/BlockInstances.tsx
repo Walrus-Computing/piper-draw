@@ -306,13 +306,13 @@ function TypedInstances({
     if (e.instanceId == null || e.instanceId >= b.length) return;
     const store = useBlockStore.getState();
     if (store.isDraggingSelection) return;
-    // X-held single-click delete (edit mode only) short-circuits everything.
+    // X-held single-click delete (Drag / Drop mode only) short-circuits everything.
     if (store.xHeld && store.mode === "edit") {
       store.removeBlock(b[e.instanceId].pos);
       return;
     }
     if (store.mode === "build") {
-      // In build mode, clicking a cube moves the cursor there
+      // In Keyboard Build mode, clicking a cube moves the cursor there
       const clicked = b[e.instanceId];
       if (!isPipeType(clicked.type)) {
         store.moveBuildCursor(clicked.pos);

@@ -152,7 +152,7 @@ export function GridPlane() {
         onClick={(e: ThreeEvent<MouseEvent>) => {
           e.stopPropagation();
           if (e.delta > 2) return;
-          // Build mode places cubes; always snap to block positions (forPipe=false).
+          // Keyboard Build mode places cubes; always snap to block positions (forPipe=false).
           const pos = snapForViewMode(viewMode, e.point, false);
           // For build we ignore the slice constraint on Z if needed; honor depth from snap.
           // But ensure depth axis lands on a block coord.

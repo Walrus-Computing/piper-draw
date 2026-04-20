@@ -115,7 +115,7 @@ interface BlockStore {
   future: UndoCommand[];
   mode: Mode;
   /**
-   * The currently armed tool in edit mode. "pointer" behaves like the old
+   * The currently armed tool in Drag / Drop mode. "pointer" behaves like the old
    * select mode (click selects, drag moves/marquees). A type tool ("cube" /
    * "pipe" / "port") behaves like the old place mode and uses the matching
    * `cubeType` / `pipeVariant` / port intent.
@@ -124,7 +124,7 @@ interface BlockStore {
   /**
    * True while the delete-modifier key (default X) is held. Short-circuits
    * hover/click handling to preview and perform single-click deletion in
-   * edit mode, regardless of the currently armed tool.
+   * Drag / Drop mode, regardless of the currently armed tool.
    */
   xHeld: boolean;
   cubeType: BlockType;
@@ -161,7 +161,7 @@ interface BlockStore {
   dragDelta: Position3D | null;
   dragValid: boolean;
 
-  // Build mode state
+  // Keyboard Build mode state
   buildCursor: Position3D | null;
   buildHistory: BuildStep[];
   undeterminedCubes: Map<string, UndeterminedCubeInfo>;
@@ -176,7 +176,7 @@ interface BlockStore {
   setCubeType: (cubeType: BlockType) => void;
   setPipeVariant: (variant: PipeVariant) => void;
   setPlacePort: (on: boolean) => void;
-  /** Cycle the armed placeable by ±1 within PLACEABLE_ORDER (edit mode only). */
+  /** Cycle the armed placeable by ±1 within PLACEABLE_ORDER (Drag / Drop mode only). */
   cycleArmedType: (dir: -1 | 1) => void;
   setPaletteDragging: (on: boolean) => void;
   convertBlockToPort: (pos: Position3D) => void;
@@ -204,7 +204,7 @@ interface BlockStore {
   setDragState: (s: { isDragging: boolean; delta: Position3D | null; valid: boolean }) => void;
   moveSelection: (delta: Position3D) => boolean;
 
-  // Build mode actions
+  // Keyboard Build mode actions
   buildMove: (direction: BuildDirection) => boolean;
   undoBuildStep: () => void;
   cycleBlock: (target?: CubeType | "Y" | null) => void;
@@ -389,7 +389,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   dragDelta: null,
   dragValid: true,
 
-  // Build mode state
+  // Keyboard Build mode state
   buildCursor: null,
   buildHistory: [],
   undeterminedCubes: new Map(),
@@ -424,7 +424,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   setMode: (mode) => {
     const prev = get();
 
-    // Leaving build mode: keep undetermined cubes as-is (only committed when building away)
+    // Leaving Keyboard Build mode: keep undetermined cubes as-is (only committed when building away)
     if (prev.mode === "build" && mode !== "build") {
       set({
         mode,
@@ -443,7 +443,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       return;
     }
 
-    // Entering build mode: place cursor on last-placed cube or origin
+    // Entering Keyboard Build mode: place cursor on last-placed cube or origin
     if (mode === "build") {
       let cursorPos: Position3D = { x: 0, y: 0, z: 0 };
 
@@ -1726,7 +1726,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   },
 
   // ---------------------------------------------------------------------------
-  // Build mode actions
+  // Keyboard Build mode actions
   // ---------------------------------------------------------------------------
 
   buildMove: (direction) => {
@@ -2249,7 +2249,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       let placeType: CubeType | "Y" | null;
       if (target !== undefined) {
-        // Explicit target (e.g. toolbar click in build mode) must be a valid option.
+        // Explicit target (e.g. toolbar click in Keyboard Build mode) must be a valid option.
         if (!cycle.includes(target)) return state;
         placeType = target;
       } else {

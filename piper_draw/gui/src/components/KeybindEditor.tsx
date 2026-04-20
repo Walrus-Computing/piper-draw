@@ -10,8 +10,8 @@ import {
 } from "../stores/keybindStore";
 
 const MODE_TAB_LABELS: Record<Mode, string> = {
-  edit: "Edit",
-  build: "Build",
+  edit: "Drag / Drop",
+  build: "Keyboard Build",
 };
 
 export function KeybindEditor({

@@ -67,7 +67,7 @@ export const PIPE_VARIANTS: PipeVariant[] = ["ZX", "XZ", "ZXH", "XZH"];
 /**
  * Toolbar-order list of placeable items (Port + 6 cubes + Y + 4 pipes).
  * Pointer is excluded — it's a tool, not an object. Used by ArrowLeft/Right
- * cycling in edit mode.
+ * cycling in Drag / Drop mode.
  */
 export type Placeable =
   | { kind: "port" }
@@ -1021,7 +1021,7 @@ export function hasYCubePipeAxisConflict(
  *   (0, 0, ±1) → TQEC Y ∓ srcSizeY / dstSizeY
  */
 // ---------------------------------------------------------------------------
-// Build mode types & logic
+// Keyboard Build mode types & logic
 // ---------------------------------------------------------------------------
 
 export type BuildDirection = { tqecAxis: 0 | 1 | 2; sign: 1 | -1 };

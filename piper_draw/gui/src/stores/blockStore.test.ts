@@ -846,7 +846,7 @@ describe("blockStore", () => {
       expect(st.pipeVariant).toBe("XZH");
     });
 
-    it("does nothing in build mode", () => {
+    it("does nothing in Keyboard Build mode", () => {
       useBlockStore.setState({ mode: "build", armedTool: "cube", cubeType: "XZZ", pipeVariant: null });
       useBlockStore.getState().cycleArmedType(1);
       const st = useBlockStore.getState();
