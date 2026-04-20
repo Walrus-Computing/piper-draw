@@ -547,9 +547,12 @@ export function Toolbar({
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           <button
             key="pointer"
-            onClick={() => setArmedTool("pointer")}
+            onClick={() => {
+              if (mode === "build") setMode("edit");
+              setArmedTool("pointer");
+            }}
             title="Select and move blocks"
-            style={blockBtnStyle(armedTool === "pointer")}
+            style={blockBtnStyle(mode === "edit" && armedTool === "pointer")}
           >
             Pointer
             <div style={previewWrapStyle}>

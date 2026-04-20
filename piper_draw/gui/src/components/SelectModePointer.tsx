@@ -234,13 +234,20 @@ export function SelectModePointer({
         hitBlockKey: hitKey,
         shiftAtDown: e.shiftKey,
       };
+      // Lock out OrbitControls for the duration of the gesture. Without this,
+      // Shift-swapping of OrbitControls' LEFT button (ROTATE↔PAN) lets the camera
+      // pan out from under the pointer before we commit to marquee/selection.
+      if (controlsRef.current) {
+        controlsRef.current.enableRotate = false;
+        controlsRef.current.enablePan = false;
+      }
       try {
         target.setPointerCapture(e.pointerId);
       } catch {
         // Some browsers reject capture during certain input phases
       }
     },
-    [isSelectActive, threeStateRef],
+    [isSelectActive, threeStateRef, controlsRef],
   );
 
   const onPointerMove = useCallback(
