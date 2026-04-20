@@ -7,6 +7,7 @@ import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
 import { fetchTemplateManifest, loadTemplateBlocks, type TemplateEntry } from "../utils/templates";
 import { usePreviewImages } from "./PreviewRenderer";
+import { FpsDisplay } from "./FpsCounter";
 import type { ViewMode } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -99,7 +100,7 @@ const blockBtnStyle = (active: boolean, disabled?: boolean) => ({
 // ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCamera: () => void; controlsRef: React.RefObject<any>; toolbarRef: React.RefObject<HTMLDivElement | null> }) {
+export function Toolbar({ onResetCamera, controlsRef, toolbarRef, fpsRef }: { onResetCamera: () => void; controlsRef: React.RefObject<any>; toolbarRef: React.RefObject<HTMLDivElement | null>; fpsRef: React.RefObject<HTMLSpanElement | null> }) {
   const scale = useToolbarScale(toolbarRef);
   const mode = useBlockStore((s) => s.mode);
   const setMode = useBlockStore((s) => s.setMode);
@@ -655,30 +656,35 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
 
       {/* Position display */}
       <div style={{ width: 1, background: "#ddd" }} />
-      <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", fontFamily: "monospace", fontSize: "12px", color: "#555", lineHeight: "1.6", minWidth: 90 }}>
-        <span style={groupLabelStyle}>Position</span>
-        {mode === "build" && buildCursor ? (
-          <PositionEditor pos={buildCursor} onCommit={moveBuildCursor} />
-        ) : (() => {
-          const pos: Position3D | null = hoveredGridPos;
-          const bt: BlockType | null = useBlockStore.getState().hoveredBlockType;
-          if (!pos) return <><span>X: —</span><span>Y: —</span><span>Z: —</span></>;
-          const isPipe = bt ? isPipeType(bt) : pipeAxisFromPos(pos) !== null;
-          if (isPipe) {
-            const axis = pipeAxisFromPos(pos);
-            const coords = [pos.x, pos.y, pos.z];
-            const labels = ["X", "Y", "Z"];
-            return labels.map((l, i) => {
-              if (i === axis) {
-                const c1 = (coords[i] - 1) / 3;
-                const c2 = (coords[i] + 2) / 3;
-                return <span key={i}>{l}: {c1} → {c2}</span>;
-              }
-              return <span key={i}>{l}: {coords[i] / 3}</span>;
-            });
-          }
-          return <><span>X: {pos.x / 3}</span><span>Y: {pos.y / 3}</span><span>Z: {pos.z / 3}</span></>;
-        })()}
+      <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", fontFamily: "monospace", fontSize: "12px", color: "#555", lineHeight: "1.6", minWidth: 90 }}>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <span style={groupLabelStyle}>Position</span>
+          {mode === "build" && buildCursor ? (
+            <PositionEditor pos={buildCursor} onCommit={moveBuildCursor} />
+          ) : (() => {
+            const pos: Position3D | null = hoveredGridPos;
+            const bt: BlockType | null = useBlockStore.getState().hoveredBlockType;
+            if (!pos) return <><span>X: —</span><span>Y: —</span><span>Z: —</span></>;
+            const isPipe = bt ? isPipeType(bt) : pipeAxisFromPos(pos) !== null;
+            if (isPipe) {
+              const axis = pipeAxisFromPos(pos);
+              const coords = [pos.x, pos.y, pos.z];
+              const labels = ["X", "Y", "Z"];
+              return labels.map((l, i) => {
+                if (i === axis) {
+                  const c1 = (coords[i] - 1) / 3;
+                  const c2 = (coords[i] + 2) / 3;
+                  return <span key={i}>{l}: {c1} → {c2}</span>;
+                }
+                return <span key={i}>{l}: {coords[i] / 3}</span>;
+              });
+            }
+            return <><span>X: {pos.x / 3}</span><span>Y: {pos.y / 3}</span><span>Z: {pos.z / 3}</span></>;
+          })()}
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <FpsDisplay spanRef={fpsRef} />
+        </div>
       </div>
     </div>
   );
