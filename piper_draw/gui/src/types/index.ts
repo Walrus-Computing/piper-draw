@@ -10,6 +10,27 @@ export interface Position3D {
   z: number;
 }
 
+// ---------------------------------------------------------------------------
+// View modes (perspective vs. orthographic elevation)
+// ---------------------------------------------------------------------------
+
+export type IsoAxis = "x" | "y" | "z";
+
+export type ViewMode =
+  | { kind: "persp" }
+  | { kind: "iso"; axis: IsoAxis; slice: number };
+
+/** TQEC axis index: 0=x, 1=y, 2=z. */
+export function axisIndex(axis: IsoAxis): 0 | 1 | 2 {
+  return axis === "x" ? 0 : axis === "y" ? 1 : 2;
+}
+
+/** Returns the integer slice that the given depth coordinate falls into.
+ *  Each slice spans 3 units (cube + 2 pipe slots) starting at a multiple of 3. */
+export function depthToSlice(depth: number): number {
+  return Math.floor(depth / 3) * 3;
+}
+
 /**
  * ZXCube types from TQEC. Each string character gives the basis
  * (X or Z) for the face pair on that TQEC axis: [X-axis, Y-axis, Z-axis].
@@ -165,19 +186,24 @@ function nearestMult3(v: number): number {
   return Math.round(v / 3) * 3;
 }
 
+/**
+ * Snap two raw in-plane coordinates to a valid TQEC pair: either both at block
+ * positions (multiples of 3) or one at a pipe slot (≡ 1 mod 3) for pipes.
+ */
+export function snapInPlane(rawA: number, rawB: number, forPipe: boolean): { a: number; b: number } {
+  if (!forPipe) return { a: nearestMult3(rawA), b: nearestMult3(rawB) };
+  const ba = nearestMult3(rawA), bb = nearestMult3(rawB);
+  const pa = nearest3kPipeCoord(rawA), pb = nearest3kPipeCoord(rawB);
+  const d1 = Math.abs(rawA - pa) + Math.abs(rawB - bb);
+  const d2 = Math.abs(rawA - ba) + Math.abs(rawB - pb);
+  if (d1 <= d2) return { a: pa, b: bb };
+  return { a: ba, b: pb };
+}
+
 /** Snap raw TQEC X/Y coordinates (on ground plane z=0) to nearest valid position. */
 export function snapGroundPos(rawX: number, rawY: number, forPipe: boolean): Position3D {
-  if (!forPipe) {
-    return { x: nearestMult3(rawX), y: nearestMult3(rawY), z: 0 };
-  }
-  // For pipe on ground: z=0 ≡ 0 (mod 3), need exactly one of x,y in a non-zero pipe remainder class
-  const bx = nearestMult3(rawX), by = nearestMult3(rawY);
-  const px = nearest3kPipeCoord(rawX), py = nearest3kPipeCoord(rawY);
-  // Candidate: X-pipe at (px, by) or Y-pipe at (bx, py)
-  const d1 = Math.abs(rawX - px) + Math.abs(rawY - by);
-  const d2 = Math.abs(rawX - bx) + Math.abs(rawY - py);
-  if (d1 <= d2) return { x: px, y: by, z: 0 };
-  return { x: bx, y: py, z: 0 };
+  const { a, b } = snapInPlane(rawX, rawY, forPipe);
+  return { x: a, y: b, z: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -797,15 +823,30 @@ function pipeEndBasis(base: string, hadamard: boolean, openAxis: number, axis: n
 
 /**
  * Check whether a pipe placement conflicts with adjacent cube colors.
- * For each of the pipe's two closed TQEC axes, the pipe's basis character
- * must match any adjacent cube's basis character on the same axis.
+ *
+ * For each of the pipe's two endpoints:
+ *  - If a real cube exists, the pipe's basis on the two closed axes must match
+ *    the cube's basis on those axes (strict check).
+ *  - If the position is a port (no real cube), the pipe is allowed iff some
+ *    cube type at that position would satisfy both the new pipe's basis AND
+ *    any other pipes already attached at the port. This lets the user wire up
+ *    a port whose type is still flexible — auto-promotion picks a canonical
+ *    type that satisfies all pipes.
+ *
  * For Hadamard pipes, the far end (offset +2) uses swapped colors.
  * Returns true if there IS a conflict (placement should be rejected).
  */
+/** Structural subset of Map<string, Block> — helpers only need `.get()`, so
+ *  a lightweight wrapper (e.g. one that hides selected keys during a drag)
+ *  can be passed instead of cloning the full map. */
+export interface BlocksLookup {
+  get(key: string): Block | undefined;
+}
+
 export function hasPipeColorConflict(
   pipeType: PipeType,
   pipePos: Position3D,
-  blocks: Map<string, Block>,
+  blocks: BlocksLookup,
 ): boolean {
   const base = pipeType.replace("H", "");
   const hadamard = pipeType.length > 3;
@@ -816,13 +857,31 @@ export function hasPipeColorConflict(
   for (const offset of [-1, 2]) {
     const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
     nCoords[openAxis] += offset;
-    const neighbor = blocks.get(posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] }));
+    const neighborPos: Position3D = { x: nCoords[0], y: nCoords[1], z: nCoords[2] };
+    const neighbor = blocks.get(posKey(neighborPos));
 
-    if (!neighbor) continue;
+    const swapped = offset === 2;
+
+    if (!neighbor) {
+      // Port endpoint: check if any cube type satisfies both existing pipe
+      // constraints at this position AND the new pipe's basis requirements.
+      const opts = determineCubeOptions(neighborPos, blocks);
+      const candidates: readonly CubeType[] = opts.determined ? [opts.type] : opts.options;
+      if (candidates.length === 0) return true;
+      const anyMatches = candidates.some(ct => {
+        for (let axis = 0; axis < 3; axis++) {
+          if (axis === openAxis) continue;
+          if (pipeEndBasis(base, hadamard, openAxis, axis, swapped) !== ct[axis]) return false;
+        }
+        return true;
+      });
+      if (!anyMatches) return true;
+      continue;
+    }
+
     if (neighbor.type === "Y") continue;
     if (isPipeType(neighbor.type)) continue;
 
-    const swapped = offset === 2;
     for (let axis = 0; axis < 3; axis++) {
       if (axis === openAxis) continue;
       if (pipeEndBasis(base, hadamard, openAxis, axis, swapped) !== neighbor.type[axis]) return true;
@@ -841,7 +900,7 @@ export function hasPipeColorConflict(
 export function hasCubeColorConflict(
   cubeType: CubeType,
   cubePos: Position3D,
-  blocks: Map<string, Block>,
+  blocks: BlocksLookup,
 ): boolean {
   const coords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
 
@@ -882,7 +941,7 @@ export function hasCubeColorConflict(
 export function hasYCubePipeAxisConflict(
   blockType: BlockType,
   pos: Position3D,
-  blocks: Map<string, Block>,
+  blocks: BlocksLookup,
 ): boolean {
   if (blockType === "Y") {
     const coords: [number, number, number] = [pos.x, pos.y, pos.z];
@@ -960,6 +1019,23 @@ export function computePipePos(cursorPos: Position3D, dir: BuildDirection): Posi
 }
 
 /**
+ * Given the previous and destination cursor positions of a single build step,
+ * return the posKey of the pipe the step traversed. prev and dest differ by
+ * exactly ±3 along one axis; the pipe sits at prev±{1,2} in that slot.
+ */
+export function traversedPipeKey(prev: Position3D, dest: Position3D): string {
+  const dx = dest.x - prev.x, dy = dest.y - prev.y, dz = dest.z - prev.z;
+  const axis = dx !== 0 ? 0 : dy !== 0 ? 1 : 2;
+  const delta = axis === 0 ? dx : axis === 1 ? dy : dz;
+  const offset = delta > 0 ? 1 : -2;
+  const pipe = { x: prev.x, y: prev.y, z: prev.z };
+  if (axis === 0) pipe.x += offset;
+  else if (axis === 1) pipe.y += offset;
+  else pipe.z += offset;
+  return posKey(pipe);
+}
+
+/**
  * Swap the two closed-axis characters of a pipe base type.
  * E.g. "OXZ" → "OZX", "ZOX" → "XOZ", "XZO" → "ZXO".
  */
@@ -969,6 +1045,21 @@ export function swapPipeVariant(pipeBase: string): string {
   const closedAxes = [0, 1, 2].filter(a => a !== openAxis);
   [chars[closedAxes[0]], chars[closedAxes[1]]] = [chars[closedAxes[1]], chars[closedAxes[0]]];
   return chars.join("");
+}
+
+/**
+ * Flip basis colors on any BlockType by globally swapping X↔Z.
+ * Cubes: "XZZ" → "ZXX", pipes: "OXZ" → "OZX", "XZOH" → "ZXOH". Y is returned unchanged.
+ */
+export function flipBlockType(type: BlockType): BlockType {
+  if (type === "Y") return type;
+  let out = "";
+  for (const ch of type) {
+    if (ch === "X") out += "Z";
+    else if (ch === "Z") out += "X";
+    else out += ch;
+  }
+  return out as BlockType;
 }
 
 /**
@@ -991,7 +1082,7 @@ export function inferPipeType(srcType: CubeType, tqecAxis: 0 | 1 | 2): PipeType 
  */
 export function determineCubeOptions(
   cubePos: Position3D,
-  blocks: Map<string, Block>,
+  blocks: BlocksLookup,
 ): { determined: true; type: CubeType } | { determined: false; options: CubeType[] } {
   const constraints: (string | null)[] = [null, null, null];
   const coords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
@@ -1038,6 +1129,68 @@ export function determineCubeOptions(
 }
 
 /**
+ * Return posKeys of pipes whose open-axis endpoint lies at cubePos.
+ * Used by the cube → port conversion (must have ≤1) and by the cascade-delete
+ * path (deleting a junction cube also removes its attached pipes).
+ */
+export function getAttachedPipeKeys(
+  cubePos: Position3D,
+  blocks: Map<string, Block>,
+): string[] {
+  const keys: string[] = [];
+  const coords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
+  for (let axis = 0; axis < 3; axis++) {
+    for (const pipeOffset of [1, -2]) {
+      const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
+      nCoords[axis] += pipeOffset;
+      const k = posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
+      const neighbor = blocks.get(k);
+      if (!neighbor || !isPipeType(neighbor.type)) continue;
+      const base = neighbor.type.replace("H", "");
+      if (base.indexOf("O") === axis) keys.push(k);
+    }
+  }
+  return keys;
+}
+
+/**
+ * Count the number of pipes whose open-axis endpoint lies at cubePos.
+ * Used to decide when a port position has "enough" pipes to auto-promote to a cube.
+ */
+export function countAttachedPipes(
+  cubePos: Position3D,
+  blocks: Map<string, Block>,
+): number {
+  return getAttachedPipeKeys(cubePos, blocks).length;
+}
+
+/**
+ * Pick a canonical CubeType for a port position, or null if it should remain a port.
+ *
+ * Rules:
+ *   - Fewer than 2 attached pipes: return null (still a port).
+ *   - 2+ pipes that uniquely constrain: return that type.
+ *   - 2+ pipes with multiple valid options (colinear-pipe ambiguity, e.g. XZZ vs XZX
+ *     when both Z faces are hidden by Z-pipes): pick the first valid CUBE_TYPES entry.
+ *     This may differ from a hand-authored TQEC graph — see CLAUDE.md "Canonicalisation
+ *     assumption" for the rationale.
+ *   - 2+ pipes with conflicting constraints (no valid options): return null.
+ */
+export function canonicalCubeForPort(
+  cubePos: Position3D,
+  blocks: Map<string, Block>,
+): CubeType | null {
+  if (countAttachedPipes(cubePos, blocks) < 2) return null;
+  const result = determineCubeOptions(cubePos, blocks);
+  if (result.determined) return result.type;
+  if (result.options.length === 0) return null;
+  for (const ct of CUBE_TYPES) {
+    if (result.options.includes(ct)) return ct;
+  }
+  return null;
+}
+
+/**
  * Map a WASD/Arrow key + camera azimuthal angle to a TQEC BuildDirection.
  * Camera azimuth is snapped to the nearest 90° to align with grid axes.
  *
@@ -1050,9 +1203,20 @@ export function determineCubeOptions(
 export function wasdToBuildDirection(
   key: "w" | "a" | "s" | "d" | "arrowup" | "arrowdown",
   cameraAzimuth: number,
+  axisAbsolute: boolean = false,
 ): BuildDirection {
   if (key === "arrowup") return { tqecAxis: 2, sign: 1 };
   if (key === "arrowdown") return { tqecAxis: 2, sign: -1 };
+
+  // Axis-absolute mode: WASD maps to fixed world axes regardless of camera.
+  if (axisAbsolute) {
+    switch (key) {
+      case "w": return { tqecAxis: 0, sign: 1 };
+      case "s": return { tqecAxis: 0, sign: -1 };
+      case "a": return { tqecAxis: 1, sign: 1 };
+      case "d": return { tqecAxis: 1, sign: -1 };
+    }
+  }
 
   // Snap to nearest 90° quadrant: 0, 1, 2, 3
   const q = ((Math.round(cameraAzimuth / (Math.PI / 2)) % 4) + 4) % 4;

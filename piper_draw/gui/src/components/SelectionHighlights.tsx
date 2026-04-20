@@ -1,7 +1,7 @@
-import { useRef, useMemo } from "react";
+import { useMemo } from "react";
 import * as THREE from "three";
-import { useFrame } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
+import { usePulseScale } from "../hooks/usePulseScale";
 import { tqecToThree, yBlockZOffset, blockThreeSize, posKey } from "../types";
 import type { Block, BlockType } from "../types";
 
@@ -45,15 +45,9 @@ function PulsingHighlight({
   block: Block;
   zo: number;
 }) {
-  const groupRef = useRef<THREE.Group>(null!);
+  const groupRef = usePulseScale();
   const [tx, ty, tz] = tqecToThree(block.pos, block.type, zo);
   const { box, edges } = getHighlightGeo(block.type);
-
-  useFrame(({ clock }) => {
-    if (!groupRef.current) return;
-    const pulse = 1.0 + 0.02 * Math.sin(clock.getElapsedTime() * 4);
-    groupRef.current.scale.setScalar(pulse);
-  });
 
   return (
     <group ref={groupRef} position={[tx, ty, tz]}>
@@ -66,6 +60,7 @@ function PulsingHighlight({
 export function SelectionHighlights() {
   const selectedKeys = useBlockStore((s) => s.selectedKeys);
   const blocks = useBlockStore((s) => s.blocks);
+  const isDragging = useBlockStore((s) => s.isDraggingSelection);
 
   const selectedBlocks = useMemo(() => {
     if (selectedKeys.size === 0) return [];
@@ -79,6 +74,7 @@ export function SelectionHighlights() {
     return result;
   }, [selectedKeys, blocks]);
 
+  if (isDragging) return null;
   if (selectedBlocks.length === 0) return null;
 
   return (

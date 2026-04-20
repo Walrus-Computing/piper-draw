@@ -1,5 +1,5 @@
-import { describe, expect, it, beforeEach, vi } from "vitest";
-import { useValidationStore } from "./validationStore";
+import { afterAll, beforeAll, describe, expect, it, beforeEach, vi } from "vitest";
+import { installAutoRevalidate, useValidationStore } from "./validationStore";
 import { useBlockStore } from "./blockStore";
 
 // Mock the validate fetch call
@@ -17,7 +17,7 @@ function resetStores() {
     hiddenFaces: new Map(),
     history: [],
     future: [],
-    mode: "place",
+    mode: "edit",
     cubeType: "XZZ",
     pipeVariant: null,
     hoveredGridPos: null,
@@ -32,6 +32,13 @@ function resetStores() {
 }
 
 describe("validationStore", () => {
+  let uninstall: () => void;
+  beforeAll(() => {
+    uninstall = installAutoRevalidate();
+  });
+  afterAll(() => {
+    uninstall();
+  });
   beforeEach(() => {
     resetStores();
     mockValidate.mockReset();

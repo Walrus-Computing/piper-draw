@@ -2,6 +2,7 @@ import { useMemo, useCallback } from "react";
 import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
+import { usePulseScale } from "../hooks/usePulseScale";
 import {
   tqecToThree,
   posKey,
@@ -11,9 +12,15 @@ import {
   hasPipeColorConflict,
   hasCubeColorConflict,
   hasYCubePipeAxisConflict,
-  resolvePipeType,
+  getAdjacentPos,
 } from "../types";
+import { resolvePipeTypeFromFace } from "./BlockInstances";
 import type { Position3D, Block, BlockType, CubeType } from "../types";
+
+// Sentinel cube type for sizing/face-normal calculations on a port (which has
+// no real type). All standard cubes are 1×1×1 in grid units, so any concrete
+// cube type produces the right offsets for getAdjacentPos.
+const PORT_SENTINEL_TYPE: BlockType = "XZZ";
 
 const ghostMaterial = new THREE.MeshBasicMaterial({
   color: 0xdddddd,
@@ -28,18 +35,43 @@ const ghostLineMaterial = new THREE.LineBasicMaterial({
   linewidth: 1,
 });
 
+const selectionHighlightMaterial = new THREE.MeshBasicMaterial({
+  color: 0x4a9eff,
+  transparent: true,
+  opacity: 0.2,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
+
+const selectionOutlineMaterial = new THREE.LineBasicMaterial({
+  color: 0x4a9eff,
+  linewidth: 2,
+});
+
 const defaultBox = new THREE.BoxGeometry(1, 1, 1);
 const defaultEdges = new THREE.EdgesGeometry(defaultBox);
+const highlightBox = new THREE.BoxGeometry(1.04, 1.04, 1.04);
+const highlightEdges = new THREE.EdgesGeometry(highlightBox);
 
 const noRaycast = () => {};
 
 /**
- * Find positions at open pipe endpoints where no cube exists.
- * Returns an array of TQEC positions where ghost cubes should appear.
+ * Find all port positions: open pipe endpoints plus any user-placed port markers.
+ * Skips positions already occupied by a real block.
  */
-function getOpenPipeEndpoints(blocks: Map<string, Block>): Position3D[] {
+function getAllPortPositions(
+  blocks: Map<string, Block>,
+  explicitPorts: Set<string>,
+): Position3D[] {
   const endpoints: Position3D[] = [];
   const seen = new Set<string>();
+
+  const add = (pos: Position3D) => {
+    const key = posKey(pos);
+    if (blocks.has(key) || seen.has(key)) return;
+    seen.add(key);
+    endpoints.push(pos);
+  };
 
   for (const block of blocks.values()) {
     if (!isPipeType(block.type)) continue;
@@ -51,15 +83,13 @@ function getOpenPipeEndpoints(blocks: Map<string, Block>): Position3D[] {
     for (const offset of [-1, 2]) {
       const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
       nCoords[openAxis] += offset;
-      const pos: Position3D = { x: nCoords[0], y: nCoords[1], z: nCoords[2] };
-      const key = posKey(pos);
-
-      // Only add if there's no real block there and we haven't already added it
-      if (!blocks.has(key) && !seen.has(key)) {
-        seen.add(key);
-        endpoints.push(pos);
-      }
+      add({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
     }
+  }
+
+  for (const key of explicitPorts) {
+    const parts = key.split(",").map(Number);
+    add({ x: parts[0], y: parts[1], z: parts[2] });
   }
 
   return endpoints;
@@ -73,14 +103,46 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
   const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
     const store = useBlockStore.getState();
-    if (store.mode !== "place") return;
+    if (store.mode !== "edit" || store.xHeld) return;
+    if (store.armedTool === "pointer") return;
 
-    let blockType: BlockType = store.cubeType;
-    if (store.pipeVariant) {
-      const resolved = resolvePipeType(store.pipeVariant, pos);
-      if (!resolved) { store.setHoveredGridPos(pos, undefined, true); return; }
-      blockType = resolved;
+    // The port tool targets existing cubes, not ports — clicking a port is a no-op,
+    // so don't render a misleading placement preview.
+    if (store.armedTool === "port") {
+      store.setHoveredGridPos(null);
+      return;
     }
+
+    if (store.armedTool === "pipe" && store.pipeVariant) {
+      // Pipe placement adjacent to a port: use the hovered face normal to compute
+      // which adjacent pipe slot to target, mirroring BlockInstances' face logic.
+      if (!e.face) {
+        store.setHoveredGridPos(null);
+        return;
+      }
+      const resolved = resolvePipeTypeFromFace(pos, PORT_SENTINEL_TYPE, e.face.normal, store.pipeVariant);
+      if (!resolved) {
+        store.setHoveredGridPos(null);
+        return;
+      }
+      const adj = getAdjacentPos(pos, PORT_SENTINEL_TYPE, e.face.normal, resolved);
+      const adjKey = posKey(adj);
+      const existingKey = store.blocks.has(adjKey) ? adjKey : undefined;
+      const adjReplace = !!(existingKey && store.blocks.get(existingKey)!.type !== resolved);
+      if (!isValidPos(adj, resolved) || hasBlockOverlap(adj, resolved, store.blocks, store.spatialIndex, existingKey)) {
+        store.setHoveredGridPos(adj, resolved, true, undefined, adjReplace);
+      } else if (existingKey && store.blocks.get(existingKey)!.type === resolved) {
+        store.setHoveredGridPos(null);
+      } else if (!store.freeBuild && isPipeType(resolved) && hasPipeColorConflict(resolved, adj, store.blocks)) {
+        store.setHoveredGridPos(adj, resolved, true, "Pipe colors don't match the adjacent cube", adjReplace);
+      } else if (!store.freeBuild && hasYCubePipeAxisConflict(resolved, adj, store.blocks)) {
+        store.setHoveredGridPos(adj, resolved, true, "Y cube cannot be next to an X-open or Y-open pipe", adjReplace);
+      } else {
+        store.setHoveredGridPos(adj, resolved, false, undefined, adjReplace);
+      }
+      return;
+    }
+    const blockType: BlockType = store.cubeType;
 
     if (!isValidPos(pos, blockType) || hasBlockOverlap(pos, blockType, store.blocks, store.spatialIndex)) {
       store.setHoveredGridPos(pos, blockType, true);
@@ -99,7 +161,18 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
     e.stopPropagation();
     if (e.delta > 2) return;
     const store = useBlockStore.getState();
-    if (store.mode !== "place") return;
+    if (store.mode !== "edit" || store.xHeld) return;
+    if (store.armedTool === "pointer") return;
+    // Port tool: clicking a port is a no-op (it's already a port).
+    if (store.armedTool === "port") return;
+    if (store.armedTool === "pipe" && store.pipeVariant) {
+      if (!e.face) return;
+      const resolved = resolvePipeTypeFromFace(pos, PORT_SENTINEL_TYPE, e.face.normal, store.pipeVariant);
+      if (!resolved) return;
+      const adj = getAdjacentPos(pos, PORT_SENTINEL_TYPE, e.face.normal, resolved);
+      store.addBlock(adj);
+      return;
+    }
     store.addBlock(pos);
   }, [pos]);
 
@@ -126,7 +199,45 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
 }
 
 /**
- * Non-interactive ghost cube (for delete/select/build modes).
+ * Port ghost in select mode — clicking toggles it in `selectedPortPositions`.
+ */
+function SelectablePortGhost({ pos, threePos }: { pos: Position3D; threePos: [number, number, number] }) {
+  const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
+    e.stopPropagation();
+    if (e.delta > 2) return;
+    const additive = e.shiftKey;
+    useBlockStore.getState().togglePortSelection(pos, additive);
+  }, [pos]);
+
+  return (
+    <group position={threePos}>
+      <mesh
+        geometry={defaultBox}
+        material={ghostMaterial}
+        onClick={handleClick}
+      />
+      <lineSegments
+        geometry={defaultEdges}
+        material={ghostLineMaterial}
+        raycast={noRaycast}
+      />
+    </group>
+  );
+}
+
+/** Pulsing blue outline around a selected port. */
+function PortSelectionHighlight({ threePos }: { threePos: [number, number, number] }) {
+  const groupRef = usePulseScale();
+  return (
+    <group ref={groupRef} position={threePos}>
+      <mesh geometry={highlightBox} material={selectionHighlightMaterial} raycast={noRaycast} />
+      <lineSegments geometry={highlightEdges} material={selectionOutlineMaterial} raycast={noRaycast} />
+    </group>
+  );
+}
+
+/**
+ * Non-interactive ghost cube (for delete/build modes).
  */
 function StaticGhost({ threePos }: { threePos: [number, number, number] }) {
   return (
@@ -146,68 +257,65 @@ function StaticGhost({ threePos }: { threePos: [number, number, number] }) {
 }
 
 /**
- * Renders white semi-transparent ghost cubes at open pipe endpoints
- * and at undetermined cube positions. In place mode, ghosts at open
- * pipe endpoints are interactive — hovering shows the placement preview
- * and clicking places the block.
+ * Renders white semi-transparent ghost cubes ("ports") at open pipe endpoints.
+ * - Place mode: hovering shows placement preview; clicking places the block.
+ * - Select mode: clicking adds the port to `selectedPortPositions` (shift-click = additive).
+ * - Delete/build mode: static ghost, no interaction.
  */
 export function OpenPipeGhosts() {
   const blocks = useBlockStore((s) => s.blocks);
-  const undeterminedCubes = useBlockStore((s) => s.undeterminedCubes);
   const mode = useBlockStore((s) => s.mode);
   const buildCursor = useBlockStore((s) => s.buildCursor);
+  const selectedPortPositions = useBlockStore((s) => s.selectedPortPositions);
+  const portPositions = useBlockStore((s) => s.portPositions);
+  const armedTool = useBlockStore((s) => s.armedTool);
+  const xHeld = useBlockStore((s) => s.xHeld);
 
-  const isPlaceMode = mode === "place";
+  const pipeEndpoints = useMemo(() => {
+    const result: Array<{ key: string; pos: Position3D; threePos: [number, number, number] }> = [];
 
-  const { pipeEndpoints, undetermined } = useMemo(() => {
-    const pipeEndpoints: Array<{ key: string; pos: Position3D; threePos: [number, number, number] }> = [];
-    const undetermined: Array<{ key: string; threePos: [number, number, number] }> = [];
-    const seen = new Set<string>();
-
-    // Ghost cubes at open pipe endpoints (positions with no block)
+    // Ghost cubes at open pipe endpoints (positions with no block).
     // In build mode, skip the cursor position — BuildCursor renders it with a pulse.
     const cursorKey = buildCursor ? posKey(buildCursor) : null;
-    for (const pos of getOpenPipeEndpoints(blocks)) {
+    for (const pos of getAllPortPositions(blocks, portPositions)) {
       const key = posKey(pos);
       if (mode === "build" && key === cursorKey) continue;
-      seen.add(key);
-      pipeEndpoints.push({
+      result.push({
         key,
         pos,
         threePos: tqecToThree(pos, "XZZ") as [number, number, number],
       });
     }
 
-    // Ghost cubes at undetermined cube positions (always visible).
-    // In build mode, skip the cursor position — BuildCursor renders it with a pulse.
-    for (const [key] of undeterminedCubes) {
-      if (seen.has(key)) continue;
-      if (mode === "build" && key === cursorKey) continue;
-      const block = blocks.get(key);
-      if (!block) continue;
-      undetermined.push({
-        key,
-        threePos: tqecToThree(block.pos, block.type) as [number, number, number],
-      });
+    return result;
+  }, [blocks, mode, buildCursor, portPositions]);
+
+  if (pipeEndpoints.length === 0) return null;
+
+  const renderGhost = (
+    key: string,
+    pos: Position3D,
+    threePos: [number, number, number],
+  ) => {
+    if (mode === "edit" && !xHeld && armedTool !== "pointer") {
+      return <InteractiveGhost key={key} pos={pos} threePos={threePos} />;
     }
+    if (mode === "edit" && !xHeld && armedTool === "pointer") {
+      return <SelectablePortGhost key={key} pos={pos} threePos={threePos} />;
+    }
+    return <StaticGhost key={key} threePos={threePos} />;
+  };
 
-    return { pipeEndpoints, undetermined };
-  }, [blocks, undeterminedCubes, mode, buildCursor]);
-
-  if (pipeEndpoints.length === 0 && undetermined.length === 0) return null;
-
+  const showSelection = mode === "edit" && armedTool === "pointer" && !xHeld;
   return (
     <>
-      {pipeEndpoints.map(({ key, pos, threePos }) =>
-        isPlaceMode ? (
-          <InteractiveGhost key={key} pos={pos} threePos={threePos} />
-        ) : (
-          <StaticGhost key={key} threePos={threePos} />
-        )
-      )}
-      {undetermined.map(({ key, threePos }) => (
-        <StaticGhost key={key} threePos={threePos} />
-      ))}
+      {pipeEndpoints.map(({ key, pos, threePos }) => renderGhost(key, pos, threePos))}
+      {showSelection &&
+        pipeEndpoints
+          .filter(({ key }) => selectedPortPositions.has(key))
+          .map(({ key, threePos }) => (
+            <PortSelectionHighlight key={`hl-${key}`} threePos={threePos} />
+          ))}
     </>
   );
 }

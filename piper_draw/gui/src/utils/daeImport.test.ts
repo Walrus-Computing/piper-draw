@@ -143,4 +143,47 @@ describe("parseDaeToBlocks", () => {
   it("throws on invalid XML", () => {
     expect(() => parseDaeToBlocks("not xml at all<>")).toThrow();
   });
+
+  it("canonicalises a sandwiched cube to the first valid CUBE_TYPES entry", () => {
+    // Two OZX pipes along X axis flanking a cube at origin. Given OZX pipes,
+    // valid CUBE_TYPES at (0,0,0) are {ZZX, XZX}; canonical is ZZX (first in order).
+    // Import the non-canonical XZX — expect it to be normalised to ZZX.
+    const xml = `<?xml version="1.0"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <library_nodes>
+    <node id="lib_cube" name="xzx" type="NODE"><instance_geometry url="#g1"/></node>
+    <node id="lib_pipe" name="ozx" type="NODE"><instance_geometry url="#g2"/></node>
+  </library_nodes>
+  <library_visual_scenes>
+    <visual_scene id="s" name="scene">
+      <node name="SketchUp" type="NODE">
+        <node id="c" type="NODE">
+          <matrix>1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+          <instance_node url="#lib_cube"/>
+        </node>
+        <node id="p1" type="NODE">
+          <matrix>1 0 0 1 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+          <instance_node url="#lib_pipe"/>
+        </node>
+        <node id="p2" type="NODE">
+          <matrix>1 0 0 -2 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+          <instance_node url="#lib_pipe"/>
+        </node>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#s"/></scene>
+</COLLADA>`;
+    const blocks = parseDaeToBlocks(xml);
+    expect(blocks.get("0,0,0")!.type).toBe("ZZX");
+    expect(blocks.get("1,0,0")!.type).toBe("OZX");
+    expect(blocks.get("-2,0,0")!.type).toBe("OZX");
+  });
+
+  it("leaves an isolated cube's type unchanged on import", () => {
+    // A cube with no adjacent pipes is not canonicalised — the user's declared
+    // type is preserved. Only pipe-constrained ambiguity triggers canonicalisation.
+    const blocks = parseDaeToBlocks(minimalDae("zxz"));
+    expect(blocks.get("0,0,0")!.type).toBe("ZXZ");
+  });
 });

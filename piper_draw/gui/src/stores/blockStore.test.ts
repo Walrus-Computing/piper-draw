@@ -1,5 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { useBlockStore } from "./blockStore";
+import type { Block } from "../types";
+import { buildSpatialIndex } from "../types";
 
 function reset() {
   useBlockStore.setState({
@@ -8,13 +10,20 @@ function reset() {
     hiddenFaces: new Map(),
     history: [],
     future: [],
-    mode: "place",
+    mode: "edit",
     cubeType: "XZZ",
     pipeVariant: null,
+    armedTool: "cube",
+    xHeld: false,
+    portWarning: null,
     hoveredGridPos: null,
     hoveredBlockType: null,
     hoveredInvalid: false,
     selectedKeys: new Set(),
+    selectedPortPositions: new Set(),
+    portPositions: new Set(),
+    undeterminedCubes: new Map(),
+    freeBuild: false,
   });
 }
 
@@ -115,6 +124,42 @@ describe("blockStore", () => {
       useBlockStore.getState().removeBlock({ x: 3, y: 0, z: 0 });
       expect(useBlockStore.getState().blocks.size).toBe(1);
       expect(useBlockStore.getState().history.length).toBe(histBefore);
+    });
+
+    it("cascades attached pipes when removing a cube with ≥2 pipes", () => {
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ["0,1,0", { pos: { x: 0, y: 1, z: 0 }, type: "ZOX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.getState().removeBlock({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(0);
+    });
+
+    it("does not cascade when removing a cube with <2 pipes", () => {
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.getState().removeBlock({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(1);
+      expect(useBlockStore.getState().blocks.has("1,0,0")).toBe(true);
+    });
+
+    it("undoes a cube-with-pipes cascade as a single step", () => {
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ["0,1,0", { pos: { x: 0, y: 1, z: 0 }, type: "ZOX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      const histBefore = useBlockStore.getState().history.length;
+      useBlockStore.getState().removeBlock({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().history.length).toBe(histBefore + 1);
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.size).toBe(3);
     });
   });
 
@@ -298,23 +343,297 @@ describe("blockStore", () => {
       useBlockStore.getState().deleteSelected();
       expect(useBlockStore.getState().blocks.size).toBe(0);
     });
+
+    it("cascades attached pipes when deleting a selected cube with ≥2 pipes", () => {
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ["0,1,0", { pos: { x: 0, y: 1, z: 0 }, type: "ZOX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.setState({ selectedKeys: new Set(["0,0,0"]) });
+      useBlockStore.getState().deleteSelected();
+      expect(useBlockStore.getState().blocks.size).toBe(0);
+    });
+
+    it("cascade-delete undoes in a single step", () => {
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ["0,1,0", { pos: { x: 0, y: 1, z: 0 }, type: "ZOX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.setState({ selectedKeys: new Set(["0,0,0"]) });
+      useBlockStore.getState().deleteSelected();
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.size).toBe(3);
+    });
+  });
+
+  describe("convertBlockToPort", () => {
+    it("removes a standalone cube (0 pipes)", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().convertBlockToPort({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(0);
+      expect(useBlockStore.getState().portWarning).toBeNull();
+    });
+
+    it("removes a cube with 1 attached pipe (leaving the pipe)", () => {
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.getState().convertBlockToPort({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.has("0,0,0")).toBe(false);
+      expect(useBlockStore.getState().blocks.has("1,0,0")).toBe(true);
+    });
+
+    it("refuses a cube with 2+ pipes and sets a warning", () => {
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ["0,1,0", { pos: { x: 0, y: 1, z: 0 }, type: "ZOX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.getState().convertBlockToPort({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(3);
+      expect(useBlockStore.getState().portWarning).toMatch(/2 pipes attached/);
+    });
+
+    it("refuses a pipe and sets a warning", () => {
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.getState().convertBlockToPort({ x: 1, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(1);
+      expect(useBlockStore.getState().portWarning).toMatch(/Only cubes/);
+    });
+
+    it("is a no-op on an empty position", () => {
+      useBlockStore.getState().convertBlockToPort({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().portWarning).toBeNull();
+    });
+
+    it("can be undone to restore the cube", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().convertBlockToPort({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.has("0,0,0")).toBe(true);
+    });
+  });
+
+  describe("setPlacePort", () => {
+    it("arms the port tool when turned on", () => {
+      useBlockStore.getState().setPlacePort(true);
+      expect(useBlockStore.getState().armedTool).toBe("port");
+    });
+
+    it("is superseded by setCubeType", () => {
+      useBlockStore.getState().setPlacePort(true);
+      useBlockStore.getState().setCubeType("ZXZ");
+      expect(useBlockStore.getState().armedTool).toBe("cube");
+    });
+
+    it("is superseded by setPipeVariant", () => {
+      useBlockStore.getState().setPlacePort(true);
+      useBlockStore.getState().setPipeVariant("ZX");
+      expect(useBlockStore.getState().armedTool).toBe("pipe");
+    });
+
+    it("disarms back to pointer when turned off", () => {
+      useBlockStore.getState().setPlacePort(true);
+      useBlockStore.getState().setPlacePort(false);
+      expect(useBlockStore.getState().armedTool).toBe("pointer");
+    });
+  });
+
+  describe("flipSelected", () => {
+    it("swaps X↔Z on a selected cube", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().flipSelected();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXX");
+    });
+
+    it("flips a connected cube+pipe+cube chain", () => {
+      // XZZ cubes with a Z-open pipe between them (variant XZ at Z-axis = XZO)
+      // matches the cubes' X=X, Y=Z on the closed axes.
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 1 });
+      useBlockStore.setState({ pipeVariant: null, cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 3 });
+      expect(useBlockStore.getState().blocks.size).toBe(3);
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().flipSelected();
+      const b = useBlockStore.getState().blocks;
+      expect(b.get("0,0,0")?.type).toBe("ZXX");
+      expect(b.get("0,0,1")?.type).toBe("ZXO");
+      expect(b.get("0,0,3")?.type).toBe("ZXX");
+    });
+
+    it("leaves Y blocks unchanged", () => {
+      useBlockStore.setState({ cubeType: "Y" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().flipSelected();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("Y");
+    });
+
+    it("is a no-op when nothing is selected", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      const histBefore = useBlockStore.getState().history.length;
+      useBlockStore.getState().flipSelected();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZZ");
+      expect(useBlockStore.getState().history.length).toBe(histBefore);
+    });
+
+    it("rejects when flipping would conflict with a non-selected adjacent pipe", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 1 });
+      expect(useBlockStore.getState().blocks.size).toBe(2);
+      // Select only the cube — flipping it would mismatch the adjacent pipe.
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
+      useBlockStore.getState().flipSelected();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZZ");
+      expect(useBlockStore.getState().blocks.get("0,0,1")?.type).toBe("XZO");
+    });
+
+    it("allows flipping across a selection boundary when freeBuild is on", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 1 });
+      useBlockStore.setState({ freeBuild: true });
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
+      useBlockStore.getState().flipSelected();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXX");
+    });
+
+    it("can be undone and redone", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().flipSelected();
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZZ");
+      useBlockStore.getState().redo();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXX");
+    });
+
+    it("is idempotent under double flip", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().flipSelected();
+      useBlockStore.getState().flipSelected();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZZ");
+    });
   });
 
   describe("setMode clears selection", () => {
-    it("clears selection when switching to place mode", () => {
+    it("clears selection when switching from edit to build", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
-      useBlockStore.setState({ mode: "select" });
       useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
-      useBlockStore.getState().setMode("place");
+      expect(useBlockStore.getState().selectedKeys.size).toBe(1);
+      useBlockStore.getState().setMode("build");
       expect(useBlockStore.getState().selectedKeys.size).toBe(0);
     });
 
-    it("preserves selection when switching to delete mode", () => {
+    it("clears selection when arming a placement tool from pointer", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
-      useBlockStore.setState({ mode: "select" });
       useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
-      useBlockStore.getState().setMode("delete");
       expect(useBlockStore.getState().selectedKeys.size).toBe(1);
+      useBlockStore.getState().setCubeType("XZZ");
+      expect(useBlockStore.getState().selectedKeys.size).toBe(0);
+    });
+  });
+
+  describe("cyclePipe — just-traversed pipe preference", () => {
+    // Scenario: cube ZZX at (3,0,0) with two dangling pipes on different axes.
+    // Both pipes have two valid types (OZX/OXZH on X, ZOX/ZOXH on Y) because
+    // the far end of each is an open port. Cursor sits on the cube, so R with
+    // no preference would bail with "Multiple undetermined pipes".
+    function setupLCorner() {
+      const blocks = new Map<string, Block>([
+        ["3,0,0", { pos: { x: 3, y: 0, z: 0 }, type: "ZZX" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ["3,1,0", { pos: { x: 3, y: 1, z: 0 }, type: "ZOX" }],
+      ]);
+      useBlockStore.setState({
+        blocks,
+        spatialIndex: buildSpatialIndex(blocks),
+        hiddenFaces: new Map(),
+        history: [],
+        future: [],
+        mode: "build",
+        freeBuild: false,
+        buildCursor: { x: 3, y: 0, z: 0 },
+        buildHistory: [],
+        undeterminedCubes: new Map(),
+        hoveredInvalidReason: null,
+      });
+    }
+
+    it("bails with 'Multiple undetermined pipes' when buildHistory is empty", () => {
+      setupLCorner();
+      useBlockStore.getState().cyclePipe();
+      const s = useBlockStore.getState();
+      expect(s.hoveredInvalidReason).toBe("Multiple undetermined pipes — cannot cycle");
+      expect(s.blocks.get("1,0,0")?.type).toBe("OZX");
+      expect(s.blocks.get("3,1,0")?.type).toBe("ZOX");
+    });
+
+    it("cycles the just-traversed pipe when a build step is on the history stack", () => {
+      setupLCorner();
+      // Simulate having stepped +X from (0,0,0) to (3,0,0): pipe at (1,0,0).
+      useBlockStore.setState({
+        buildHistory: [{
+          prevCursorPos: { x: 0, y: 0, z: 0 },
+          destCursorPos: { x: 3, y: 0, z: 0 },
+          pipe: { key: "1,0,0", block: { pos: { x: 1, y: 0, z: 0 }, type: "OZX" } },
+          cube: null,
+        }],
+      });
+      useBlockStore.getState().cyclePipe();
+      const s = useBlockStore.getState();
+      expect(s.hoveredInvalidReason).toBeNull();
+      // X pipe cycled; Y pipe untouched.
+      expect(s.blocks.get("1,0,0")?.type).not.toBe("OZX");
+      expect(s.blocks.get("3,1,0")?.type).toBe("ZOX");
+    });
+
+    it("prefers the Y pipe when the last step came down the Y axis", () => {
+      setupLCorner();
+      // Simulate having stepped -Y from (3,3,0) to (3,0,0): pipe at (3,1,0).
+      useBlockStore.setState({
+        buildHistory: [{
+          prevCursorPos: { x: 3, y: 3, z: 0 },
+          destCursorPos: { x: 3, y: 0, z: 0 },
+          pipe: { key: "3,1,0", block: { pos: { x: 3, y: 1, z: 0 }, type: "ZOX" } },
+          cube: null,
+        }],
+      });
+      useBlockStore.getState().cyclePipe();
+      const s = useBlockStore.getState();
+      expect(s.hoveredInvalidReason).toBeNull();
+      expect(s.blocks.get("3,1,0")?.type).not.toBe("ZOX");
+      expect(s.blocks.get("1,0,0")?.type).toBe("OZX");
+    });
+
+    it("falls through to the bail when the last step's pipe isn't cycle-eligible", () => {
+      setupLCorner();
+      // Step's pipe position doesn't match any adjacent pipe — nothing to prefer.
+      useBlockStore.setState({
+        buildHistory: [{
+          prevCursorPos: { x: 3, y: 0, z: 3 },
+          destCursorPos: { x: 3, y: 0, z: 0 },
+          pipe: null,
+          cube: null,
+        }],
+      });
+      useBlockStore.getState().cyclePipe();
+      expect(useBlockStore.getState().hoveredInvalidReason).toBe(
+        "Multiple undetermined pipes — cannot cycle",
+      );
     });
   });
 
@@ -351,6 +670,123 @@ describe("blockStore", () => {
       const histBefore = useBlockStore.getState().history.length;
       useBlockStore.getState().loadBlocks(new Map());
       expect(useBlockStore.getState().history.length).toBe(histBefore);
+    });
+  });
+
+  describe("moveSelection", () => {
+    function selectAllCurrent() {
+      const s = useBlockStore.getState();
+      useBlockStore.setState({ selectedKeys: new Set(s.blocks.keys()) });
+    }
+
+    it("moves a single selected cube by (3,0,0) and updates selectedKeys", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      selectAllCurrent();
+      const ok = useBlockStore.getState().moveSelection({ x: 3, y: 0, z: 0 });
+      const s = useBlockStore.getState();
+      expect(ok).toBe(true);
+      expect(s.blocks.has("0,0,0")).toBe(false);
+      expect(s.blocks.get("3,0,0")?.type).toBe("XZZ");
+      expect(s.selectedKeys.has("3,0,0")).toBe(true);
+      expect(s.selectedKeys.has("0,0,0")).toBe(false);
+    });
+
+    it("moves a cube + attached pipe pair together preserving adjacency", () => {
+      // ZXZ cubes (Y=X, Z=Z) connected by an OXZ pipe (closed Y=X, Z=Z).
+      useBlockStore.setState({ cubeType: "ZXZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: null, cubeType: "XZZ" });
+      selectAllCurrent();
+      const ok = useBlockStore.getState().moveSelection({ x: 0, y: 3, z: 0 });
+      const s = useBlockStore.getState();
+      expect(ok).toBe(true);
+      expect(s.blocks.size).toBe(3);
+      expect(s.blocks.has("0,3,0")).toBe(true);
+      expect(s.blocks.has("3,3,0")).toBe(true);
+      expect(s.blocks.has("1,3,0")).toBe(true);
+      expect(s.blocks.get("1,3,0")?.type).toBe("OXZ");
+    });
+
+    it("rejects a move that overlaps a non-selected block", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      // Select only the first cube
+      useBlockStore.setState({ selectedKeys: new Set(["0,0,0"]) });
+      const ok = useBlockStore.getState().moveSelection({ x: 3, y: 0, z: 0 });
+      const s = useBlockStore.getState();
+      expect(ok).toBe(false);
+      // Both cubes should still be present at their original positions
+      expect(s.blocks.has("0,0,0")).toBe(true);
+      expect(s.blocks.has("3,0,0")).toBe(true);
+      // selectedKeys unchanged
+      expect(s.selectedKeys.has("0,0,0")).toBe(true);
+    });
+
+    it("rejects a move that creates a color conflict, and succeeds under freeBuild", () => {
+      // Cube ZXZ (Y=X,Z=Z) at (0,0,0) with pipe OXZ (Y=X,Z=Z) at (1,0,0) — a valid pair.
+      // Cube XZZ (Y=Z,Z=Z) at (6,0,0). Moving the pipe to (4,0,0) puts it next to XZZ,
+      // which mismatches on the Y axis → color conflict.
+      useBlockStore.setState({ cubeType: "ZXZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: null, cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 6, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(3);
+
+      useBlockStore.setState({ selectedKeys: new Set(["1,0,0"]) });
+      const ok = useBlockStore.getState().moveSelection({ x: 3, y: 0, z: 0 });
+      expect(ok).toBe(false);
+
+      useBlockStore.setState({ freeBuild: true });
+      const ok2 = useBlockStore.getState().moveSelection({ x: 3, y: 0, z: 0 });
+      expect(ok2).toBe(true);
+      useBlockStore.setState({ freeBuild: false });
+    });
+
+    it("delta = {0,0,0} is a no-op with no history entry", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      selectAllCurrent();
+      const beforeHist = useBlockStore.getState().history.length;
+      const ok = useBlockStore.getState().moveSelection({ x: 0, y: 0, z: 0 });
+      expect(ok).toBe(false);
+      expect(useBlockStore.getState().history.length).toBe(beforeHist);
+    });
+
+    it("undo restores old positions and selection; redo re-applies the move", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.setState({ selectedKeys: new Set(["0,0,0", "3,0,0"]) });
+      const ok = useBlockStore.getState().moveSelection({ x: 0, y: 3, z: 0 });
+      expect(ok).toBe(true);
+      expect(useBlockStore.getState().selectedKeys.has("0,3,0")).toBe(true);
+
+      useBlockStore.getState().undo();
+      const s1 = useBlockStore.getState();
+      expect(s1.blocks.has("0,0,0")).toBe(true);
+      expect(s1.blocks.has("3,0,0")).toBe(true);
+      expect(s1.blocks.has("0,3,0")).toBe(false);
+      expect(s1.selectedKeys.has("0,0,0")).toBe(true);
+      expect(s1.selectedKeys.has("3,0,0")).toBe(true);
+
+      useBlockStore.getState().redo();
+      const s2 = useBlockStore.getState();
+      expect(s2.blocks.has("0,3,0")).toBe(true);
+      expect(s2.blocks.has("3,3,0")).toBe(true);
+      expect(s2.blocks.has("0,0,0")).toBe(false);
+      expect(s2.selectedKeys.has("0,3,0")).toBe(true);
+    });
+
+    it("supports vertical moves (non-zero z) while preserving parity", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ selectedKeys: new Set(["0,0,0"]) });
+      const ok = useBlockStore.getState().moveSelection({ x: 0, y: 0, z: 3 });
+      expect(ok).toBe(true);
+      expect(useBlockStore.getState().blocks.has("0,0,3")).toBe(true);
+      expect(useBlockStore.getState().selectedKeys.has("0,0,3")).toBe(true);
     });
   });
 });
