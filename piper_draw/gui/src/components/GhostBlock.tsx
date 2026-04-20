@@ -224,7 +224,7 @@ export function GhostBlock() {
   const armedTool = useBlockStore((s) => s.armedTool);
   const xHeld = useBlockStore((s) => s.xHeld);
   if (!hasHover || mode === "build") return null;
-  // In edit mode, only show a ghost when a placement tool is armed (or X-held
+  // In Drag / Drop mode, only show a ghost when a placement tool is armed (or X-held
   // delete preview). Pointer mode has no ghost — hover just highlights.
   if (mode === "edit" && !xHeld && armedTool === "pointer") return null;
   return <GhostBlockInner />;

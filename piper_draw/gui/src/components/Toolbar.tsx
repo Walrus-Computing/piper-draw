@@ -121,14 +121,14 @@ export function Toolbar({
     return block.type;
   });
   // True when the build cursor is sitting on a port (no cube at that position).
-  // Lets the toolbar highlight the Port button as "currently selected" while in build mode.
+  // Lets the toolbar highlight the Port button as "currently selected" while in Keyboard Build mode.
   const buildCursorOnPort = useBlockStore((s) => {
     if (s.mode !== "build" || !s.buildCursor) return false;
     return !s.blocks.has(posKey(s.buildCursor));
   });
   // True when the cursor position has ≥2 attached pipes — i.e. it can't be
   // converted back to a port without first removing a pipe. Used to dim the
-  // Port button in build mode so users don't click it expecting a no-op.
+  // Port button in Keyboard Build mode so users don't click it expecting a no-op.
   const buildCursorPortAllowed = useBlockStore((s) => {
     if (s.mode !== "build" || !s.buildCursor) return true;
     const coords: [number, number, number] = [s.buildCursor.x, s.buildCursor.y, s.buildCursor.z];
@@ -180,7 +180,7 @@ export function Toolbar({
   });
   const buildValidTypes = buildValidTypesStr != null ? new Set(buildValidTypesStr.split(",").filter(Boolean)) : null;
 
-  // When exactly one cube-slot thing is selected in edit mode (a single port OR a
+  // When exactly one cube-slot thing is selected in Drag / Drop mode (a single port OR a
   // single cube/Y block), compute info used to grey out and highlight toolbar
   // entries: the currently placed type, whether port-conversion is still legal,
   // and which cube types remain valid replacements at that position.
@@ -237,7 +237,7 @@ export function Toolbar({
     };
   })();
 
-  // When exactly one pipe is selected in edit mode, compute (a) its current
+  // When exactly one pipe is selected in Drag / Drop mode, compute (a) its current
   // toolbar variant (for highlighting) and (b) which other variants would still
   // be valid at that position — i.e. swapping to that variant keeps every
   // committed neighbour cube within its valid CUBE_TYPES set. Mirrors the
@@ -541,23 +541,31 @@ export function Toolbar({
       {/* Separator */}
       <div style={{ width: 1, background: "#ddd" }} />
 
-      {/* Blocks group (Pointer + Port + ZXCubes + Y) */}
+      {/* Tool group (Pointer) */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+        <span style={groupLabelStyle}>Tool</span>
+        <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
+          <button
+            key="pointer"
+            onClick={() => setArmedTool("pointer")}
+            title="Select and move blocks"
+            style={blockBtnStyle(armedTool === "pointer")}
+          >
+            Pointer
+            <div style={previewWrapStyle}>
+              <PointerIcon />
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Separator */}
+      <div style={{ width: 1, background: "#ddd" }} />
+
+      {/* Blocks group (Port + ZXCubes + Y) */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <span style={groupLabelStyle}>Blocks</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
-          {mode === "edit" && (
-            <button
-              key="pointer"
-              onClick={() => setArmedTool("pointer")}
-              title="Select and move blocks"
-              style={blockBtnStyle(armedTool === "pointer")}
-            >
-              Pointer
-              <div style={previewWrapStyle}>
-                <PointerIcon />
-              </div>
-            </button>
-          )}
           <button
             key="port"
             onPointerDown={() => {
@@ -567,7 +575,7 @@ export function Toolbar({
             }}
             onClick={() => {
               if (mode === "build") {
-                // In build mode, clicking Port converts the cursor cube back to a port
+                // In Keyboard Build mode, clicking Port converts the cursor cube back to a port
                 // (only valid when pipeCount < 2; cycleBlock validates and no-ops otherwise).
                 cycleBlock(null);
                 return;
@@ -887,7 +895,7 @@ function PositionEditor({ pos, onCommit }: { pos: Position3D; onCommit: (p: Posi
 }
 
 // ---------------------------------------------------------------------------
-// Mode segmented control — Edit | Build pill
+// Mode segmented control — Drag / Drop | Keyboard Build pill
 // ---------------------------------------------------------------------------
 
 function ModeSegmented({
@@ -913,6 +921,7 @@ function ModeSegmented({
     <div
       style={{
         display: "inline-flex",
+        flexDirection: "column",
         border: "2px solid #4a9eff",
         borderRadius: 6,
         overflow: "hidden",
@@ -921,10 +930,10 @@ function ModeSegmented({
       }}
     >
       <button onClick={() => setMode("edit")} style={segStyle(mode === "edit")}>
-        Edit
+        Drag / Drop
       </button>
       <button onClick={() => setMode("build")} style={segStyle(mode === "build")}>
-        Build
+        Keyboard Build
       </button>
     </div>
   );
@@ -1288,7 +1297,7 @@ function SettingsMenu({
           <div style={{ height: 1, background: "#eee" }} />
 
           <div>
-            <div style={{ fontWeight: 600, color: "#555", marginBottom: 4 }}>Build mode</div>
+            <div style={{ fontWeight: 600, color: "#555", marginBottom: 4 }}>Keyboard Build</div>
             <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "2px 0" }}>
               <input type="checkbox" checked={cameraFollowsBuild} onChange={toggleCameraFollowsBuild} />
               <span title="When off, the camera stays put while you build with the keyboard">

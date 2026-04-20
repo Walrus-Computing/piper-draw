@@ -634,7 +634,7 @@ export default function App() {
     };
   }, []);
 
-  // Hold-to-delete modifier (default X): while held in edit mode, clicks
+  // Hold-to-delete modifier (default X): while held in Drag / Drop mode, clicks
   // delete the hovered block regardless of the currently armed tool. The
   // BlockInstances/GhostBlock components read store.xHeld to switch to a
   // red-preview cursor.
