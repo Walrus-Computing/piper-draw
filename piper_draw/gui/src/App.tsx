@@ -568,13 +568,21 @@ export default function App() {
           }
           return;
         case "cyclePrev":
+        case "cycleNext": {
           e.preventDefault();
-          store.cycleArmedType(-1);
+          const dir = action === "cyclePrev" ? -1 : 1;
+          // With a single selection in edit mode + pointer, cycle the selected
+          // item through its valid toolbar options instead of swapping the
+          // armed type (which would lift the selection).
+          const single =
+            store.mode === "edit" &&
+            store.armedTool === "pointer" &&
+            ((store.selectedKeys.size === 1 && store.selectedPortPositions.size === 0)
+              || (store.selectedKeys.size === 0 && store.selectedPortPositions.size === 1));
+          if (single) store.cycleSelectedType(dir);
+          else store.cycleArmedType(dir);
           return;
-        case "cycleNext":
-          e.preventDefault();
-          store.cycleArmedType(1);
-          return;
+        }
       }
     };
     window.addEventListener("keydown", handler);
