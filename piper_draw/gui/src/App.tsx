@@ -8,6 +8,8 @@ THREE.ColorManagement.enabled = false;
 import {
   OrbitControls,
   GizmoHelper,
+  PerspectiveCamera,
+  OrthographicCamera,
 } from "@react-three/drei";
 import { BlockInstances } from "./components/BlockInstances";
 import { GridPlane } from "./components/GridPlane";
@@ -20,17 +22,38 @@ import { ValidationToast } from "./components/ValidationToast";
 import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { SelectionHighlights } from "./components/SelectionHighlights";
 import { BuildCursor } from "./components/BuildCursor";
-import { MarqueeSelect, type ThreeState } from "./components/MarqueeSelect";
+import { SelectModePointer, type ThreeState } from "./components/SelectModePointer";
+import { DragGhost } from "./components/DragGhost";
 import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
+import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
 import { BuildModeHints } from "./components/BuildModeHints";
+import { SelectModeHints } from "./components/SelectModeHints";
+import { PlaceModeHints } from "./components/PlaceModeHints";
+import { DeleteModeHints } from "./components/DeleteModeHints";
+import { BuildModeToggles } from "./components/BuildModeToggles";
 import { KeybindEditor } from "./components/KeybindEditor";
 import { HelpPanel } from "./components/HelpPanel";
 import { useBlockStore } from "./stores/blockStore";
-import { useKeybindStore, buildActionForKey, actionToWasdKey } from "./stores/keybindStore";
-import { wasdToBuildDirection, tqecToThree, type Block } from "./types";
+import {
+  useKeybindStore,
+  actionForKey,
+  actionToWasdKey,
+  type KeyBinding,
+  type Mode,
+} from "./stores/keybindStore";
+import { wasdToBuildDirection, tqecToThree, type Block, type ViewMode } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
+import { downloadPng } from "./utils/photoExport";
+import {
+  ISO_INITIAL_ZOOM,
+  isoBuildDirection,
+  isoCameraThree,
+  isoGridMeshTransform,
+  isoTargetThree,
+  isoUpThree,
+} from "./utils/isoView";
 
 const GRID_SNAP = 3;
 
@@ -38,172 +61,258 @@ const AUTOSAVE_KEY = "piper-draw:autosave:v1";
 const AUTOSAVE_DEBOUNCE_MS = 500;
 
 /**
- * Shader-based ground grid: dark grey cells at block positions (mod 3 ≡ 0),
+ * Shader-based grid mesh: dark grey cells at block positions (mod 3 ≡ 0),
  * light grey cells at pipe positions (mod 3 ≡ 1), with light edges on each cell.
- * No separate grid lines — the edge border provides the visual structure.
+ * Uses two world-space basis vectors as uniforms so the same shader can render
+ * the floor (TQEC X/Y) or any iso-view plane.
  */
-const gridMaterial = new THREE.ShaderMaterial({
-  transparent: true,
-  depthWrite: false,
-  vertexShader: `
-    varying vec3 vWorldPos;
-    void main() {
-      vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
-      gl_Position = projectionMatrix * viewMatrix * vec4(vWorldPos, 1.0);
-    }
-  `,
-  fragmentShader: `
-    varying vec3 vWorldPos;
-    float pmod(float a, float b) { return a - b * floor(a / b); }
-    void main() {
-      // TQEC coords: x = Three.js x, y = -Three.js z
-      float tx = vWorldPos.x;
-      float ty = -vWorldPos.z;
-      float mx = pmod(floor(tx), 3.0);
-      float my = pmod(floor(ty), 3.0);
-
-      bool xBlock = mx < 0.5;
-      bool yBlock = my < 0.5;
-      // Pipes span 2 cells: mod 3 ≡ 1 and ≡ 2
-      bool xPipe = mx > 0.5;
-      bool yPipe = my > 0.5;
-
-      bool isBlock = xBlock && yBlock;
-      bool isPipe = (xPipe && yBlock) || (xBlock && yPipe);
-
-      if (!isBlock && !isPipe) discard;
-
-      // Edge detection: for pipe cells, treat the 2-unit span as one tile
-      // so the internal boundary between ≡ 1 and ≡ 2 cells is suppressed.
-      float fx = fract(tx);
-      float fy = fract(ty);
-      float edgeWidth = 0.03;
-
-      float edgeX, edgeY;
-      if (isPipe && xPipe) {
-        // Pipe spans x from pmod 1..3; remap to 0..2
-        float px = pmod(tx, 3.0) - 1.0;
-        edgeX = min(px, 2.0 - px);
-      } else {
-        edgeX = min(fx, 1.0 - fx);
+function makeGridMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: {
+      // World-space directions whose dot products with vWorldPos give the two
+      // in-plane TQEC coordinates used for the mod-3 checkerboard.
+      axisU: { value: new THREE.Vector3(1, 0, 0) },   // TQEC X
+      axisV: { value: new THREE.Vector3(0, 0, -1) },  // TQEC Y
+      // Center used for the distance fade (orbit target along the in-plane axes).
+      fadeCenter: { value: new THREE.Vector3(0, 0, 0) },
+    },
+    vertexShader: `
+      varying vec3 vWorldPos;
+      void main() {
+        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * viewMatrix * vec4(vWorldPos, 1.0);
       }
-      if (isPipe && yPipe) {
-        float py = pmod(ty, 3.0) - 1.0;
-        edgeY = min(py, 2.0 - py);
-      } else {
-        edgeY = min(fy, 1.0 - fy);
+    `,
+    fragmentShader: `
+      uniform vec3 axisU;
+      uniform vec3 axisV;
+      uniform vec3 fadeCenter;
+      varying vec3 vWorldPos;
+      float pmod(float a, float b) { return a - b * floor(a / b); }
+      void main() {
+        float tx = dot(axisU, vWorldPos);
+        float ty = dot(axisV, vWorldPos);
+        float mx = pmod(floor(tx), 3.0);
+        float my = pmod(floor(ty), 3.0);
+
+        bool xBlock = mx < 0.5;
+        bool yBlock = my < 0.5;
+        bool xPipe = mx > 0.5;
+        bool yPipe = my > 0.5;
+
+        bool isBlock = xBlock && yBlock;
+        bool isPipe = (xPipe && yBlock) || (xBlock && yPipe);
+
+        if (!isBlock && !isPipe) discard;
+
+        float fx = fract(tx);
+        float fy = fract(ty);
+        float edgeWidth = 0.03;
+
+        float edgeX, edgeY;
+        if (isPipe && xPipe) {
+          float px = pmod(tx, 3.0) - 1.0;
+          edgeX = min(px, 2.0 - px);
+        } else {
+          edgeX = min(fx, 1.0 - fx);
+        }
+        if (isPipe && yPipe) {
+          float py = pmod(ty, 3.0) - 1.0;
+          edgeY = min(py, 2.0 - py);
+        } else {
+          edgeY = min(fy, 1.0 - fy);
+        }
+
+        float edgeDist = min(edgeX, edgeY);
+        bool onEdge = edgeDist < edgeWidth;
+
+        if (onEdge) {
+          gl_FragColor = vec4(0.85, 0.85, 0.85, 0.35);
+        } else if (isBlock) {
+          gl_FragColor = vec4(0.45, 0.45, 0.45, 0.18);
+        } else {
+          gl_FragColor = vec4(0.65, 0.65, 0.65, 0.12);
+        }
+
+        // Fade by distance from center along in-plane axes only.
+        vec3 d = vWorldPos - fadeCenter;
+        float du = dot(axisU, d);
+        float dv = dot(axisV, d);
+        float dist = sqrt(du * du + dv * dv);
+        float fade = 1.0 - smoothstep(100.0, 300.0, dist);
+        gl_FragColor.a *= fade;
       }
+    `,
+  });
+}
 
-      float edgeDist = min(edgeX, edgeY);
-      bool onEdge = edgeDist < edgeWidth;
-
-      if (onEdge) {
-        // Light edge
-        gl_FragColor = vec4(0.85, 0.85, 0.85, 0.35);
-      } else if (isBlock) {
-        // Dark grey fill
-        gl_FragColor = vec4(0.45, 0.45, 0.45, 0.18);
-      } else {
-        // Light grey fill
-        gl_FragColor = vec4(0.65, 0.65, 0.65, 0.12);
-      }
-
-      // Fade with distance from origin for a clean look
-      float dist = length(vWorldPos.xz);
-      float fade = 1.0 - smoothstep(100.0, 300.0, dist);
-      gl_FragColor.a *= fade;
-    }
-  `,
-});
+const gridMaterial = makeGridMaterial();
 
 function CheckerboardGrid() {
   const ref = useRef<THREE.Mesh>(null!);
   const target = useRef(new THREE.Vector3());
-  useFrame(({ camera }) => {
-    if (!ref.current) return;
-    if (cameraGroundPoint(camera, target.current)) {
-      ref.current.position.x = Math.round(target.current.x / GRID_SNAP) * GRID_SNAP;
-      ref.current.position.z = Math.round(target.current.z / GRID_SNAP) * GRID_SNAP;
+  const viewMode = useBlockStore((s) => s.viewMode);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const controls = useThree((s) => s.controls) as any;
+
+  // Update shader uniforms whenever the active plane changes.
+  useEffect(() => {
+    const u = gridMaterial.uniforms;
+    if (viewMode.kind === "persp" || viewMode.axis === "z") {
+      u.axisU.value.set(1, 0, 0);
+      u.axisV.value.set(0, 0, -1);
+    } else if (viewMode.axis === "x") {
+      u.axisU.value.set(0, 0, -1);  // TQEC Y = -Three Z
+      u.axisV.value.set(0, 1, 0);   // TQEC Z =  Three Y
+    } else {
+      u.axisU.value.set(1, 0, 0);   // TQEC X
+      u.axisV.value.set(0, 1, 0);   // TQEC Z
     }
+  }, [viewMode]);
+
+  useFrame(({ camera }) => {
+    const mesh = ref.current;
+    if (!mesh) return;
+    const u = gridMaterial.uniforms;
+    if (viewMode.kind === "persp") {
+      if (cameraGroundPoint(camera, target.current)) {
+        mesh.position.x = Math.round(target.current.x / GRID_SNAP) * GRID_SNAP;
+        mesh.position.z = Math.round(target.current.z / GRID_SNAP) * GRID_SNAP;
+        mesh.position.y = 0.001;
+        u.fadeCenter.value.set(mesh.position.x, 0, mesh.position.z);
+      }
+      return;
+    }
+    // Iso mode: align mesh with active slice plane; follow orbit target along in-plane axes.
+    const ot: THREE.Vector3 | undefined = controls?.target;
+    const axis = viewMode.axis;
+    const slice = viewMode.slice;
+    if (axis === "x") {
+      mesh.position.x = slice + 0.001;
+      mesh.position.y = ot ? Math.round(ot.y / GRID_SNAP) * GRID_SNAP : 0;
+      mesh.position.z = ot ? Math.round(ot.z / GRID_SNAP) * GRID_SNAP : 0;
+    } else if (axis === "y") {
+      mesh.position.x = ot ? Math.round(ot.x / GRID_SNAP) * GRID_SNAP : 0;
+      mesh.position.y = ot ? Math.round(ot.y / GRID_SNAP) * GRID_SNAP : 0;
+      mesh.position.z = -slice - 0.001;
+    } else {
+      mesh.position.x = ot ? Math.round(ot.x / GRID_SNAP) * GRID_SNAP : 0;
+      mesh.position.y = slice + 0.001;
+      mesh.position.z = ot ? Math.round(ot.z / GRID_SNAP) * GRID_SNAP : 0;
+    }
+    u.fadeCenter.value.copy(mesh.position);
   });
+
+  const rotation: [number, number, number] = viewMode.kind === "persp"
+    ? [-Math.PI / 2, 0, 0]
+    : isoGridMeshTransform(viewMode.axis).rotation;
+
   return (
-    <mesh ref={ref} rotation-x={-Math.PI / 2} position={[0, 0.001, 0]}>
+    <mesh ref={ref} rotation={rotation}>
       <planeGeometry args={[500, 500]} />
       <primitive object={gridMaterial} attach="material" />
     </mesh>
   );
 }
 
-const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent);
-const modKey = isMac ? "\u2318" : "Ctrl+";
+/**
+ * Camera + controls that swap based on viewMode. PerspectiveCamera for free-orbit
+ * 3D mode; OrthographicCamera for axis-locked elevation views with rotation disabled.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ViewportCamera({ controlsRef }: { controlsRef: React.RefObject<any> }) {
+  const viewMode = useBlockStore((s) => s.viewMode);
+  if (viewMode.kind === "persp") {
+    return (
+      <>
+        <PerspectiveCamera
+          makeDefault
+          position={[14, 14, -14]}
+          fov={35}
+          near={0.1}
+          far={100000}
+        />
+        <OrbitControls
+          ref={controlsRef}
+          makeDefault
+          enableRotate
+          zoomToCursor
+          maxDistance={50000}
+          screenSpacePanning={false}
+          mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
+        />
+      </>
+    );
+  }
+  return <IsoViewport viewMode={viewMode} controlsRef={controlsRef} />;
+}
 
-function SelectModeHints() {
-  const mode = useBlockStore((s) => s.mode);
-  if (mode !== "select") return null;
+function IsoViewport({
+  viewMode,
+  controlsRef,
+}: {
+  viewMode: Extract<ViewMode, { kind: "iso" }>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  controlsRef: React.RefObject<any>;
+}) {
+  const cameraRef = useRef<THREE.OrthographicCamera>(null);
 
-  const altKey = isMac ? "⌥ Option+" : "Alt+";
-  const hints = [
-    ["Click", "Select"],
-    ["Drag", "Box select"],
-    [`${altKey}Drag`, "Orbit"],
-    ["Right Drag", "Pan"],
-    ["Shift+Click", "Add/remove"],
-    [`${modKey}A`, "Select all"],
-    ["Delete", "Delete selected"],
-    ["Esc", "Clear selection"],
-  ];
+  // Position the orthographic camera + orbit target whenever the iso slice/axis changes.
+  useEffect(() => {
+    const cam = cameraRef.current;
+    const ctrl = controlsRef.current;
+    if (!cam) return;
+    const target = isoTargetThree(viewMode);
+    const pos = isoCameraThree(viewMode);
+    cam.up.copy(isoUpThree(viewMode.axis));
+    cam.position.copy(pos);
+    cam.lookAt(target);
+    cam.updateProjectionMatrix();
+    if (ctrl) {
+      ctrl.target.copy(target);
+      ctrl.update();
+    }
+  }, [viewMode, controlsRef]);
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: 60,
-        left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: 1,
-        display: "flex",
-        gap: "6px",
-        alignItems: "center",
-        background: "rgba(0,0,0,0.7)",
-        color: "#fff",
-        padding: "6px 14px",
-        borderRadius: "8px",
-        fontSize: "12px",
-        fontFamily: "sans-serif",
-        pointerEvents: "none",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {hints.map(([key, action], i) => (
-        <span key={key} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          {i > 0 && <span style={{ color: "rgba(255,255,255,0.3)" }}>|</span>}
-          <kbd
-            style={{
-              background: "rgba(255,255,255,0.15)",
-              padding: "1px 5px",
-              borderRadius: "3px",
-              fontSize: "11px",
-            }}
-          >
-            {key}
-          </kbd>
-          <span style={{ color: "rgba(255,255,255,0.7)" }}>{action}</span>
-        </span>
-      ))}
-    </div>
+    <>
+      <OrthographicCamera
+        ref={cameraRef}
+        makeDefault
+        near={0.1}
+        far={100000}
+        zoom={ISO_INITIAL_ZOOM}
+      />
+      <OrbitControls
+        ref={controlsRef}
+        makeDefault
+        enableRotate={false}
+        zoomToCursor
+        maxZoom={500}
+        minZoom={2}
+        screenSpacePanning
+        mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
+      />
+    </>
   );
 }
 
 /**
  * Snaps the camera to the build direction target when cameraSnapTarget changes.
- * Uses OrbitControls to set azimuthal angle and target position.
+ * In perspective mode, animates camera + orbit target. In iso mode, the camera
+ * is locked to the active slice — instead of moving the camera, advance the
+ * slice when the cursor moves along the depth axis (the IsoViewport effect
+ * then re-positions the ortho camera to follow).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> }) {
   const cameraSnapTarget = useBlockStore((s) => s.cameraSnapTarget);
   const lastBuildAxis = useBlockStore((s) => s.lastBuildAxis);
   const clearCameraSnap = useBlockStore((s) => s.clearCameraSnap);
+  const viewMode = useBlockStore((s) => s.viewMode);
+  const stepSlice = useBlockStore((s) => s.stepSlice);
   const { camera } = useThree();
   const prevTarget = useRef<{ azimuth: number | null; targetPos: { x: number; y: number; z: number } } | null>(null);
   const prevBuildAxis = useRef<number | null>(null);
@@ -212,6 +321,16 @@ function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> })
     if (!cameraSnapTarget || !controlsRef.current) return;
     if (prevTarget.current === cameraSnapTarget) return;
     prevTarget.current = cameraSnapTarget;
+
+    if (viewMode.kind === "iso") {
+      const target = cameraSnapTarget.targetPos;
+      const cursorDepth =
+        viewMode.axis === "x" ? target.x : viewMode.axis === "y" ? target.y : target.z;
+      const delta = cursorDepth - viewMode.slice;
+      if (delta !== 0) stepSlice(delta);
+      clearCameraSnap();
+      return;
+    }
 
     const controls = controlsRef.current;
     const [tx, ty, tz] = tqecToThree(cameraSnapTarget.targetPos, "XZZ");
@@ -242,6 +361,41 @@ function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> })
     animateCamera(controls, endTarget, endPos);
     clearCameraSnap();
   });
+
+  return null;
+}
+
+/**
+ * Captures the WebGL canvas as a PNG when `photoRequest` is set.
+ * Waits two animation frames so React's commit (which hides grid/overlays)
+ * and R3F's subsequent render both complete before reading pixels.
+ */
+function ScreenshotCapture() {
+  const photoRequest = useBlockStore((s) => s.photoRequest);
+  const clearPhotoRequest = useBlockStore((s) => s.clearPhotoRequest);
+  const { gl } = useThree();
+
+  useEffect(() => {
+    if (!photoRequest) return;
+    let raf1 = 0;
+    let raf2 = 0;
+    let cancelled = false;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        if (cancelled) return;
+        downloadPng(gl.domElement).catch((err) => {
+          console.error("Photo export failed:", err);
+        }).finally(() => {
+          clearPhotoRequest();
+        });
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [photoRequest, gl, clearPhotoRequest]);
 
   return null;
 }
@@ -307,88 +461,108 @@ export default function App() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
-  const [keybindEditorOpen, setKeybindEditorOpen] = useState(false);
+  const [keybindEditorMode, setKeybindEditorMode] = useState<Mode | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const threeStateRef = useRef<ThreeState | null>(null);
+  const photoRequest = useBlockStore((s) => s.photoRequest);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       const ctrl = e.ctrlKey || e.metaKey;
+      const shift = e.shiftKey;
+      const alt = e.altKey;
       const store = useBlockStore.getState();
+      const bindings = useKeybindStore.getState().bindings;
+      const mode = store.mode;
 
-      // Build mode keys (no modifier)
-      if (!ctrl && store.mode === "build") {
-        const bindings = useKeybindStore.getState().bindings;
-        const action = buildActionForKey(bindings, key);
-        if (action) {
-          e.preventDefault();
-          switch (action) {
-            case "moveForward":
-            case "moveBack":
-            case "moveLeft":
-            case "moveRight":
-            case "moveUp":
-            case "moveDown": {
-              const controls = controlsRef.current;
-              if (!controls) return;
-              const azimuth = controls.getAzimuthalAngle();
-              const dirKey = actionToWasdKey(action);
-              const direction = wasdToBuildDirection(dirKey, azimuth);
-              store.buildMove(direction);
-              return;
+      if (mode === "build") {
+        const action = actionForKey(bindings.build, key, ctrl, shift, alt);
+        if (!action) return;
+        e.preventDefault();
+        switch (action) {
+          case "moveForward":
+          case "moveBack":
+          case "moveLeft":
+          case "moveRight":
+          case "moveUp":
+          case "moveDown": {
+            const controls = controlsRef.current;
+            if (!controls) return;
+            const dirKey = actionToWasdKey(action);
+            let direction;
+            if (store.viewMode.kind === "iso") {
+              direction = isoBuildDirection(dirKey, store.viewMode.axis);
+            } else {
+              const { axisAbsoluteWasd } = useKeybindStore.getState();
+              direction = wasdToBuildDirection(dirKey, controls.getAzimuthalAngle(), axisAbsoluteWasd);
             }
-            case "undo":
-              store.undoBuildStep();
-              return;
-            case "cycleBlock":
-              store.cycleBlock();
-              return;
-            case "cyclePipe":
-              store.cyclePipe();
-              return;
-            case "deleteAtCursor":
-              store.deleteAtBuildCursor();
-              return;
-            case "exitBuild":
-              store.setMode("place");
-              return;
+            store.buildMove(direction);
+            return;
           }
+          case "undo": store.undoBuildStep(); return;
+          case "cycleBlock": store.cycleBlock(); return;
+          case "cyclePipe": store.cyclePipe(); return;
+          case "deleteAtCursor": store.deleteAtBuildCursor(); return;
+          case "exitBuild": store.setMode("place"); return;
         }
+        return;
       }
 
-      // Non-modifier shortcuts
-      if (!ctrl) {
-        if (key === "delete" || key === "backspace") {
+      const action = actionForKey<string>(
+        bindings[mode] as Record<string, KeyBinding>,
+        key,
+        ctrl,
+        shift,
+        alt,
+      );
+      if (!action) return;
+
+      switch (action) {
+        case "selectAll":
+          e.preventDefault();
+          store.selectAll();
+          return;
+        case "deleteSelection":
           if (store.selectedKeys.size > 0) {
             e.preventDefault();
             store.deleteSelected();
           }
           return;
-        }
-        if (key === "escape") {
+        case "clearSelection":
           if (store.selectedKeys.size > 0) {
             e.preventDefault();
             store.clearSelection();
           }
           return;
-        }
-        return;
-      }
-
-      // Ctrl/Cmd shortcuts
-      if (key === "a" && store.mode === "select") {
-        e.preventDefault();
-        store.selectAll();
-      } else if (key === "z" && e.shiftKey) {
-        e.preventDefault();
-        store.redo();
-      } else if (key === "z") {
-        e.preventDefault();
-        store.undo();
-      } else if (key === "y") {
-        e.preventDefault();
-        store.redo();
+        case "undo":
+          e.preventDefault();
+          store.undo();
+          return;
+        case "redo":
+          e.preventDefault();
+          store.redo();
+          return;
+        case "stepForward":
+          // Skip slice-step in select mode when there's a selection — SelectModePointer
+          // handles ↑/↓ as a Z-nudge of the selection.
+          if (store.viewMode.kind === "iso" && !(mode === "select" && store.selectedKeys.size > 0)) {
+            e.preventDefault();
+            store.stepSlice(3);
+          }
+          return;
+        case "stepBack":
+          if (store.viewMode.kind === "iso" && !(mode === "select" && store.selectedKeys.size > 0)) {
+            e.preventDefault();
+            store.stepSlice(-3);
+          }
+          return;
+        case "flipColors":
+          if (store.selectedKeys.size > 0) {
+            e.preventDefault();
+            store.flipSelected();
+          }
+          return;
       }
     };
     window.addEventListener("keydown", handler);
@@ -439,6 +613,19 @@ export default function App() {
         onResetCamera={() => {
           const controls = controlsRef.current;
           if (!controls) return;
+          const viewMode = useBlockStore.getState().viewMode;
+          if (viewMode.kind === "iso") {
+            const sliceZero = { ...viewMode, slice: 0 };
+            animateCamera(controls, isoTargetThree(sliceZero), isoCameraThree(sliceZero), {
+              onComplete: () => {
+                const cur = useBlockStore.getState();
+                if (cur.viewMode.kind === "iso" && cur.viewMode.slice !== 0) {
+                  cur.stepSlice(-cur.viewMode.slice);
+                }
+              },
+            });
+            return;
+          }
           animateCamera(controls, controls.target0.clone(), controls.position0.clone());
         }}
         controlsRef={controlsRef}
@@ -489,43 +676,46 @@ export default function App() {
       >
         <FpsDisplay spanRef={fpsRef} />
       </div>
-      <SelectModeHints />
-      <BuildModeHints onCustomize={() => setKeybindEditorOpen(true)} />
-      {keybindEditorOpen && <KeybindEditor onClose={() => setKeybindEditorOpen(false)} />}
+      <SelectModeHints onCustomize={() => setKeybindEditorMode("select")} />
+      <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />
+      <PlaceModeHints onCustomize={() => setKeybindEditorMode("place")} />
+      <DeleteModeHints onCustomize={() => setKeybindEditorMode("delete")} />
+      <BuildModeToggles />
+      {keybindEditorMode && (
+        <KeybindEditor mode={keybindEditorMode} onClose={() => setKeybindEditorMode(null)} />
+      )}
       <PlacementWarning toolbarRef={toolbarRef} />
       <Canvas
-        camera={{ position: [14, 14, -14], fov: 35, near: 0.1, far: 100000 }}
-        gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }}
+        gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping, preserveDrawingBuffer: true }}
         onContextMenu={(e) => e.preventDefault()}
       >
         <color attach="background" args={["#CBDFC6"]} />
         <ambientLight intensity={1.4} />
         <directionalLight position={[10, 10, 10]} intensity={1.0} />
         <BlockInstances />
-        <InvalidBlockHighlights />
-        <SelectionHighlights />
-        <BuildCursor />
-        <OpenPipeGhosts />
+        {!photoRequest && <FoldOutCubeOverlay />}
+        {!photoRequest && <InvalidBlockHighlights />}
+        {!photoRequest && <SelectionHighlights />}
+        {!photoRequest && <DragGhost />}
+        {!photoRequest && <BuildCursor />}
+        {!photoRequest && <OpenPipeGhosts />}
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
-        <GhostBlock />
+        {!photoRequest && <GhostBlock />}
         <AxisLabels />
         <FpsSampler targetRef={fpsRef} />
-        <CheckerboardGrid />
-        <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
-          <OrientationGizmo />
-        </GizmoHelper>
+        {!photoRequest && <CheckerboardGrid />}
+        {!photoRequest && (
+          <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
+            <OrientationGizmo />
+          </GizmoHelper>
+        )}
+        <ScreenshotCapture />
         <ThreeStateBridge stateRef={threeStateRef} />
-        <OrbitControls
-          ref={controlsRef}
-          makeDefault
-          maxDistance={50000}
-          screenSpacePanning={false}
-          mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
-        />
+        <ViewportCamera controlsRef={controlsRef} />
         <NavControlsModifier controlsRef={controlsRef} />
       </Canvas>
-      <MarqueeSelect threeStateRef={threeStateRef} controlsRef={controlsRef} />
+      <SelectModePointer threeStateRef={threeStateRef} controlsRef={controlsRef} />
     </>
   );
 }

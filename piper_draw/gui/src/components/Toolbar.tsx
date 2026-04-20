@@ -2,13 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { useBlockStore, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
 import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
-import type { BlockType, CubeType, PipeType, PipeVariant, Position3D } from "../types";
+import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
 import { fetchTemplateManifest, loadTemplateBlocks, type TemplateEntry } from "../utils/templates";
-import { animateCamera } from "../utils/cameraAnim";
-import * as THREE from "three";
 import { usePreviewImages } from "./PreviewRenderer";
+import type { ViewMode } from "../types";
 
 // ---------------------------------------------------------------------------
 // Responsive sizing
@@ -128,6 +127,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
     return count;
   });
   const deleteSelected = useBlockStore((s) => s.deleteSelected);
+  const flipSelected = useBlockStore((s) => s.flipSelected);
 
   const buildCursor = useBlockStore((s) => s.buildCursor);
   const moveBuildCursor = useBlockStore((s) => s.moveBuildCursor);
@@ -339,11 +339,10 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
   const validationStatus = useValidationStore((s) => s.status);
   const runValidation = useValidationStore((s) => s.validate);
 
-  const setCameraPreset = (position: [number, number, number]) => {
-    const controls = controlsRef.current;
-    if (!controls) return;
-    animateCamera(controls, new THREE.Vector3(0, 0, 0), new THREE.Vector3(...position));
-  };
+  const viewMode = useBlockStore((s) => s.viewMode);
+  const setPerspView = useBlockStore((s) => s.setPerspView);
+  const setIsoView = useBlockStore((s) => s.setIsoView);
+  const stepSlice = useBlockStore((s) => s.stepSlice);
 
   const previewImg = (key: string) => {
     const src = previewImages.get(key);
@@ -392,17 +391,49 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         </button>
       </div>
 
-      {/* View buttons */}
+      {/* View buttons: 3D (perspective + free orbit) and Iso (axis-locked elevation) */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
-        <button onClick={() => setCameraPreset([35, 35, 0.01])} style={{ ...btnStyle(false), whiteSpace: "nowrap" }}>
-          X View
+        <button
+          onClick={setPerspView}
+          style={{ ...btnStyle(viewMode.kind === "persp"), whiteSpace: "nowrap" }}
+          title="Free 3D perspective view with orbit"
+        >
+          3D
         </button>
-        <button onClick={() => setCameraPreset([0.01, 35, -35])} style={{ ...btnStyle(false), whiteSpace: "nowrap" }}>
-          Y View
-        </button>
-        <button onClick={() => setCameraPreset([0, 50, 0.01])} style={{ ...btnStyle(false), whiteSpace: "nowrap" }}>
-          Z View
-        </button>
+        <IsoMenu
+          viewMode={viewMode}
+          onPick={setIsoView}
+        />
+        {viewMode.kind === "iso" && (
+          <div style={{ display: "flex", gap: "2px", alignItems: "center" }}>
+            <button
+              onClick={() => stepSlice(-3)}
+              title="Move slice toward negative depth"
+              style={{ ...btnStyle(false), padding: "2px 6px", fontSize: "11px", flex: 1 }}
+            >
+              ◂
+            </button>
+            <span
+              title="Active slice on the depth axis (TQEC units / 3)"
+              style={{
+                fontFamily: "monospace",
+                fontSize: "11px",
+                color: "#555",
+                minWidth: 28,
+                textAlign: "center",
+              }}
+            >
+              {viewMode.slice / 3}
+            </span>
+            <button
+              onClick={() => stepSlice(3)}
+              title="Move slice toward positive depth"
+              style={{ ...btnStyle(false), padding: "2px 6px", fontSize: "11px", flex: 1 }}
+            >
+              ▸
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Undo / Redo / Clear */}
@@ -438,6 +469,15 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
             style={{ ...btnStyle(false), borderColor: "#dc3545", color: "#dc3545" }}
           >
             Delete {selectedCount}
+          </button>
+        )}
+        {selectedCount > 0 && (
+          <button
+            onClick={flipSelected}
+            title="Swap X↔Z colors on all selected blocks"
+            style={{ ...btnStyle(false), borderColor: "#4a9eff", color: "#4a9eff" }}
+          >
+            Flip {selectedCount}
           </button>
         )}
         <button
@@ -488,6 +528,14 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
           style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
         >
           Export
+        </button>
+        <button
+          onClick={() => useBlockStore.getState().requestPhoto()}
+          disabled={blocksEmpty}
+          title="Save current view as PNG"
+          style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
+        >
+          Photo
         </button>
         <TemplatePicker onLoad={loadBlocks} />
       </div>
@@ -632,6 +680,82 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
           return <><span>X: {pos.x / 3}</span><span>Y: {pos.y / 3}</span><span>Z: {pos.z / 3}</span></>;
         })()}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Iso view menu — dropdown to pick which axis to view down
+// ---------------------------------------------------------------------------
+
+const ISO_AXIS_LABEL: Record<IsoAxis, string> = {
+  x: "Iso X",
+  y: "Iso Y",
+  z: "Iso Z",
+};
+
+function IsoMenu({ viewMode, onPick }: { viewMode: ViewMode; onPick: (axis: IsoAxis) => void }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const active = viewMode.kind === "iso";
+  const label = active ? ISO_AXIS_LABEL[viewMode.axis] : "Iso";
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const pick = (axis: IsoAxis) => {
+    onPick(axis);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{ ...btnStyle(active), whiteSpace: "nowrap", width: "100%" }}
+        title="Axis-locked orthographic elevation view"
+      >
+        {label} ▾
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            background: "#fff",
+            border: "1px solid #ccc",
+            borderRadius: 4,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            padding: 4,
+            minWidth: 90,
+            zIndex: 1000,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          {(["x", "y", "z"] as IsoAxis[]).map((axis) => (
+            <button
+              key={axis}
+              onClick={() => pick(axis)}
+              style={{
+                ...btnStyle(active && viewMode.axis === axis),
+                textAlign: "left",
+                padding: "4px 10px",
+              }}
+            >
+              {ISO_AXIS_LABEL[axis]}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

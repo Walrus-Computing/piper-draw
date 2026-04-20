@@ -10,6 +10,27 @@ export interface Position3D {
   z: number;
 }
 
+// ---------------------------------------------------------------------------
+// View modes (perspective vs. orthographic elevation)
+// ---------------------------------------------------------------------------
+
+export type IsoAxis = "x" | "y" | "z";
+
+export type ViewMode =
+  | { kind: "persp" }
+  | { kind: "iso"; axis: IsoAxis; slice: number };
+
+/** TQEC axis index: 0=x, 1=y, 2=z. */
+export function axisIndex(axis: IsoAxis): 0 | 1 | 2 {
+  return axis === "x" ? 0 : axis === "y" ? 1 : 2;
+}
+
+/** Returns the integer slice that the given depth coordinate falls into.
+ *  Each slice spans 3 units (cube + 2 pipe slots) starting at a multiple of 3. */
+export function depthToSlice(depth: number): number {
+  return Math.floor(depth / 3) * 3;
+}
+
 /**
  * ZXCube types from TQEC. Each string character gives the basis
  * (X or Z) for the face pair on that TQEC axis: [X-axis, Y-axis, Z-axis].
@@ -165,19 +186,24 @@ function nearestMult3(v: number): number {
   return Math.round(v / 3) * 3;
 }
 
+/**
+ * Snap two raw in-plane coordinates to a valid TQEC pair: either both at block
+ * positions (multiples of 3) or one at a pipe slot (≡ 1 mod 3) for pipes.
+ */
+export function snapInPlane(rawA: number, rawB: number, forPipe: boolean): { a: number; b: number } {
+  if (!forPipe) return { a: nearestMult3(rawA), b: nearestMult3(rawB) };
+  const ba = nearestMult3(rawA), bb = nearestMult3(rawB);
+  const pa = nearest3kPipeCoord(rawA), pb = nearest3kPipeCoord(rawB);
+  const d1 = Math.abs(rawA - pa) + Math.abs(rawB - bb);
+  const d2 = Math.abs(rawA - ba) + Math.abs(rawB - pb);
+  if (d1 <= d2) return { a: pa, b: bb };
+  return { a: ba, b: pb };
+}
+
 /** Snap raw TQEC X/Y coordinates (on ground plane z=0) to nearest valid position. */
 export function snapGroundPos(rawX: number, rawY: number, forPipe: boolean): Position3D {
-  if (!forPipe) {
-    return { x: nearestMult3(rawX), y: nearestMult3(rawY), z: 0 };
-  }
-  // For pipe on ground: z=0 ≡ 0 (mod 3), need exactly one of x,y in a non-zero pipe remainder class
-  const bx = nearestMult3(rawX), by = nearestMult3(rawY);
-  const px = nearest3kPipeCoord(rawX), py = nearest3kPipeCoord(rawY);
-  // Candidate: X-pipe at (px, by) or Y-pipe at (bx, py)
-  const d1 = Math.abs(rawX - px) + Math.abs(rawY - by);
-  const d2 = Math.abs(rawX - bx) + Math.abs(rawY - py);
-  if (d1 <= d2) return { x: px, y: by, z: 0 };
-  return { x: bx, y: py, z: 0 };
+  const { a, b } = snapInPlane(rawX, rawY, forPipe);
+  return { x: a, y: b, z: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -810,10 +836,17 @@ function pipeEndBasis(base: string, hadamard: boolean, openAxis: number, axis: n
  * For Hadamard pipes, the far end (offset +2) uses swapped colors.
  * Returns true if there IS a conflict (placement should be rejected).
  */
+/** Structural subset of Map<string, Block> — helpers only need `.get()`, so
+ *  a lightweight wrapper (e.g. one that hides selected keys during a drag)
+ *  can be passed instead of cloning the full map. */
+export interface BlocksLookup {
+  get(key: string): Block | undefined;
+}
+
 export function hasPipeColorConflict(
   pipeType: PipeType,
   pipePos: Position3D,
-  blocks: Map<string, Block>,
+  blocks: BlocksLookup,
 ): boolean {
   const base = pipeType.replace("H", "");
   const hadamard = pipeType.length > 3;
@@ -867,7 +900,7 @@ export function hasPipeColorConflict(
 export function hasCubeColorConflict(
   cubeType: CubeType,
   cubePos: Position3D,
-  blocks: Map<string, Block>,
+  blocks: BlocksLookup,
 ): boolean {
   const coords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
 
@@ -908,7 +941,7 @@ export function hasCubeColorConflict(
 export function hasYCubePipeAxisConflict(
   blockType: BlockType,
   pos: Position3D,
-  blocks: Map<string, Block>,
+  blocks: BlocksLookup,
 ): boolean {
   if (blockType === "Y") {
     const coords: [number, number, number] = [pos.x, pos.y, pos.z];
@@ -1015,6 +1048,21 @@ export function swapPipeVariant(pipeBase: string): string {
 }
 
 /**
+ * Flip basis colors on any BlockType by globally swapping X↔Z.
+ * Cubes: "XZZ" → "ZXX", pipes: "OXZ" → "OZX", "XZOH" → "ZXOH". Y is returned unchanged.
+ */
+export function flipBlockType(type: BlockType): BlockType {
+  if (type === "Y") return type;
+  let out = "";
+  for (const ch of type) {
+    if (ch === "X") out += "Z";
+    else if (ch === "Z") out += "X";
+    else out += ch;
+  }
+  return out as BlockType;
+}
+
+/**
  * Infer the non-Hadamard PipeType to place from a source cube along the given axis.
  * The pipe's closed-axis characters come from the source cube's type characters.
  * Returns null if the closed-axis characters are both the same (e.g. "OZZ"),
@@ -1034,7 +1082,7 @@ export function inferPipeType(srcType: CubeType, tqecAxis: 0 | 1 | 2): PipeType 
  */
 export function determineCubeOptions(
   cubePos: Position3D,
-  blocks: Map<string, Block>,
+  blocks: BlocksLookup,
 ): { determined: true; type: CubeType } | { determined: false; options: CubeType[] } {
   const constraints: (string | null)[] = [null, null, null];
   const coords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
@@ -1155,9 +1203,20 @@ export function canonicalCubeForPort(
 export function wasdToBuildDirection(
   key: "w" | "a" | "s" | "d" | "arrowup" | "arrowdown",
   cameraAzimuth: number,
+  axisAbsolute: boolean = false,
 ): BuildDirection {
   if (key === "arrowup") return { tqecAxis: 2, sign: 1 };
   if (key === "arrowdown") return { tqecAxis: 2, sign: -1 };
+
+  // Axis-absolute mode: WASD maps to fixed world axes regardless of camera.
+  if (axisAbsolute) {
+    switch (key) {
+      case "w": return { tqecAxis: 0, sign: 1 };
+      case "s": return { tqecAxis: 0, sign: -1 };
+      case "a": return { tqecAxis: 1, sign: 1 };
+      case "d": return { tqecAxis: 1, sign: -1 };
+    }
+  }
 
   // Snap to nearest 90° quadrant: 0, 1, 2, 3
   const q = ((Math.round(cameraAzimuth / (Math.PI / 2)) % 4) + 4) % 4;

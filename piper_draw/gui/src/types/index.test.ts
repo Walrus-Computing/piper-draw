@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createBlockGeometry, getHiddenFaceMaskForPos, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes } from "./index";
+import { createBlockGeometry, getHiddenFaceMaskForPos, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, CUBE_TYPES, PIPE_TYPES } from "./index";
 import type { PipeType, CubeType } from "./index";
 import type { BlockType } from "./index";
 import { Vector3 } from "three";
@@ -454,6 +454,28 @@ describe("canonicalCubeForPort", () => {
   });
 });
 
+describe("wasdToBuildDirection", () => {
+  it("axis-absolute: W/S map to TQEC X axis, A/D to TQEC Y axis", () => {
+    // Camera azimuth should be ignored in axis-absolute mode.
+    expect(wasdToBuildDirection("w", 1.3, true)).toEqual({ tqecAxis: 0, sign: 1 });
+    expect(wasdToBuildDirection("s", -2.7, true)).toEqual({ tqecAxis: 0, sign: -1 });
+    expect(wasdToBuildDirection("a", 0.5, true)).toEqual({ tqecAxis: 1, sign: 1 });
+    expect(wasdToBuildDirection("d", 3.14, true)).toEqual({ tqecAxis: 1, sign: -1 });
+  });
+
+  it("axis-absolute: arrow keys still map to vertical (Z) axis", () => {
+    expect(wasdToBuildDirection("arrowup", 0, true)).toEqual({ tqecAxis: 2, sign: 1 });
+    expect(wasdToBuildDirection("arrowdown", 0, true)).toEqual({ tqecAxis: 2, sign: -1 });
+  });
+
+  it("camera-relative (default): forward depends on camera azimuth quadrant", () => {
+    // Azimuth 0 → camera on +Z, W = build +Y
+    expect(wasdToBuildDirection("w", 0)).toEqual({ tqecAxis: 1, sign: 1 });
+    // Azimuth π/2 → W = build -X
+    expect(wasdToBuildDirection("w", Math.PI / 2)).toEqual({ tqecAxis: 0, sign: -1 });
+  });
+});
+
 describe("createBlockGeometry", () => {
   it("removes one face from cube geometry when hidden", () => {
     const full = createBlockGeometry("XZZ");
@@ -468,5 +490,37 @@ describe("createBlockGeometry", () => {
     const hidden = createBlockGeometry("OZX", FACE_POS_Z);
 
     expect((full.getIndex()?.count ?? 0) - (hidden.getIndex()?.count ?? 0)).toBe(6);
+  });
+});
+
+describe("flipBlockType", () => {
+  it("swaps X↔Z in cube types", () => {
+    expect(flipBlockType("XZZ")).toBe("ZXX");
+    expect(flipBlockType("ZXZ")).toBe("XZX");
+    expect(flipBlockType("XXZ")).toBe("ZZX");
+  });
+
+  it("swaps closed-axis characters on pipes (preserving O and H)", () => {
+    expect(flipBlockType("OXZ")).toBe("OZX");
+    expect(flipBlockType("XOZH")).toBe("ZOXH");
+    expect(flipBlockType("ZXOH")).toBe("XZOH");
+  });
+
+  it("leaves Y unchanged", () => {
+    expect(flipBlockType("Y")).toBe("Y");
+  });
+
+  it("maps every cube and pipe type to another valid type", () => {
+    for (const ct of CUBE_TYPES) {
+      expect(CUBE_TYPES).toContain(flipBlockType(ct));
+    }
+    for (const pt of PIPE_TYPES) {
+      expect(PIPE_TYPES).toContain(flipBlockType(pt));
+    }
+  });
+
+  it("is an involution", () => {
+    for (const ct of CUBE_TYPES) expect(flipBlockType(flipBlockType(ct))).toBe(ct);
+    for (const pt of PIPE_TYPES) expect(flipBlockType(flipBlockType(pt))).toBe(pt);
   });
 });

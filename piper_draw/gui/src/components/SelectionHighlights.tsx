@@ -60,6 +60,7 @@ function PulsingHighlight({
 export function SelectionHighlights() {
   const selectedKeys = useBlockStore((s) => s.selectedKeys);
   const blocks = useBlockStore((s) => s.blocks);
+  const isDragging = useBlockStore((s) => s.isDraggingSelection);
 
   const selectedBlocks = useMemo(() => {
     if (selectedKeys.size === 0) return [];
@@ -73,6 +74,7 @@ export function SelectionHighlights() {
     return result;
   }, [selectedKeys, blocks]);
 
+  if (isDragging) return null;
   if (selectedBlocks.length === 0) return null;
 
   return (

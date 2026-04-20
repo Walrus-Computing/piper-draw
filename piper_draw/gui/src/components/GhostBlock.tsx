@@ -1,7 +1,18 @@
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
-import { tqecToThree, yBlockZOffset, getHiddenFaceMaskForPos } from "../types";
+import {
+  tqecToThree,
+  yBlockZOffset,
+  getHiddenFaceMaskForPos,
+  isPipeType,
+  pipeAxisFromPos,
+  axisIndex,
+  CUBE_TYPES,
+} from "../types";
+import { isoTopThreeAxis } from "../utils/isoFoldOut";
+import type { ThreeAxis } from "../utils/isoFoldOut";
 import { getCachedGeometry, getCachedEdges, getCachedFullBox } from "./BlockInstances";
+import { FoldOutCubeFaces } from "./FoldOutCube";
 
 const noRaycast = () => {};
 
@@ -61,6 +72,27 @@ const replaceLineMaterial = new THREE.LineBasicMaterial({
   opacity: 0.85,
   depthWrite: false,
 });
+// Iso-mode ghost for non-cube types (pipes, Y): opaque colored mesh + full-opacity
+// black edges, matching the toolbar preview style. Cube ghosts use the fold-out
+// instead so they don't go through these.
+const isoGhostMaterial = new THREE.MeshBasicMaterial({
+  vertexColors: true,
+  side: THREE.DoubleSide,
+  polygonOffset: true,
+  polygonOffsetFactor: 1,
+  polygonOffsetUnits: 1,
+});
+const isoLineMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
+// Iso-mode overlay for depth-axis pipe ghosts: draws the pipe's full extent on top
+// of any occluding geometry so the user can tell where the pipe goes (the cap alone
+// looks identical to a cube cap when seen end-on).
+const depthPipeOutlineMaterial = new THREE.LineBasicMaterial({
+  color: "#1f6feb",
+  transparent: true,
+  opacity: 0.55,
+  depthTest: false,
+  depthWrite: false,
+});
 
 /**
  * Inner component — only mounts when hoveredGridPos is non-null.
@@ -76,6 +108,7 @@ function GhostBlockInner() {
   const blocks = useBlockStore((s) => s.blocks);
   const spatialIndex = useBlockStore((s) => s.spatialIndex);
   const placePort = useBlockStore((s) => s.placePort);
+  const viewMode = useBlockStore((s) => s.viewMode);
 
   // Port placement preview: render a port-style white ghost at the snapped
   // cube position. No type-dependent coloring, no hidden-face mask.
@@ -107,14 +140,42 @@ function GhostBlockInner() {
   const isInvalid = !isDelete && hoveredInvalid;
   const isReplace = !isDelete && hoveredReplace;
 
-  let meshMat = isInvalid ? invalidMaterial : ghostMaterial;
-  let lineMat = isInvalid ? invalidLineMaterial : validLineMaterial;
+  const isIso = viewMode.kind === "iso";
+  let meshMat: THREE.Material = isInvalid
+    ? invalidMaterial
+    : isIso
+      ? isoGhostMaterial
+      : ghostMaterial;
+  let lineMat: THREE.Material = isInvalid
+    ? invalidLineMaterial
+    : isIso
+      ? isoLineMaterial
+      : validLineMaterial;
   let scale = isInvalid ? 1.005 : 1;
   if (isReplace && !isInvalid) {
     meshMat = replaceMaterial;
     lineMat = replaceLineMaterial;
     scale = 1.01;
   }
+
+  // In iso mode, a pipe whose open axis matches the view's depth axis collapses end-on
+  // to a unit cap (visually identical to a cube). Render the full pipe edges with
+  // depthTest off so the user can see the pipe is there even if a cube occludes it.
+  const pipeAxis = isPipeType(activeType) ? pipeAxisFromPos(hoveredGridPos) : null;
+  const showDepthPipeOutline =
+    !isDelete &&
+    viewMode.kind === "iso" &&
+    pipeAxis !== null &&
+    pipeAxis === axisIndex(viewMode.axis);
+  const fullPipeEdges = showDepthPipeOutline ? getCachedEdges(activeType, 0) : null;
+
+  // Iso-mode cube preview: fan the 4 side faces outward so their colors are visible.
+  const showFoldOutCube =
+    !isDelete &&
+    !isInvalid &&
+    viewMode.kind === "iso" &&
+    (CUBE_TYPES as readonly string[]).includes(activeType);
+  const foldTopAxis: ThreeAxis = viewMode.kind === "iso" ? isoTopThreeAxis(viewMode.axis) : 0;
 
   return (
     <group position={[x, y, z]}>
@@ -125,14 +186,27 @@ function GhostBlockInner() {
         </mesh>
       ) : (
         <group scale={scale}>
-          <mesh>
-            <primitive object={ghostGeometry} attach="geometry" />
-            <primitive object={meshMat} attach="material" />
-          </mesh>
-          <lineSegments>
-            <primitive object={ghostEdges} attach="geometry" />
-            <primitive object={lineMat} attach="material" />
-          </lineSegments>
+          {!showFoldOutCube && (
+            <>
+              <mesh>
+                <primitive object={ghostGeometry} attach="geometry" />
+                <primitive object={meshMat} attach="material" />
+              </mesh>
+              <lineSegments>
+                <primitive object={ghostEdges} attach="geometry" />
+                <primitive object={lineMat} attach="material" />
+              </lineSegments>
+            </>
+          )}
+          {fullPipeEdges && (
+            <lineSegments scale={1.04} renderOrder={999}>
+              <primitive object={fullPipeEdges} attach="geometry" />
+              <primitive object={depthPipeOutlineMaterial} attach="material" />
+            </lineSegments>
+          )}
+          {showFoldOutCube && (
+            <FoldOutCubeFaces blockType={activeType} topAxis={foldTopAxis} />
+          )}
         </group>
       )}
     </group>

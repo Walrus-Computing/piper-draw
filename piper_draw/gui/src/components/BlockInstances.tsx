@@ -21,6 +21,10 @@ import {
   VARIANT_AXIS_MAP,
 } from "../types";
 import type { BlockType, CubeType, Block, FaceMask, Position3D, PipeVariant } from "../types";
+import { posInActiveSlice } from "../utils/isoView";
+
+const DIMMED_OPACITY = 0.18;
+const DIMMED_EDGE_OPACITY = 0.25;
 
 const MIN_CAPACITY = 64;
 
@@ -32,6 +36,12 @@ const geometryCache = new Map<string, THREE.BufferGeometry>();
 const fullBoxCache = new Map<BlockType, THREE.BoxGeometry>();
 const edgesCache = new Map<string, THREE.BufferGeometry>();
 const edgeLineMaterial = new THREE.LineBasicMaterial({ color: "#000000" });
+const dimmedEdgeLineMaterial = new THREE.LineBasicMaterial({
+  color: "#000000",
+  transparent: true,
+  opacity: DIMMED_EDGE_OPACITY,
+  depthWrite: false,
+});
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function resolvePipeTypeFromFace(
@@ -86,11 +96,13 @@ function TypedInstances({
   blocks,
   hiddenFaces,
   allBlocks,
+  dimmed,
 }: {
   cubeType: BlockType;
   blocks: Block[];
   hiddenFaces: FaceMask;
   allBlocks: Map<string, Block>;
+  dimmed: boolean;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const blocksRef = useRef(blocks);
@@ -112,8 +124,14 @@ function TypedInstances({
     () => new THREE.MeshLambertMaterial({
       vertexColors: true,
       side: THREE.DoubleSide,
+      transparent: dimmed,
+      opacity: dimmed ? DIMMED_OPACITY : 1,
+      depthWrite: !dimmed,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
     }),
-    [],
+    [dimmed],
   );
   const dummy = useMemo(() => new THREE.Matrix4(), []);
 
@@ -278,6 +296,7 @@ function TypedInstances({
     const b = blocksRef.current;
     if (e.instanceId == null || e.instanceId >= b.length) return;
     const store = useBlockStore.getState();
+    if (store.isDraggingSelection) return;
     if (store.mode === "build") {
       // In build mode, clicking a cube moves the cursor there
       const clicked = b[e.instanceId];
@@ -339,7 +358,7 @@ function TypedInstances({
         onClick={handleClick}
       />
       {batchedEdgesGeo && (
-        <lineSegments geometry={batchedEdgesGeo} material={edgeLineMaterial} />
+        <lineSegments geometry={batchedEdgesGeo} material={dimmed ? dimmedEdgeLineMaterial : edgeLineMaterial} />
       )}
     </>
   );
@@ -348,17 +367,20 @@ function TypedInstances({
 export function BlockInstances() {
   const blocks = useBlockStore((s) => s.blocks);
   const hiddenFaces = useBlockStore((s) => s.hiddenFaces);
+  const viewMode = useBlockStore((s) => s.viewMode);
 
   const grouped = useMemo(() => {
     type Group = {
       type: BlockType;
       hiddenFaces: FaceMask;
+      dimmed: boolean;
       blocks: Block[];
     };
     const map = new Map<string, Group>();
     for (const block of blocks.values()) {
       const hf = hiddenFaces.get(posKey(block.pos)) ?? 0;
-      const key = `${block.type}:${hf}`;
+      const dimmed = viewMode.kind === "iso" && !posInActiveSlice(viewMode, block.pos);
+      const key = `${block.type}:${hf}:${dimmed ? 1 : 0}`;
       const existing = map.get(key);
       if (existing) {
         existing.blocks.push(block);
@@ -366,22 +388,24 @@ export function BlockInstances() {
         map.set(key, {
           type: block.type,
           hiddenFaces: hf,
+          dimmed,
           blocks: [block],
         });
       }
     }
     return map;
-  }, [blocks, hiddenFaces]);
+  }, [blocks, hiddenFaces, viewMode]);
 
   return (
     <>
-      {Array.from(grouped.values()).map((group) => (
+      {Array.from(grouped.entries()).map(([key, group]) => (
         <TypedInstances
-          key={`${group.type}:${group.hiddenFaces}`}
+          key={key}
           cubeType={group.type}
           hiddenFaces={group.hiddenFaces}
           blocks={group.blocks}
           allBlocks={blocks}
+          dimmed={group.dimmed}
         />
       ))}
     </>

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
+import { useKeybindStore } from "../stores/keybindStore";
 
 export function NavControlsModifier({
   controlsRef,
@@ -9,18 +10,25 @@ export function NavControlsModifier({
   controlsRef: React.RefObject<any>;
 }) {
   const mode = useBlockStore((s) => s.mode);
+  const navStyle = useKeybindStore((s) => s.navStyle);
 
   useEffect(() => {
-    // Note: OrbitControls internally swaps LEFT between ROTATE <-> PAN when
-    // Shift/Ctrl/Meta is held. So for Shift+drag=rotate to work, we leave
-    // LEFT=PAN and let OrbitControls do the swap. Alt is NOT part of that
-    // swap, so we explicitly set LEFT=ROTATE while Alt is held.
+    // OrbitControls auto-swaps LEFT between ROTATE and PAN when Shift/Ctrl/Meta
+    // is held: if LEFT=PAN, Shift makes it ROTATE; if LEFT=ROTATE, Shift makes
+    // it PAN. Alt is NOT part of that swap, so in the "pan" navStyle we set
+    // LEFT explicitly while Alt is held to expose Alt+Drag = rotate.
     const apply = (alt: boolean) => {
       const controls = controlsRef.current;
       if (!controls || !controls.mouseButtons) return;
       if (mode === "select") {
         controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+        return;
+      }
+      if (navStyle === "rotate") {
+        // Drag = rotate, Shift+Drag = pan (handled by OrbitControls' built-in swap).
+        controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
       } else {
+        // Drag = pan, Shift+Drag = rotate (built-in swap), Alt+Drag = rotate (manual).
         controls.mouseButtons.LEFT = alt ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN;
       }
     };
@@ -51,7 +59,7 @@ export function NavControlsModifier({
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, [mode, controlsRef]);
+  }, [mode, navStyle, controlsRef]);
 
   return null;
 }
