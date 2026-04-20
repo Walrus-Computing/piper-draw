@@ -8,49 +8,13 @@ import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
 import { fetchTemplateManifest, loadTemplateBlocks, type TemplateEntry } from "../utils/templates";
 import { usePreviewImages } from "./PreviewRenderer";
+import { FpsDisplay } from "./FpsCounter";
+import { useViewportFitScale } from "../hooks/useViewportFitScale";
 import type { ViewMode } from "../types";
 
-// ---------------------------------------------------------------------------
-// Responsive sizing
-// ---------------------------------------------------------------------------
-
-// Horizontal margin (px) kept between the toolbar and the viewport edges
-// when the toolbar is scaled down to fit a narrow window.
-const TOOLBAR_VIEWPORT_MARGIN_PX = 20;
-
-// Returns a CSS scale factor that keeps the toolbar at its natural size when
-// it fits in the viewport, and shrinks it just enough to fit when it doesn't.
-function useToolbarScale(toolbarRef: React.RefObject<HTMLDivElement | null>): number {
-  const [scale, setScale] = useState(1);
-  useEffect(() => {
-    let frame = 0;
-    const recompute = () => {
-      if (frame) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        const node = toolbarRef.current;
-        if (!node) return;
-        // offsetWidth is the layout (untransformed) width — independent of
-        // the scale we apply, so this measurement is stable across renders.
-        const natural = node.offsetWidth;
-        if (natural === 0) return;
-        const available = window.innerWidth - TOOLBAR_VIEWPORT_MARGIN_PX;
-        setScale(Math.min(1, available / natural));
-      });
-    };
-    const node = toolbarRef.current;
-    const ro = node ? new ResizeObserver(recompute) : null;
-    if (node && ro) ro.observe(node);
-    window.addEventListener("resize", recompute);
-    recompute();
-    return () => {
-      ro?.disconnect();
-      window.removeEventListener("resize", recompute);
-      if (frame) cancelAnimationFrame(frame);
-    };
-  }, [toolbarRef]);
-  return scale;
-}
+// Horizontal margin (px) kept between fixed overlays (toolbar, hint bar) and
+// the viewport edges when they scale down to fit a narrow window.
+const VIEWPORT_FIT_MARGIN_PX = 20;
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -103,15 +67,17 @@ export function Toolbar({
   onResetCamera,
   controlsRef,
   toolbarRef,
+  fpsRef,
   onOpenKeybindEditor,
 }: {
   onResetCamera: () => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   controlsRef: React.RefObject<any>;
   toolbarRef: React.RefObject<HTMLDivElement | null>;
+  fpsRef: React.RefObject<HTMLSpanElement | null>;
   onOpenKeybindEditor: (mode: KeybindMode) => void;
 }) {
-  const scale = useToolbarScale(toolbarRef);
+  const scale = useViewportFitScale(toolbarRef, VIEWPORT_FIT_MARGIN_PX);
   const mode = useBlockStore((s) => s.mode);
   const setMode = useBlockStore((s) => s.setMode);
   const armedTool = useBlockStore((s) => s.armedTool);
@@ -615,30 +581,35 @@ export function Toolbar({
 
       {/* Position display */}
       <div style={{ width: 1, background: "#ddd" }} />
-      <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", fontFamily: "monospace", fontSize: "12px", color: "#555", lineHeight: "1.6", minWidth: 90 }}>
-        <span style={groupLabelStyle}>Position</span>
-        {mode === "build" && buildCursor ? (
-          <PositionEditor pos={buildCursor} onCommit={moveBuildCursor} />
-        ) : (() => {
-          const pos: Position3D | null = hoveredGridPos;
-          const bt: BlockType | null = useBlockStore.getState().hoveredBlockType;
-          if (!pos) return <><span>X: —</span><span>Y: —</span><span>Z: —</span></>;
-          const isPipe = bt ? isPipeType(bt) : pipeAxisFromPos(pos) !== null;
-          if (isPipe) {
-            const axis = pipeAxisFromPos(pos);
-            const coords = [pos.x, pos.y, pos.z];
-            const labels = ["X", "Y", "Z"];
-            return labels.map((l, i) => {
-              if (i === axis) {
-                const c1 = (coords[i] - 1) / 3;
-                const c2 = (coords[i] + 2) / 3;
-                return <span key={i}>{l}: {c1} → {c2}</span>;
-              }
-              return <span key={i}>{l}: {coords[i] / 3}</span>;
-            });
-          }
-          return <><span>X: {pos.x / 3}</span><span>Y: {pos.y / 3}</span><span>Z: {pos.z / 3}</span></>;
-        })()}
+      <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", fontFamily: "monospace", fontSize: "12px", color: "#555", lineHeight: "1.6", minWidth: 90 }}>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <span style={groupLabelStyle}>Position</span>
+          {mode === "build" && buildCursor ? (
+            <PositionEditor pos={buildCursor} onCommit={moveBuildCursor} />
+          ) : (() => {
+            const pos: Position3D | null = hoveredGridPos;
+            const bt: BlockType | null = useBlockStore.getState().hoveredBlockType;
+            if (!pos) return <><span>X: —</span><span>Y: —</span><span>Z: —</span></>;
+            const isPipe = bt ? isPipeType(bt) : pipeAxisFromPos(pos) !== null;
+            if (isPipe) {
+              const axis = pipeAxisFromPos(pos);
+              const coords = [pos.x, pos.y, pos.z];
+              const labels = ["X", "Y", "Z"];
+              return labels.map((l, i) => {
+                if (i === axis) {
+                  const c1 = (coords[i] - 1) / 3;
+                  const c2 = (coords[i] + 2) / 3;
+                  return <span key={i}>{l}: {c1} → {c2}</span>;
+                }
+                return <span key={i}>{l}: {coords[i] / 3}</span>;
+              });
+            }
+            return <><span>X: {pos.x / 3}</span><span>Y: {pos.y / 3}</span><span>Z: {pos.z / 3}</span></>;
+          })()}
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <FpsDisplay spanRef={fpsRef} />
+        </div>
       </div>
 
       {selectedCount > 0 && mode === "edit" && (

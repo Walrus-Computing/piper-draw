@@ -15,7 +15,7 @@ import { BlockInstances } from "./components/BlockInstances";
 import { GridPlane } from "./components/GridPlane";
 import { GhostBlock } from "./components/GhostBlock";
 import { AxisLabels } from "./components/AxisLabels";
-import { FpsDisplay, FpsSampler } from "./components/FpsCounter";
+import { FpsSampler } from "./components/FpsCounter";
 import { OrientationGizmo } from "./components/OrientationGizmo";
 import { Toolbar } from "./components/Toolbar";
 import { ValidationToast } from "./components/ValidationToast";
@@ -673,6 +673,7 @@ export default function App() {
         }}
         controlsRef={controlsRef}
         toolbarRef={toolbarRef}
+        fpsRef={fpsRef}
         onOpenKeybindEditor={setKeybindEditorMode}
       />
       <ValidationToast toolbarRef={toolbarRef} controlsRef={controlsRef} />
@@ -683,8 +684,8 @@ export default function App() {
         title="About piper-draw"
         style={{
           position: "fixed",
-          bottom: 16,
-          left: 16,
+          bottom: 20,
+          left: 20,
           zIndex: 1,
           width: 32,
           height: 32,
@@ -704,22 +705,6 @@ export default function App() {
         ?
       </button>
       {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
-      <div
-        onPointerDown={(e) => e.stopPropagation()}
-        style={{
-          position: "fixed",
-          top: 10,
-          right: 16,
-          zIndex: 1,
-          background: "rgba(255,255,255,0.9)",
-          padding: "6px 12px",
-          borderRadius: "8px",
-          border: "1px solid #ddd",
-          boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
-        }}
-      >
-        <FpsDisplay spanRef={fpsRef} />
-      </div>
       <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />
       <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />
       {keybindEditorMode && (
