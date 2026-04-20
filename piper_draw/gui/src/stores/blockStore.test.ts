@@ -1022,4 +1022,42 @@ describe("blockStore", () => {
       expect(st.cubeType).toBe("XZZ");
     });
   });
+
+  describe("buildMove from an empty origin", () => {
+    it("leaves the origin slot empty (no cube placed at the start position)", () => {
+      useBlockStore.setState({
+        mode: "build",
+        buildCursor: { x: 0, y: 0, z: 0 },
+        buildHistory: [],
+      });
+      const ok = useBlockStore.getState().buildMove({ tqecAxis: 0, sign: 1 });
+      expect(ok).toBe(true);
+      const s = useBlockStore.getState();
+      // Pipe placed between origin and dest; neither endpoint holds a cube.
+      expect(s.blocks.has("1,0,0")).toBe(true);
+      expect(s.blocks.has("0,0,0")).toBe(false);
+      expect(s.blocks.has("3,0,0")).toBe(false);
+      // Cursor advances to the destination slot.
+      expect(s.buildCursor).toEqual({ x: 3, y: 0, z: 0 });
+    });
+
+    it("promotes the origin port to a cube once a second pipe attaches", () => {
+      useBlockStore.setState({
+        mode: "build",
+        buildCursor: { x: 0, y: 0, z: 0 },
+        buildHistory: [],
+      });
+      // First step: +X. Origin stays a port.
+      useBlockStore.getState().buildMove({ tqecAxis: 0, sign: 1 });
+      expect(useBlockStore.getState().blocks.has("0,0,0")).toBe(false);
+
+      // Move cursor back to the origin port and build along +Y — now the
+      // origin has two attached pipes and should auto-promote to a cube.
+      useBlockStore.setState({ buildCursor: { x: 0, y: 0, z: 0 } });
+      useBlockStore.getState().buildMove({ tqecAxis: 1, sign: 1 });
+      const origin = useBlockStore.getState().blocks.get("0,0,0");
+      expect(origin).toBeDefined();
+      expect(origin!.type).not.toMatch(/O/); // cube, not pipe
+    });
+  });
 });
