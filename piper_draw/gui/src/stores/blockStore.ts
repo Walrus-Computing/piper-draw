@@ -31,6 +31,7 @@ import {
   VARIANT_AXIS_MAP,
   toggleHadamard,
   swapPipeVariant,
+  traversedPipeKey,
 } from "../types";
 
 export type Mode = "place" | "delete" | "select" | "build";
@@ -2019,6 +2020,23 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     }
 
     if (candidatePipes.length === 0) return;
+
+    // If multiple pipes are eligible, prefer the one the user just walked
+    // through. This makes R and toolbar-click "just work" after a step even
+    // when the cursor lands next to other colinear or T-junction pipes.
+    if (candidatePipes.length > 1) {
+      const lastStep = state.buildHistory[state.buildHistory.length - 1];
+      if (lastStep) {
+        const preferredKey = lastStep.pipe?.key
+          ?? traversedPipeKey(lastStep.prevCursorPos, lastStep.destCursorPos);
+        const preferred = candidatePipes.find((c) => c.key === preferredKey);
+        if (preferred) {
+          candidatePipes.length = 0;
+          candidatePipes.push(preferred);
+        }
+      }
+    }
+
     if (!state.freeBuild && candidatePipes.length > 1) {
       set({ hoveredInvalidReason: "Multiple undetermined pipes — cannot cycle" });
       return;

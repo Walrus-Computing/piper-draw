@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { useBlockStore } from "../stores/blockStore";
+import { useBlockStore, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
-import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, PIPE_TYPE_TO_VARIANT } from "../types";
+import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
 import type { BlockType, CubeType, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
@@ -244,12 +244,19 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
   };
   // In free build mode, any adjacent pipe is cycle-eligible (mirrors cyclePipe).
   // Outside free build, only pipes with an ambiguous end qualify — those are the
-  // only ones where cycling isn't constrained to a single valid type.
-  const findUndeterminedPipeKey = (s: { buildCursor: Position3D | null; blocks: Map<string, { pos: Position3D; type: BlockType }>; freeBuild: boolean }): string | null => {
+  // only ones where cycling isn't constrained to a single valid type. If 2+ are
+  // eligible, prefer the pipe traversed by the last build step (same tiebreaker
+  // cyclePipe uses); otherwise return null to grey out the toolbar.
+  const findUndeterminedPipeKey = (s: {
+    buildCursor: Position3D | null;
+    blocks: Map<string, { pos: Position3D; type: BlockType }>;
+    freeBuild: boolean;
+    buildHistory: BuildStep[];
+  }): string | null => {
     if (!s.buildCursor) return null;
     const cc: [number, number, number] = [s.buildCursor.x, s.buildCursor.y, s.buildCursor.z];
     const cursorAmbiguous = isAmbiguousCubeEnd(posKey(s.buildCursor), s.blocks);
-    let found: string | null = null;
+    const eligible: string[] = [];
     for (let axis = 0; axis < 3; axis++) {
       for (const offset of [1, -2]) {
         const pc: [number, number, number] = [cc[0], cc[1], cc[2]];
@@ -258,25 +265,26 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         const pipe = s.blocks.get(pk);
         if (!pipe || !isPipeType(pipe.type)) continue;
         if ((pipe.type as string).replace("H", "").indexOf("O") !== axis) continue;
-        let eligible = s.freeBuild;
-        if (!eligible) {
+        let ok = s.freeBuild;
+        if (!ok) {
           const fc: [number, number, number] = [cc[0], cc[1], cc[2]];
           fc[axis] += offset === 1 ? 3 : -3;
           const farKey = posKey({ x: fc[0], y: fc[1], z: fc[2] });
-          eligible = cursorAmbiguous || isAmbiguousCubeEnd(farKey, s.blocks);
+          ok = cursorAmbiguous || isAmbiguousCubeEnd(farKey, s.blocks);
         }
-        if (eligible) {
-          // Free build cycles the first adjacent pipe (cyclePipe semantics);
-          // outside free build, 2+ ambiguous pipes make the target ambiguous.
-          if (found !== null) {
-            if (s.freeBuild) continue;
-            return null;
-          }
-          found = pk;
-        }
+        if (ok) eligible.push(pk);
       }
     }
-    return found;
+    if (eligible.length === 0) return null;
+    if (eligible.length === 1) return eligible[0];
+    if (s.freeBuild) return eligible[0];
+    const last = s.buildHistory[s.buildHistory.length - 1];
+    if (last) {
+      const preferred = last.pipe?.key
+        ?? traversedPipeKey(last.prevCursorPos, last.destCursorPos);
+      if (eligible.includes(preferred)) return preferred;
+    }
+    return null;
   };
   const buildActivePipeVariant = useBlockStore((s): PipeVariant | null => {
     if (s.mode !== "build") return null;

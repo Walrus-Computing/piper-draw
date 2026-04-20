@@ -986,6 +986,23 @@ export function computePipePos(cursorPos: Position3D, dir: BuildDirection): Posi
 }
 
 /**
+ * Given the previous and destination cursor positions of a single build step,
+ * return the posKey of the pipe the step traversed. prev and dest differ by
+ * exactly ±3 along one axis; the pipe sits at prev±{1,2} in that slot.
+ */
+export function traversedPipeKey(prev: Position3D, dest: Position3D): string {
+  const dx = dest.x - prev.x, dy = dest.y - prev.y, dz = dest.z - prev.z;
+  const axis = dx !== 0 ? 0 : dy !== 0 ? 1 : 2;
+  const delta = axis === 0 ? dx : axis === 1 ? dy : dz;
+  const offset = delta > 0 ? 1 : -2;
+  const pipe = { x: prev.x, y: prev.y, z: prev.z };
+  if (axis === 0) pipe.x += offset;
+  else if (axis === 1) pipe.y += offset;
+  else pipe.z += offset;
+  return posKey(pipe);
+}
+
+/**
  * Swap the two closed-axis characters of a pipe base type.
  * E.g. "OXZ" → "OZX", "ZOX" → "XOZ", "XZO" → "ZXO".
  */
