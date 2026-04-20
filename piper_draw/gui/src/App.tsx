@@ -26,6 +26,8 @@ import { SelectModePointer, type ThreeState } from "./components/SelectModePoint
 import { DragGhost } from "./components/DragGhost";
 import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
+import { FlowsPanel } from "./components/FlowsPanel";
+import { PortLabels3D } from "./components/PortLabels3D";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
 import { BuildModeHints } from "./components/BuildModeHints";
 import { SelectModeHints } from "./components/SelectModeHints";
@@ -46,6 +48,7 @@ import { wasdToBuildDirection, tqecToThree, type Block, type ViewMode } from "./
 import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
 import { downloadPng } from "./utils/photoExport";
+import { isEditableTarget } from "./utils/editableFocus";
 import {
   ISO_INITIAL_ZOOM,
   isoBuildDirection,
@@ -58,6 +61,7 @@ import {
 const GRID_SNAP = 3;
 
 const AUTOSAVE_KEY = "piper-draw:autosave:v1";
+const AUTOSAVE_META_KEY = "piper-draw:autosave:meta:v1";
 const AUTOSAVE_DEBOUNCE_MS = 500;
 
 /**
@@ -465,9 +469,11 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const threeStateRef = useRef<ThreeState | null>(null);
   const photoRequest = useBlockStore((s) => s.photoRequest);
+  const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return;
       const key = e.key.toLowerCase();
       const ctrl = e.ctrlKey || e.metaKey;
       const shift = e.shiftKey;
@@ -581,6 +587,25 @@ export default function App() {
     } catch {
       localStorage.removeItem(AUTOSAVE_KEY);
     }
+    try {
+      const rawMeta = localStorage.getItem(AUTOSAVE_META_KEY);
+      if (rawMeta) {
+        const parsed = JSON.parse(rawMeta) as {
+          portMeta?: Array<[string, { label: string; io: "in" | "out" }]>;
+          portPositions?: string[];
+        };
+        const store = useBlockStore.getState();
+        if (parsed.portMeta) {
+          useBlockStore.setState({ portMeta: new Map(parsed.portMeta) });
+        }
+        if (parsed.portPositions) {
+          useBlockStore.setState({ portPositions: new Set(parsed.portPositions) });
+        }
+        store.ensurePortLabels();
+      }
+    } catch {
+      localStorage.removeItem(AUTOSAVE_META_KEY);
+    }
   }, []);
 
   useEffect(() => {
@@ -592,16 +617,37 @@ export default function App() {
         // Quota exceeded or storage unavailable — ignore.
       }
     };
+    const flushMeta = () => {
+      try {
+        const s = useBlockStore.getState();
+        localStorage.setItem(
+          AUTOSAVE_META_KEY,
+          JSON.stringify({
+            portMeta: Array.from(s.portMeta.entries()),
+            portPositions: Array.from(s.portPositions),
+          }),
+        );
+      } catch {
+        // ignore
+      }
+    };
     const unsub = useBlockStore.subscribe((state, prev) => {
-      if (state.blocks === prev.blocks) return;
+      const blocksChanged = state.blocks !== prev.blocks;
+      const metaChanged =
+        state.portMeta !== prev.portMeta || state.portPositions !== prev.portPositions;
+      if (!blocksChanged && !metaChanged) return;
       if (timeout !== null) clearTimeout(timeout);
       const snapshot = state.blocks;
-      timeout = setTimeout(() => flush(snapshot), AUTOSAVE_DEBOUNCE_MS);
+      timeout = setTimeout(() => {
+        flush(snapshot);
+        flushMeta();
+      }, AUTOSAVE_DEBOUNCE_MS);
     });
     return () => {
       if (timeout !== null) {
         clearTimeout(timeout);
         flush(useBlockStore.getState().blocks);
+        flushMeta();
       }
       unsub();
     };
@@ -660,6 +706,7 @@ export default function App() {
         ?
       </button>
       {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
+      <FlowsPanel />
       <div
         onPointerDown={(e) => e.stopPropagation()}
         style={{
@@ -699,6 +746,7 @@ export default function App() {
         {!photoRequest && <DragGhost />}
         {!photoRequest && <BuildCursor />}
         {!photoRequest && <OpenPipeGhosts />}
+      {!photoRequest && flowsPanelOpen && <PortLabels3D />}
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
         {!photoRequest && <GhostBlock />}

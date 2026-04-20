@@ -13,9 +13,10 @@ import {
   hasCubeColorConflict,
   hasYCubePipeAxisConflict,
   getAdjacentPos,
+  getAllPortPositions,
 } from "../types";
 import { resolvePipeTypeFromFace } from "./BlockInstances";
-import type { Position3D, Block, BlockType, CubeType } from "../types";
+import type { Position3D, BlockType, CubeType } from "../types";
 
 // Sentinel cube type for sizing/face-normal calculations on a port (which has
 // no real type). All standard cubes are 1×1×1 in grid units, so any concrete
@@ -54,46 +55,6 @@ const highlightBox = new THREE.BoxGeometry(1.04, 1.04, 1.04);
 const highlightEdges = new THREE.EdgesGeometry(highlightBox);
 
 const noRaycast = () => {};
-
-/**
- * Find all port positions: open pipe endpoints plus any user-placed port markers.
- * Skips positions already occupied by a real block.
- */
-function getAllPortPositions(
-  blocks: Map<string, Block>,
-  explicitPorts: Set<string>,
-): Position3D[] {
-  const endpoints: Position3D[] = [];
-  const seen = new Set<string>();
-
-  const add = (pos: Position3D) => {
-    const key = posKey(pos);
-    if (blocks.has(key) || seen.has(key)) return;
-    seen.add(key);
-    endpoints.push(pos);
-  };
-
-  for (const block of blocks.values()) {
-    if (!isPipeType(block.type)) continue;
-
-    const base = block.type.replace("H", "");
-    const openAxis = base.indexOf("O"); // 0, 1, or 2
-    const coords: [number, number, number] = [block.pos.x, block.pos.y, block.pos.z];
-
-    for (const offset of [-1, 2]) {
-      const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
-      nCoords[openAxis] += offset;
-      add({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
-    }
-  }
-
-  for (const key of explicitPorts) {
-    const parts = key.split(",").map(Number);
-    add({ x: parts[0], y: parts[1], z: parts[2] });
-  }
-
-  return endpoints;
-}
 
 /**
  * Interactive ghost cube at an open pipe endpoint.

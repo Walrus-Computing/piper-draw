@@ -120,6 +120,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
   const blocksEmpty = useBlockStore((s) => s.blocks.size === 0);
   const freeBuild = useBlockStore((s) => s.freeBuild);
   const toggleFreeBuild = useBlockStore((s) => s.toggleFreeBuild);
+  const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
   const selectedCount = useBlockStore((s) => {
     if (s.selectedKeys.size === 0) return 0;
     let count = 0;
@@ -500,6 +501,17 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
           }}
         >
           {validationStatus === "loading" ? "Verifying..." : "Verify (tqec)"}
+        </button>
+        <button
+          onClick={() => useBlockStore.getState().toggleFlowsPanel()}
+          title="Show stabilizer flows for the current diagram"
+          style={{
+            ...btnStyle(flowsPanelOpen),
+            borderColor: flowsPanelOpen ? "#4a9eff" : "#ccc",
+            background: flowsPanelOpen ? "#e8f0fe" : "#fff",
+          }}
+        >
+          Flows
         </button>
         <button
           onClick={toggleFreeBuild}
