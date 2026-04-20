@@ -11,6 +11,7 @@ export function NavControlsModifier({
 }) {
   const mode = useBlockStore((s) => s.mode);
   const armedTool = useBlockStore((s) => s.armedTool);
+  const viewMode = useBlockStore((s) => s.viewMode);
   const navStyle = useKeybindStore((s) => s.navStyle);
 
   useEffect(() => {
@@ -61,7 +62,7 @@ export function NavControlsModifier({
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, [mode, armedTool, navStyle, controlsRef]);
+  }, [mode, armedTool, viewMode, navStyle, controlsRef]);
 
   return null;
 }
