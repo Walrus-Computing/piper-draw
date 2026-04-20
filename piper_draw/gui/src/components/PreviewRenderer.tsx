@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import * as THREE from "three";
 import {
   CUBE_TYPES,
+  VARIANT_AXIS_MAP,
   createBlockGeometry,
   createBlockEdges,
   blockThreeSize,
 } from "../types";
-import type { BlockType, ViewMode } from "../types";
+import type { BlockType, PipeVariant, ViewMode } from "../types";
 import { useBlockStore } from "../stores/blockStore";
 import {
   FOLD_ANGLE,
@@ -17,14 +18,20 @@ import {
 } from "../utils/isoFoldOut";
 import type { ThreeAxis } from "../utils/isoFoldOut";
 
-/** All block types to render previews for, including pipe canonical forms. */
-const PREVIEW_TYPES: { key: string; blockType: BlockType }[] = [
+/**
+ * All block types to render previews for, including pipe canonical forms.
+ * `isoZBlockType` (pipes only) overrides `blockType` in iso-z mode so that
+ * the preview shows a horizontal pipe (lying in the xy plane) as seen from
+ * above, matching how the pipe will actually be placed in that mode.
+ */
+const PREVIEW_TYPES: { key: string; blockType: BlockType; isoZBlockType?: BlockType }[] = [
   ...CUBE_TYPES.map((ct) => ({ key: ct, blockType: ct as BlockType })),
   { key: "Y", blockType: "Y" as BlockType },
-  { key: "ZX", blockType: "ZXO" as BlockType },
-  { key: "XZ", blockType: "XZO" as BlockType },
-  { key: "ZXH", blockType: "ZXOH" as BlockType },
-  { key: "XZH", blockType: "XZOH" as BlockType },
+  ...(["ZX", "XZ", "ZXH", "XZH"] as PipeVariant[]).map((v) => ({
+    key: v,
+    blockType: VARIANT_AXIS_MAP[v][2] as BlockType,
+    isoZBlockType: VARIANT_AXIS_MAP[v][0] as BlockType,
+  })),
 ];
 
 const RENDER_SIZE = 128; // high-res for crisp previews at any display size
@@ -192,8 +199,8 @@ export function usePreviewImages(controlsRef: React.RefObject<any>) {
 
     // Pre-build entries: each block has a "persp" variant; cubes additionally
     // have iso-x / iso-y / iso-z fold-out variants. Non-cube types share the
-    // single regular entry across all variants.
-    for (const { key, blockType } of PREVIEW_TYPES) {
+    // regular entry across variants, except pipes use isoZBlockType for iso-z.
+    for (const { key, blockType, isoZBlockType } of PREVIEW_TYPES) {
       const isCube = (CUBE_TYPES as readonly string[]).includes(blockType);
       const regular = buildRegularEntry(blockType);
       meshesRef.current.set(variantKey(key, "persp"), regular);
@@ -203,8 +210,9 @@ export function usePreviewImages(controlsRef: React.RefObject<any>) {
           meshesRef.current.set(variantKey(key, v), buildFoldOutCubeEntry(blockType, variantTopAxis(v)));
         }
       } else {
+        const isoZ = isoZBlockType ? buildRegularEntry(isoZBlockType) : regular;
         for (const v of FOLD_VARIANTS) {
-          meshesRef.current.set(variantKey(key, v), regular);
+          meshesRef.current.set(variantKey(key, v), v === "iso-z" ? isoZ : regular);
         }
       }
     }
