@@ -465,6 +465,21 @@ export function FlowsPanel() {
                   + Add query
                 </button>
               </div>
+              <div
+                style={{
+                  background: "#fff3cd",
+                  color: "#856404",
+                  border: "1px solid #ffeeba",
+                  borderRadius: 4,
+                  padding: "6px 8px",
+                  fontSize: 12,
+                  marginBottom: 6,
+                }}
+              >
+                ⚠ Membership checks are only reliable for pipe diagrams with a
+                single connected component. Results may be incorrect for
+                disconnected diagrams.
+              </div>
               {queries.length === 0 && (
                 <div style={{ color: "#888" }}>
                   Add a query row to check whether a Pauli flow lies in the span.
