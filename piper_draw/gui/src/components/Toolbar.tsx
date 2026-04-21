@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useBlockStore, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
 import { useKeybindStore, type Mode as KeybindMode, type NavStyle } from "../stores/keybindStore";
-import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
+import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
@@ -110,6 +110,7 @@ export function Toolbar({
   const setPaletteDragging = useBlockStore((s) => s.setPaletteDragging);
   const cycleBlock = useBlockStore((s) => s.cycleBlock);
   const cyclePipe = useBlockStore((s) => s.cyclePipe);
+  const cycleSelectedType = useBlockStore((s) => s.cycleSelectedType);
   const historyLen = useBlockStore((s) => s.history.length);
   const futureLen = useBlockStore((s) => s.future.length);
   const undo = useBlockStore((s) => s.undo);
@@ -174,7 +175,6 @@ export function Toolbar({
     const cursor = s.buildCursor;
     const coords: [number, number, number] = [cursor.x, cursor.y, cursor.z];
     let pipeCount = 0;
-    let yValid = true;
     for (let axis = 0; axis < 3; axis++) {
       for (const offset of [1, -2]) {
         const nc: [number, number, number] = [coords[0], coords[1], coords[2]];
@@ -182,10 +182,7 @@ export function Toolbar({
         const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
         if (n && isPipeType(n.type)) {
           const openAxis = n.type.replace("H", "").indexOf("O");
-          if (openAxis === axis) {
-            pipeCount++;
-            if (openAxis !== 2) yValid = false;
-          }
+          if (openAxis === axis) pipeCount++;
         }
       }
     }
@@ -196,7 +193,8 @@ export function Toolbar({
           const result = determineCubeOptions(cursor, s.blocks);
           return result.determined ? [result.type] : [...result.options];
         })();
-    if (yValid) opts.push("Y");
+    // Y is a leaf: only valid with at most one attached (Z-open) pipe.
+    if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", cursor, s.blocks)) opts.push("Y");
     return opts.join(",");
   });
   const buildValidTypes = buildValidTypesStr != null ? new Set(buildValidTypesStr.split(",").filter(Boolean)) : null;
@@ -228,7 +226,6 @@ export function Toolbar({
     }
     const coords: [number, number, number] = [pos.x, pos.y, pos.z];
     let pipeCount = 0;
-    let yValid = true;
     for (let axis = 0; axis < 3; axis++) {
       for (const offset of [1, -2]) {
         const nc: [number, number, number] = [coords[0], coords[1], coords[2]];
@@ -236,16 +233,14 @@ export function Toolbar({
         const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
         if (n && isPipeType(n.type)) {
           const openAxis = n.type.replace("H", "").indexOf("O");
-          if (openAxis === axis) {
-            pipeCount++;
-            if (openAxis !== 2) yValid = false;
-          }
+          if (openAxis === axis) pipeCount++;
         }
       }
     }
     const result = determineCubeOptions(pos, s.blocks);
     const opts: string[] = result.determined ? [result.type] : [...result.options];
-    if (yValid) opts.push("Y");
+    // Y is a leaf: only valid with at most one attached (Z-open) pipe.
+    if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", pos, s.blocks)) opts.push("Y");
     return `${currentType};${pipeCount < 2 ? "1" : "0"};${opts.join(",")}`;
   });
   const selectedCubeSlotInfo = (() => {
@@ -605,6 +600,10 @@ export function Toolbar({
             key="port"
             onPointerDown={() => {
               if (mode !== "edit") return;
+              // With a single block/port selected, defer to onClick (which
+              // replaces the selection in place); calling setPlacePort here
+              // would clear the selection before the click is handled.
+              if (selectedCubeSlotInfo != null) return;
               setPlacePort(true);
               setPaletteDragging(true);
             }}
@@ -613,6 +612,12 @@ export function Toolbar({
                 // In Keyboard Build mode, clicking Port converts the cursor cube back to a port
                 // (only valid when pipeCount < 2; cycleBlock validates and no-ops otherwise).
                 cycleBlock(null);
+                return;
+              }
+              // Single block/port selected → replace it in place rather than
+              // dropping the selection and arming the placement tool.
+              if (selectedCubeSlotInfo != null && selectedCubeSlotInfo.portAllowed) {
+                cycleSelectedType(1, { kind: "port" });
                 return;
               }
               setPlacePort(true);
@@ -634,12 +639,17 @@ export function Toolbar({
               key={ct}
               onPointerDown={() => {
                 if (mode !== "edit") return;
+                if (selectedCubeSlotInfo != null) return;
                 setCubeType(ct as BlockType);
                 setPaletteDragging(true);
               }}
               onClick={() => {
                 if (mode === "build") {
                   cycleBlock(ct);
+                  return;
+                }
+                if (selectedCubeSlotInfo != null && selectedCubeSlotInfo.validTypes.has(ct)) {
+                  cycleSelectedType(1, { kind: "cube", type: ct });
                   return;
                 }
                 setCubeType(ct as BlockType);
@@ -666,12 +676,17 @@ export function Toolbar({
           <button
             onPointerDown={() => {
               if (mode !== "edit") return;
+              if (selectedCubeSlotInfo != null) return;
               setCubeType("Y");
               setPaletteDragging(true);
             }}
             onClick={() => {
               if (mode === "build") {
                 cycleBlock("Y");
+                return;
+              }
+              if (selectedCubeSlotInfo != null && selectedCubeSlotInfo.validTypes.has("Y")) {
+                cycleSelectedType(1, { kind: "cube", type: "Y" });
                 return;
               }
               setCubeType("Y");
@@ -705,12 +720,17 @@ export function Toolbar({
               key={v}
               onPointerDown={() => {
                 if (mode !== "edit") return;
+                if (selectedPipeInfo != null) return;
                 setPipeVariant(v);
                 setPaletteDragging(true);
               }}
               onClick={() => {
                 if (mode === "build") {
                   cyclePipe(v);
+                  return;
+                }
+                if (selectedPipeInfo != null && selectedPipeInfo.validVariants.has(v)) {
+                  cycleSelectedType(1, { kind: "pipe", variant: v });
                   return;
                 }
                 setPipeVariant(v);
