@@ -484,7 +484,7 @@ export function Toolbar({
         </button>
       </div>
 
-      {/* History + Verify */}
+      {/* History + Flows */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
         <button
           onClick={undo}
@@ -500,6 +500,33 @@ export function Toolbar({
         >
           Redo
         </button>
+        <button
+          onClick={() => useBlockStore.getState().toggleFlowsPanel()}
+          title="Show stabilizer flows for the current diagram (computed by the tqec package)"
+          style={{
+            ...btnStyle(flowsPanelOpen),
+            borderColor: flowsPanelOpen ? "#4a9eff" : "#ccc",
+            background: flowsPanelOpen ? "#e8f0fe" : "#fff",
+          }}
+        >
+          Flows (tqec)
+        </button>
+      </div>
+
+      {/* Settings + File menu + Verify */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
+        <SettingsMenu
+          freeBuild={freeBuild}
+          toggleFreeBuild={toggleFreeBuild}
+          onOpenKeybindEditor={onOpenKeybindEditor}
+        />
+        <FileMenu
+          loadBlocks={loadBlocks}
+          insertBlocks={insertBlocks}
+          clearAll={clearAll}
+          onResetCamera={onResetCamera}
+          blocksEmpty={blocksEmpty}
+        />
         <button
           onClick={runValidation}
           disabled={blocksEmpty || validationStatus === "loading"}
@@ -521,33 +548,6 @@ export function Toolbar({
         >
           {validationStatus === "loading" ? "Verifying..." : "Verify (tqec)"}
         </button>
-        <button
-          onClick={() => useBlockStore.getState().toggleFlowsPanel()}
-          title="Show stabilizer flows for the current diagram"
-          style={{
-            ...btnStyle(flowsPanelOpen),
-            borderColor: flowsPanelOpen ? "#4a9eff" : "#ccc",
-            background: flowsPanelOpen ? "#e8f0fe" : "#fff",
-          }}
-        >
-          Flows
-        </button>
-      </div>
-
-      {/* File menu + Settings */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
-        <FileMenu
-          loadBlocks={loadBlocks}
-          insertBlocks={insertBlocks}
-          clearAll={clearAll}
-          onResetCamera={onResetCamera}
-          blocksEmpty={blocksEmpty}
-        />
-        <SettingsMenu
-          freeBuild={freeBuild}
-          toggleFreeBuild={toggleFreeBuild}
-          onOpenKeybindEditor={onOpenKeybindEditor}
-        />
       </div>
 
       {/* Separator */}

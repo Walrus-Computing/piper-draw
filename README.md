@@ -13,6 +13,8 @@ This package contains a test that verifies the exported `.dae` file is correctly
 
 The **Verify (tqec)** button sends the current diagram to a FastAPI backend that builds a [`tqec.BlockGraph`](https://github.com/tqec/tqec) and reports per-cube validation errors.
 
+The **Flows (tqec)** button opens a side panel that computes stabilizer flows (correlation surfaces) for the current diagram, also via the [tqec](https://github.com/tqec/tqec) package.
+
 ## Getting started
 
 ### Prerequisites
@@ -41,6 +43,7 @@ The **Verify (tqec)** button sends the current diagram to a FastAPI backend that
 - Assemble stack elements with drag-and-drop.
 - Export the design via the Collada export button to generate a `.dae` file.
 - Click **Verify (tqec)** to run server-side validation via the [tqec](https://github.com/tqec/tqec) package; any errors are shown inline on the offending cubes.
+- Click **Flows (tqec)** to compute and inspect stabilizer flows (correlation surfaces) for the current diagram via the [tqec](https://github.com/tqec/tqec) package.
 - Run the provided validation test to check `.dae` compatibility.
 - Use the **Templates** button in the toolbar to load a bundled example diagram (CNOT, CZ, move + rotation, three CNOTs, Steane encoding) and edit it as a starting point.
 
