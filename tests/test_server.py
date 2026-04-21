@@ -545,6 +545,45 @@ class TestZXEndpoint:
         # A well-optimized CNOT collapses to a single CX / CNOT gate.
         assert names in (["CNOT"], ["CX"]), f"expected single CX, got {names}"
 
+    def test_extract_returns_qc_and_qsim_formats(self):
+        # The unified export UX offers .qasm / .qc / .qsim / .qgraph. The
+        # backend is responsible for emitting qc (via pyzx.Circuit.to_qc)
+        # and qsim (via the custom basic-gate emitter) alongside qasm.
+        result = self._run(
+            ZXRequest(
+                blocks=[
+                    BlockInput(pos=[0, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[-2, 0, 0], type="OXZ"),
+                    BlockInput(pos=[1, 0, 0], type="OXZ"),
+                ],
+                port_labels=[
+                    PortLabelInput(pos=[-3, 0, 0], label="a"),
+                    PortLabelInput(pos=[3, 0, 0], label="b"),
+                ],
+                port_io={"a": "in", "b": "out"},
+                simplify=True,
+                extract=True,
+            )
+        )
+        assert result["ok"] is True
+        c = result["circuit"]
+        assert c is not None
+        # .qc is the Quipper-style ASCII circuit format.
+        assert "BEGIN" in c["qc"] and "END" in c["qc"]
+        # qsim format: first line is qubit count, subsequent lines start with
+        # a time index. Every line (after the header) should begin with a
+        # non-negative integer followed by a gate name.
+        lines = [ln for ln in c["qsim"].strip().splitlines() if ln]
+        assert lines, "qsim output is empty"
+        assert lines[0].isdigit(), f"first line should be qubit count: {lines[0]!r}"
+        for ln in lines[1:]:
+            parts = ln.split()
+            assert parts[0].isdigit(), f"expected time index in {ln!r}"
+            # Gate name should be one of the ones the emitter handles.
+            assert parts[1] in {
+                "h", "x", "z", "s", "t", "rx", "ry", "rz", "cx", "cz", "swap",
+            }, f"unexpected qsim gate: {parts[1]!r} in {ln!r}"
+
     def test_extract_cnot_verified_and_displayed_as_circuit(self):
         # After extract+basic_optimization on the CNOT template:
         #   - the displayed ZX graph should be c.to_graph() (the optimized

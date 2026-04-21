@@ -121,6 +121,11 @@ class ZXCircuit(BaseModel):
     qubits: int
     gate_count: int
     qasm: str
+    # Quipper-style .qc (via pyzx.Circuit.to_qc). Empty string if emission failed.
+    qc: str = ""
+    # Google qsim input format (custom emitter — see `_circuit_to_qsim`). Empty
+    # string if any gate in the circuit isn't representable in qsim.
+    qsim: str = ""
     gates: list[ZXGate]
     # Semantic-equality check of the extracted+optimized circuit against the
     # pre-simplification ZX graph. `None` means the check was skipped (too many
@@ -138,6 +143,64 @@ class ZXResponse(BaseModel):
     circuit: ZXCircuit | None = None
     circuit_error: str | None = None
     error: str | None = None
+
+
+def _circuit_to_qsim(c) -> str:
+    """Emit a Google qsim input description of circuit `c`.
+
+    Format: https://github.com/quantumlib/qsim/blob/master/docs/input_format.md.
+    Covers the gate set produced by `pyzx.Circuit.to_basic_gates()`
+    (HAD/NOT/Z/S/T/ZPhase/XPhase/YPhase/CNOT/CZ/SWAP). Unknown gates raise
+    `ValueError` so callers can surface the failure instead of silently
+    emitting a semantically-different circuit.
+    """
+
+    def angle_rad(phase) -> float:
+        # pyzx phases are Fractions of π (e.g. Fraction(1, 4) == π/4).
+        return float(phase) * math.pi
+
+    lines: list[str] = [str(c.qubits)]
+    for t, g in enumerate(c.gates):
+        name = type(g).__name__
+        target = getattr(g, "target", None)
+        control = getattr(g, "control", None)
+        phase = getattr(g, "phase", None)
+        adjoint = bool(getattr(g, "adjoint", False))
+
+        if name == "HAD":
+            lines.append(f"{t} h {target}")
+        elif name == "NOT":
+            lines.append(f"{t} x {target}")
+        elif name == "Z":
+            lines.append(f"{t} z {target}")
+        elif name == "S":
+            if adjoint:
+                lines.append(f"{t} rz {target} {-math.pi / 2:.10g}")
+            else:
+                lines.append(f"{t} s {target}")
+        elif name == "T":
+            if adjoint:
+                lines.append(f"{t} rz {target} {-math.pi / 4:.10g}")
+            else:
+                lines.append(f"{t} t {target}")
+        elif name == "ZPhase":
+            lines.append(f"{t} rz {target} {angle_rad(phase):.10g}")
+        elif name == "XPhase":
+            lines.append(f"{t} rx {target} {angle_rad(phase):.10g}")
+        elif name == "YPhase":
+            lines.append(f"{t} ry {target} {angle_rad(phase):.10g}")
+        elif name in ("CNOT", "CX"):
+            lines.append(f"{t} cx {control} {target}")
+        elif name == "CZ":
+            lines.append(f"{t} cz {control} {target}")
+        elif name == "SWAP":
+            # pyzx stores SWAP endpoints on control / target.
+            q1 = control if control is not None else getattr(g, "ctrl1", None)
+            q2 = target if target is not None else getattr(g, "ctrl2", None)
+            lines.append(f"{t} swap {q1} {q2}")
+        else:
+            raise ValueError(f"Cannot emit gate '{name}' in qsim format")
+    return "\n".join(lines) + "\n"
 
 
 def _serialize_gate(g) -> ZXGate:
@@ -495,10 +558,24 @@ async def zx(req: ZXRequest) -> ZXResponse:
                         f"limit of {VERIFY_QUBIT_LIMIT}"
                     )
 
+                # pyzx.to_qc and our qsim emitter can both raise on edge-case
+                # gate sets; emit an empty string rather than aborting the
+                # whole response so the UI still shows qasm + the diagram.
+                try:
+                    qc_str = c.to_qc()
+                except Exception:
+                    qc_str = ""
+                try:
+                    qsim_str = _circuit_to_qsim(c)
+                except Exception:
+                    qsim_str = ""
+
                 circuit_info = ZXCircuit(
                     qubits=c.qubits,
                     gate_count=len(basic.gates),
                     qasm=c.to_qasm(),
+                    qc=qc_str,
+                    qsim=qsim_str,
                     gates=[_serialize_gate(g) for g in basic.gates],
                     verified=verified,
                     verification_error=verification_error,

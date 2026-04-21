@@ -28,6 +28,10 @@ export interface ZXCircuit {
   qubits: number;
   gate_count: number;
   qasm: string;
+  // Quipper-style .qc; "" if pyzx couldn't emit it for this gate set.
+  qc: string;
+  // Google qsim input format; "" if any gate isn't representable in qsim.
+  qsim: string;
   gates: ZXGate[];
   // Semantic-equality check of the extracted+optimized circuit against the
   // pre-simplification ZX graph. `null` means skipped (too many qubits, or
@@ -110,22 +114,88 @@ export async function computeZX(
   }
 }
 
-export function downloadQGraph(qgraph: string, filename = "piper-draw.qgraph"): void {
-  downloadBlob(qgraph, "application/json", filename);
+export interface ZXExportPayload {
+  qasm: string;
+  qc: string;
+  qsim: string;
+  qgraph: string;
 }
 
-export function downloadQasm(qasm: string, filename = "piper-draw.qasm"): void {
-  downloadBlob(qasm, "text/plain", filename);
-}
+type ZXExportFormat = "qasm" | "qc" | "qsim" | "qgraph";
 
-function downloadBlob(content: string, type: string, filename: string): void {
-  const blob = new Blob([content], { type });
+type FileSystemFileHandleLike = {
+  createWritable: () => Promise<{ write: (b: Blob) => Promise<void>; close: () => Promise<void> }>;
+  name?: string;
+};
+
+/**
+ * Open a native save dialog offering all ZX export formats. The user picks
+ * filename, location, and format (via the dialog's file-type dropdown); we
+ * write the matching payload based on the chosen file's extension.
+ *
+ * Falls back to `a.download` with a default `.qasm` filename on browsers
+ * without the File System Access API (Firefox, Safari).
+ */
+export async function exportZX(
+  payload: ZXExportPayload,
+  defaultBase = "piper-draw",
+): Promise<void> {
+  const w = window as Window & {
+    showSaveFilePicker?: (opts: unknown) => Promise<FileSystemFileHandleLike>;
+  };
+  if (typeof w.showSaveFilePicker === "function") {
+    try {
+      const handle = await w.showSaveFilePicker({
+        suggestedName: `${defaultBase}.qasm`,
+        types: [
+          { description: "OpenQASM 2.0", accept: { "text/plain": [".qasm"] } },
+          { description: "Quipper .qc", accept: { "text/plain": [".qc"] } },
+          { description: "Google qsim input", accept: { "text/plain": [".qsim"] } },
+          { description: "pyzx graph JSON", accept: { "application/json": [".qgraph"] } },
+        ],
+      });
+      const fmt = formatFromName(handle.name ?? `${defaultBase}.qasm`);
+      const { text, mime } = contentFor(fmt, payload);
+      const writable = await handle.createWritable();
+      await writable.write(new Blob([text], { type: mime }));
+      await writable.close();
+      return;
+    } catch (err: unknown) {
+      // User cancelled the dialog — no-op. Anything else: fall through to
+      // the legacy download path so the user still gets a file.
+      if (err instanceof DOMException && err.name === "AbortError") return;
+    }
+  }
+  // Legacy fallback: download .qasm with the default name.
+  const { text, mime } = contentFor("qasm", payload);
+  const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename;
+  a.download = `${defaultBase}.qasm`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+function formatFromName(name: string): ZXExportFormat {
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".qc")) return "qc";
+  if (lower.endsWith(".qsim")) return "qsim";
+  if (lower.endsWith(".qgraph")) return "qgraph";
+  return "qasm";
+}
+
+function contentFor(fmt: ZXExportFormat, p: ZXExportPayload): { text: string; mime: string } {
+  switch (fmt) {
+    case "qc":
+      return { text: p.qc, mime: "text/plain" };
+    case "qsim":
+      return { text: p.qsim, mime: "text/plain" };
+    case "qgraph":
+      return { text: p.qgraph, mime: "application/json" };
+    case "qasm":
+      return { text: p.qasm, mime: "text/plain" };
+  }
 }

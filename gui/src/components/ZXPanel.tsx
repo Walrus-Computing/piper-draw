@@ -15,8 +15,7 @@ const PANEL_MIN_HEIGHT = 220;
 const PANEL_BOTTOM_SAFE = 140;
 import {
   computeZX,
-  downloadQGraph,
-  downloadQasm,
+  exportZX,
   type ZXCircuit,
   type ZXGate,
   type ZXResult,
@@ -479,10 +478,17 @@ export function ZXPanel({
             Extract circuit (pyzx)
           </label>
           <button
-            onClick={() =>
-              result?.ok && result.qgraph && downloadQGraph(result.qgraph)
-            }
-            disabled={!result?.ok || !result.qgraph}
+            onClick={() => {
+              if (!result?.ok) return;
+              void exportZX({
+                qasm: result.circuit?.qasm ?? "",
+                qc: result.circuit?.qc ?? "",
+                qsim: result.circuit?.qsim ?? "",
+                qgraph: result.qgraph ?? "",
+              });
+            }}
+            disabled={!result?.ok}
+            title="Save as .qasm / .qc / .qsim / .qgraph (format picked in the save dialog)"
             style={{
               padding: "3px 10px",
               fontSize: 12,
@@ -493,7 +499,7 @@ export function ZXPanel({
               cursor: !result?.ok ? "default" : "pointer",
             }}
           >
-            Download .qgraph (pyzx)
+            Export…
           </button>
           {stats && (
             <span style={{ color: "#666", marginLeft: "auto" }}>{stats}</span>
@@ -584,33 +590,9 @@ function CircuitSection({
   }
   return (
     <div style={{ marginTop: 12 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 4,
-        }}
-      >
-        <span style={{ fontWeight: 600 }}>
-          Circuit: {circuit.qubits} qubit{circuit.qubits === 1 ? "" : "s"},{" "}
-          {circuit.gate_count} gate{circuit.gate_count === 1 ? "" : "s"}
-        </span>
-        <button
-          onClick={() => downloadQasm(circuit.qasm)}
-          style={{
-            marginLeft: "auto",
-            padding: "3px 10px",
-            fontSize: 12,
-            borderRadius: 4,
-            border: "1px solid #4a9eff",
-            background: "#fff",
-            color: "#4a9eff",
-            cursor: "pointer",
-          }}
-        >
-          Download .qasm (pyzx)
-        </button>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>
+        Circuit: {circuit.qubits} qubit{circuit.qubits === 1 ? "" : "s"},{" "}
+        {circuit.gate_count} gate{circuit.gate_count === 1 ? "" : "s"}
       </div>
       <VerificationBadge circuit={circuit} />
       <CircuitDiagram circuit={circuit} />
