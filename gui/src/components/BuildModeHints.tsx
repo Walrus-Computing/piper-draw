@@ -23,7 +23,6 @@ export function BuildModeHints({ onCustomize }: { onCustomize: () => void }) {
       moveLabel,
     ],
     [`${bindingToLabel(b.moveUp)}/${bindingToLabel(b.moveDown)}`, "Move Z"],
-    [bindingToLabel(b.undo), "Undo step"],
     [bindingToLabel(b.cycleBlock), "Cycle block"],
     [bindingToLabel(b.cyclePipe), "Cycle pipe"],
     [bindingToLabel(b.exitBuild), "Exit build"],
