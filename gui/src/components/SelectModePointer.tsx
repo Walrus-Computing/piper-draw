@@ -28,6 +28,7 @@ type Pending = {
   startY: number;
   hitBlockKey: string | null;
   shiftAtDown: boolean;
+  marqueeRequested: boolean;
 };
 
 type DraggingMarquee = {
@@ -225,6 +226,13 @@ export function SelectModePointer({
         hitKey = pickSelectedBlockAt(ts.camera, ndcX, ndcY, store.selectedKeys, store.blocks);
       }
 
+      // Ctrl+Shift forces marquee. Shift alone is reserved for select-mode
+      // gestures (vertical block drag) and must be swallowed so OrbitControls'
+      // built-in Shift-swap doesn't orbit the camera. Unmodified empty-space
+      // drags fall through to OrbitControls for the usual camera controls.
+      const marqueeRequested = e.ctrlKey && e.shiftKey;
+      if (!e.shiftKey && !hitKey) return;
+
       dragRef.current = {
         kind: "pending",
         pointerId: e.pointerId,
@@ -232,8 +240,9 @@ export function SelectModePointer({
         canvasRect,
         startX: e.clientX,
         startY: e.clientY,
-        hitBlockKey: hitKey,
-        shiftAtDown: e.shiftKey,
+        hitBlockKey: marqueeRequested ? null : hitKey,
+        shiftAtDown: e.shiftKey && !e.ctrlKey,
+        marqueeRequested,
       };
       // Lock out OrbitControls for the duration of the gesture. Without this,
       // Shift-swapping of OrbitControls' LEFT button (ROTATE↔PAN) lets the camera
@@ -300,6 +309,12 @@ export function SelectModePointer({
           useBlockStore.getState().setDragState({ isDragging: true, delta: { x: 0, y: 0, z: 0 }, valid: true });
           latestEventRef.current = { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey };
           scheduleFrame();
+          return;
+        }
+
+        if (!state.marqueeRequested) {
+          // Shift-only on empty space: swallow the gesture so OrbitControls
+          // doesn't orbit. Leave in pending; pointerup will clean up.
           return;
         }
 
