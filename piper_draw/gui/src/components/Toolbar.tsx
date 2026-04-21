@@ -7,6 +7,7 @@ import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } 
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
 import { fetchTemplateManifest, loadTemplateBlocks, type TemplateEntry } from "../utils/templates";
+import { evalCoordExpr } from "../utils/parseCoordExpr";
 import { usePreviewImages } from "./PreviewRenderer";
 import { FpsDisplay } from "./FpsCounter";
 import { useViewportFitScale } from "../hooks/useViewportFitScale";
@@ -849,14 +850,9 @@ function PositionEditor({ pos, onCommit }: { pos: Position3D; onCommit: (p: Posi
   const valueOf = (k: "x" | "y" | "z") => draft[k] ?? String(pos[k] / 3);
 
   const commit = () => {
-    const parse = (s: string): number | null => {
-      if (s.trim() === "") return null;
-      const n = Number(s);
-      return Number.isInteger(n) ? n : null;
-    };
-    const nx = draft.x !== undefined ? parse(draft.x) : pos.x / 3;
-    const ny = draft.y !== undefined ? parse(draft.y) : pos.y / 3;
-    const nz = draft.z !== undefined ? parse(draft.z) : pos.z / 3;
+    const nx = draft.x !== undefined ? evalCoordExpr(draft.x) : pos.x / 3;
+    const ny = draft.y !== undefined ? evalCoordExpr(draft.y) : pos.y / 3;
+    const nz = draft.z !== undefined ? evalCoordExpr(draft.z) : pos.z / 3;
     if (nx === null || ny === null || nz === null) {
       setDraft({});
       return;
@@ -887,8 +883,8 @@ function PositionEditor({ pos, onCommit }: { pos: Position3D; onCommit: (p: Posi
     <label key={k} style={{ display: "flex", alignItems: "center", gap: 4 }}>
       {k.toUpperCase()}:
       <input
-        type="number"
-        step={1}
+        type="text"
+        inputMode="numeric"
         value={valueOf(k)}
         onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
         onKeyDown={onKeyDown}
