@@ -468,7 +468,9 @@ export default function App() {
   const controlsRef = useRef<any>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [keybindEditorMode, setKeybindEditorMode] = useState<KeybindEditorTab | null>(null);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(
+    () => typeof localStorage !== 'undefined' && !localStorage.getItem('piperDraw.seenIntro'),
+  );
   const threeStateRef = useRef<ThreeState | null>(null);
   const photoRequest = useBlockStore((s) => s.photoRequest);
   const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
@@ -979,7 +981,18 @@ export default function App() {
       >
         ?
       </button>
-      {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
+      {helpOpen && (
+        <HelpPanel
+          onClose={() => {
+            setHelpOpen(false);
+            try {
+              localStorage.setItem('piperDraw.seenIntro', '1');
+            } catch {
+              // ignore (e.g. private mode)
+            }
+          }}
+        />
+      )}
       <FlowsPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
       <ZXPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
       {showHints && <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />}
