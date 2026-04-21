@@ -686,7 +686,7 @@ export default function App() {
           store.selectAll();
           return;
         case "deleteSelection":
-          if (store.selectedKeys.size > 0) {
+          if (store.selectedKeys.size > 0 || store.selectedPortPositions.size > 0) {
             e.preventDefault();
             store.deleteSelected();
           }
