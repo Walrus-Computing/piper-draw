@@ -2,11 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBlockStore } from "../stores/blockStore";
 import {
   ResizeGrip,
+  clampGeometryToSafe,
   readPanelGeometry,
   rectsOverlap,
   useFloatingPanel,
+  type SafeMargins,
 } from "../hooks/useFloatingPanel";
 import { PortsTable } from "./PortsTable";
+
+const PANEL_MIN_WIDTH = 280;
+const PANEL_MIN_HEIGHT = 220;
+const PANEL_BOTTOM_SAFE = 140;
 import {
   computeZX,
   downloadQGraph,
@@ -241,9 +247,11 @@ function ZXSvg({ result }: { result: ZXResult }) {
 
 export function ZXPanel({
   controlsRef,
+  toolbarRef,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   controlsRef: React.RefObject<any>;
+  toolbarRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const open = useBlockStore((s) => s.zxPanelOpen);
   const flowsOpen = useBlockStore((s) => s.flowsPanelOpen);
@@ -268,27 +276,48 @@ export function ZXPanel({
   } = useFloatingPanel({
     id: "zx",
     defaultGeometry: {
-      x: typeof window !== "undefined" ? window.innerWidth - 372 : 12,
+      x: typeof window !== "undefined" ? window.innerWidth - 370 : 10,
       y: 64,
       width: 360,
-      height: typeof window !== "undefined" ? window.innerHeight - 76 : 600,
+      height: typeof window !== "undefined" ? window.innerHeight - 74 : 600,
     },
-    minWidth: 280,
-    minHeight: 220,
+    minWidth: PANEL_MIN_WIDTH,
+    minHeight: PANEL_MIN_HEIGHT,
   });
 
-  // When this panel opens while the Flows panel is already open and the two
-  // would overlap, move this panel to the left edge so both stay visible.
+  // On every open transition, move out of the way of other UI:
+  //   1. anti-overlap with the Flows panel (snap to left edge if both clash)
+  //   2. clamp to a safe zone that excludes the top toolbar and the bottom
+  //      strip occupied by the orientation gizmo / hint bar / help button.
   const wasOpen = useRef(open);
   useEffect(() => {
-    if (open && !wasOpen.current && flowsOpen) {
-      const other = readPanelGeometry("flows");
-      if (other && rectsOverlap(geometry, other)) {
-        setGeometry({ x: 12, y: 64 });
+    if (open && !wasOpen.current) {
+      let next = geometry;
+      if (flowsOpen) {
+        const other = readPanelGeometry("flows");
+        if (other && rectsOverlap(next, other)) {
+          next = { ...next, x: 10, y: 64 };
+        }
+      }
+      const tbRect = toolbarRef.current?.getBoundingClientRect();
+      const safe: SafeMargins = {
+        top: tbRect ? Math.ceil(tbRect.bottom) + 8 : 60,
+        right: 10,
+        bottom: PANEL_BOTTOM_SAFE,
+        left: 10,
+      };
+      next = clampGeometryToSafe(next, safe, PANEL_MIN_WIDTH, PANEL_MIN_HEIGHT);
+      if (
+        next.x !== geometry.x ||
+        next.y !== geometry.y ||
+        next.width !== geometry.width ||
+        next.height !== geometry.height
+      ) {
+        setGeometry(next);
       }
     }
     wasOpen.current = open;
-  }, [open, flowsOpen, geometry, setGeometry]);
+  }, [open, flowsOpen, geometry, setGeometry, toolbarRef]);
 
   const sig = useMemo(() => signature(blocks, portMeta), [blocks, portMeta]);
 
@@ -332,6 +361,13 @@ export function ZXPanel({
 
   return (
     <div
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          setZXPanelOpen(false);
+        }
+      }}
       style={{
         ...containerStyle,
         zIndex: 50,
@@ -344,6 +380,7 @@ export function ZXPanel({
         fontSize: 12,
         color: "#222",
         overflow: "hidden",
+        outline: "none",
       }}
     >
       <header

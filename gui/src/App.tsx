@@ -957,8 +957,8 @@ export default function App() {
         title="About piper-draw"
         style={{
           position: "fixed",
-          bottom: 20,
-          left: 20,
+          bottom: 10,
+          left: 10,
           zIndex: 1,
           width: 32,
           height: 32,
@@ -978,8 +978,8 @@ export default function App() {
         ?
       </button>
       {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
-      <FlowsPanel controlsRef={controlsRef} />
-      <ZXPanel controlsRef={controlsRef} />
+      <FlowsPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
+      <ZXPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
       {showHints && <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />}
       {showHints && <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />}
       {keybindEditorMode && (

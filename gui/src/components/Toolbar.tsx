@@ -121,8 +121,6 @@ export function Toolbar({
   const blocksEmpty = useBlockStore((s) => s.blocks.size === 0);
   const freeBuild = useBlockStore((s) => s.freeBuild);
   const toggleFreeBuild = useBlockStore((s) => s.toggleFreeBuild);
-  const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
-  const zxPanelOpen = useBlockStore((s) => s.zxPanelOpen);
   const selectedCount = useBlockStore((s) => {
     if (s.selectedKeys.size === 0) return 0;
     let count = 0;
@@ -406,9 +404,6 @@ export function Toolbar({
 
   const previewImages = usePreviewImages(controlsRef);
 
-  const validationStatus = useValidationStore((s) => s.status);
-  const runValidation = useValidationStore((s) => s.validate);
-
   const viewMode = useBlockStore((s) => s.viewMode);
   const setPerspView = useBlockStore((s) => s.setPerspView);
   const setIsoView = useBlockStore((s) => s.setIsoView);
@@ -500,47 +495,42 @@ export function Toolbar({
         </button>
       </div>
 
-      {/* History + Flows */}
+      {/* History + Analyze */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
-        <button
-          onClick={undo}
-          disabled={historyLen === 0}
-          style={{ ...btnStyle(false), opacity: historyLen === 0 ? 0.4 : 1, cursor: historyLen === 0 ? "default" : "pointer" }}
-        >
-          Undo
-        </button>
-        <button
-          onClick={redo}
-          disabled={futureLen === 0}
-          style={{ ...btnStyle(false), opacity: futureLen === 0 ? 0.4 : 1, cursor: futureLen === 0 ? "default" : "pointer" }}
-        >
-          Redo
-        </button>
-        <button
-          onClick={() => useBlockStore.getState().toggleFlowsPanel()}
-          title="Show stabilizer flows for the current diagram (computed by the tqec package)"
-          style={{
-            ...btnStyle(flowsPanelOpen),
-            borderColor: flowsPanelOpen ? "#4a9eff" : "#ccc",
-            background: flowsPanelOpen ? "#e8f0fe" : "#fff",
-          }}
-        >
-          Flows (tqec)
-        </button>
-        <button
-          onClick={() => useBlockStore.getState().toggleZXPanel()}
-          title="Show the ZX-calculus diagram corresponding to this pipe diagram (tqec builds the graph, pyzx owns the .qgraph export and full_reduce simplification)"
-          style={{
-            ...btnStyle(zxPanelOpen),
-            borderColor: zxPanelOpen ? "#4a9eff" : "#ccc",
-            background: zxPanelOpen ? "#e8f0fe" : "#fff",
-          }}
-        >
-          ZX (tqec + pyzx)
-        </button>
+        <div style={{ display: "flex", gap: "4px" }}>
+          <button
+            onClick={undo}
+            disabled={historyLen === 0}
+            title="Undo"
+            style={{
+              ...btnStyle(false),
+              padding: "4px 6px",
+              flex: 1,
+              opacity: historyLen === 0 ? 0.4 : 1,
+              cursor: historyLen === 0 ? "default" : "pointer",
+            }}
+          >
+            ↶
+          </button>
+          <button
+            onClick={redo}
+            disabled={futureLen === 0}
+            title="Redo"
+            style={{
+              ...btnStyle(false),
+              padding: "4px 6px",
+              flex: 1,
+              opacity: futureLen === 0 ? 0.4 : 1,
+              cursor: futureLen === 0 ? "default" : "pointer",
+            }}
+          >
+            ↷
+          </button>
+        </div>
+        <AnalyzeMenu />
       </div>
 
-      {/* Settings + File menu + Verify */}
+      {/* Settings + File menu */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
         <SettingsMenu
           freeBuild={freeBuild}
@@ -554,27 +544,6 @@ export function Toolbar({
           onResetCamera={onResetCamera}
           blocksEmpty={blocksEmpty}
         />
-        <button
-          onClick={runValidation}
-          disabled={blocksEmpty || validationStatus === "loading"}
-          title="Server-side validation via the TQEC library"
-          style={{
-            ...btnStyle(false),
-            opacity: blocksEmpty ? 0.4 : 1,
-            cursor: blocksEmpty || validationStatus === "loading" ? "default" : "pointer",
-            borderColor:
-              validationStatus === "valid" ? "#28a745" :
-              validationStatus === "invalid" ? "#dc3545" :
-              "#ccc",
-            background:
-              validationStatus === "valid" ? "#d4edda" :
-              validationStatus === "invalid" ? "#f8d7da" :
-              validationStatus === "loading" ? "#e8f0fe" :
-              "#fff",
-          }}
-        >
-          {validationStatus === "loading" ? "Verifying..." : "Verify (tqec)"}
-        </button>
       </div>
 
       {/* Separator */}
@@ -1331,6 +1300,130 @@ function FileMenu({
             style={{ ...item(blocksEmpty), color: "#dc3545" }}
           >
             Clear all
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AnalyzeMenu — Verify (tqec), Flows (tqec), ZX (tqec + pyzx) under one trigger
+// ---------------------------------------------------------------------------
+
+function AnalyzeMenu() {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  const blocksEmpty = useBlockStore((s) => s.blocks.size === 0);
+  const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
+  const zxPanelOpen = useBlockStore((s) => s.zxPanelOpen);
+  const validationStatus = useValidationStore((s) => s.status);
+  const runValidation = useValidationStore((s) => s.validate);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const verifyDisabled = blocksEmpty || validationStatus === "loading";
+  const verifyBorder =
+    validationStatus === "valid" ? "#28a745" :
+    validationStatus === "invalid" ? "#dc3545" :
+    null;
+  const verifyBackground =
+    validationStatus === "valid" ? "#d4edda" :
+    validationStatus === "invalid" ? "#f8d7da" :
+    validationStatus === "loading" ? "#e8f0fe" :
+    null;
+
+  const anyPanelOpen = flowsPanelOpen || zxPanelOpen;
+  const openDots = (flowsPanelOpen ? "•" : "") + (zxPanelOpen ? "•" : "");
+  const triggerActive = open || anyPanelOpen;
+  const triggerStyle: React.CSSProperties = {
+    ...btnStyle(triggerActive),
+    whiteSpace: "nowrap",
+    width: "100%",
+    ...(verifyBorder ? { borderColor: verifyBorder } : {}),
+    ...(verifyBackground ? { background: verifyBackground } : {}),
+  };
+  const triggerTitle = (() => {
+    const parts: string[] = [];
+    if (validationStatus === "valid") parts.push("Verify: valid");
+    else if (validationStatus === "invalid") parts.push("Verify: invalid");
+    else if (validationStatus === "loading") parts.push("Verify: running");
+    if (flowsPanelOpen) parts.push("Flows panel open");
+    if (zxPanelOpen) parts.push("ZX panel open");
+    return parts.length > 0 ? parts.join(" • ") : "Analyze the diagram (tqec / pyzx)";
+  })();
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title={triggerTitle}
+        style={triggerStyle}
+      >
+        Analyze {openDots && <span style={{ color: "#4a9eff" }}>{openDots}</span>}▾
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            background: "#fff",
+            border: "1px solid #ccc",
+            borderRadius: 4,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            padding: 8,
+            minWidth: 180,
+            zIndex: 1000,
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            fontFamily: "sans-serif",
+          }}
+        >
+          <button
+            onClick={() => { runValidation(); }}
+            disabled={verifyDisabled}
+            title="Server-side validation via the TQEC library"
+            style={{
+              ...btnStyle(false),
+              opacity: blocksEmpty ? 0.4 : 1,
+              cursor: verifyDisabled ? "default" : "pointer",
+              borderColor: verifyBorder ?? "#ccc",
+              background: verifyBackground ?? "#fff",
+            }}
+          >
+            {validationStatus === "loading" ? "Verifying..." : "Verify (tqec)"}
+          </button>
+          <button
+            onClick={() => useBlockStore.getState().toggleFlowsPanel()}
+            title="Show stabilizer flows for the current diagram (computed by the tqec package)"
+            style={{
+              ...btnStyle(flowsPanelOpen),
+              borderColor: flowsPanelOpen ? "#4a9eff" : "#ccc",
+              background: flowsPanelOpen ? "#e8f0fe" : "#fff",
+            }}
+          >
+            Flows (tqec)
+          </button>
+          <button
+            onClick={() => useBlockStore.getState().toggleZXPanel()}
+            title="Show the ZX-calculus diagram corresponding to this pipe diagram (tqec builds the graph, pyzx owns the .qgraph export and full_reduce simplification)"
+            style={{
+              ...btnStyle(zxPanelOpen),
+              borderColor: zxPanelOpen ? "#4a9eff" : "#ccc",
+              background: zxPanelOpen ? "#e8f0fe" : "#fff",
+            }}
+          >
+            ZX (tqec + pyzx)
           </button>
         </div>
       )}
