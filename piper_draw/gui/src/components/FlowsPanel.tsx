@@ -160,6 +160,7 @@ export function FlowsPanel() {
   const [computedSig, setComputedSig] = useState<string | null>(null);
   const [queries, setQueries] = useState<Query[]>([]);
   const [nextQueryId, setNextQueryId] = useState(1);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const portList = useMemo(() => {
     const positions = getAllPortPositions(blocks, portPositions);
@@ -260,7 +261,24 @@ export function FlowsPanel() {
         }}
       >
         <span style={{ fontWeight: 600, fontSize: 13 }}>Stabilizer flows</span>
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <button
+            onClick={() => setHelpOpen((v) => !v)}
+            aria-pressed={helpOpen}
+            aria-label="About stabilizer flows"
+            title="About stabilizer flows"
+            style={{
+              background: "none",
+              border: "none",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+              color: helpOpen ? "#4a9eff" : "#666",
+              padding: "0 4px",
+            }}
+          >
+            ?
+          </button>
           <button
             onClick={handleCompute}
             disabled={loading || portList.length === 0}
@@ -292,6 +310,59 @@ export function FlowsPanel() {
           </button>
         </div>
       </header>
+
+      {helpOpen && (
+        <section
+          style={{
+            padding: "10px 12px",
+            background: "#f6f8fa",
+            borderBottom: "1px solid #eee",
+            color: "#333",
+            lineHeight: 1.45,
+          }}
+        >
+          <p style={{ margin: "0 0 8px" }}>
+            A <b>stabilizer flow</b> (a.k.a. <i>correlation surface</i>) is a
+            pattern of Pauli operators on the diagram's input/output ports
+            that the circuit preserves. Flows form an Abelian group under
+            element-wise multiplication.
+          </p>
+          <p style={{ margin: "0 0 8px" }}>
+            They can be used to <b>verify Clifford operations</b>: a Clifford
+            map is uniquely determined by how it transports input Paulis to
+            output Paulis, so matching the expected flows confirms the
+            intended operation.
+          </p>
+          <p style={{ margin: "0 0 8px" }}>
+            Within a single <b>connected component</b> of a pipe diagram,
+            there are as many flows as that component has open ports. They
+            correspond to the <b>Pauli webs</b> of the component's underlying
+            ZX graph.
+          </p>
+          <p style={{ margin: "0 0 8px" }}>
+            <b>Reading the table:</b> each row is one basis flow; columns are
+            ports; cells show the Pauli (<code>I</code>/<code>X</code>/
+            <code>Y</code>/<code>Z</code>) that flow assigns to that port.
+          </p>
+          <p style={{ margin: "0 0 8px" }}>
+            <b>Check membership</b> tests whether a candidate Pauli
+            assignment you build by clicking cells lies in the span of the
+            computed flows — a linear-algebra check over GF(2), ignoring
+            phases.
+          </p>
+          <p style={{ margin: 0, fontSize: 11, color: "#666" }}>
+            More:{" "}
+            <a
+              href="https://tqec.github.io/tqec/user_guide/terminology.html"
+              target="_blank"
+              rel="noreferrer"
+            >
+              TQEC terminology guide
+            </a>
+            .
+          </p>
+        </section>
+      )}
 
       <div style={{ padding: "10px 12px", overflowY: "auto", flex: 1 }}>
         <section>
