@@ -1,55 +1,35 @@
 import { useEffect, useRef, useState } from "react";
-import { useBlockStore } from "../stores/blockStore";
+import { useBlockStore, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
-import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, PIPE_TYPE_TO_VARIANT } from "../types";
-import type { BlockType, CubeType, PipeType, PipeVariant, Position3D } from "../types";
+import { useKeybindStore, type Mode as KeybindMode, type NavStyle } from "../stores/keybindStore";
+import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
+import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
 import { fetchTemplateManifest, loadTemplateBlocks, type TemplateEntry } from "../utils/templates";
-import { animateCamera } from "../utils/cameraAnim";
-import * as THREE from "three";
+import { evalCoordExpr } from "../utils/parseCoordExpr";
 import { usePreviewImages } from "./PreviewRenderer";
+import { FpsDisplay } from "./FpsCounter";
+import { useViewportFitScale } from "../hooks/useViewportFitScale";
+import type { ViewMode } from "../types";
 
-// ---------------------------------------------------------------------------
-// Responsive sizing
-// ---------------------------------------------------------------------------
+// Horizontal margin (px) kept between fixed overlays (toolbar, hint bar) and
+// the viewport edges when they scale down to fit a narrow window.
+const VIEWPORT_FIT_MARGIN_PX = 20;
 
-// Horizontal margin (px) kept between the toolbar and the viewport edges
-// when the toolbar is scaled down to fit a narrow window.
-const TOOLBAR_VIEWPORT_MARGIN_PX = 20;
+// User-controlled toolbar scale is persisted across reloads and clamped to
+// this range so the toolbar stays legible and can't be dragged off-screen.
+const TOOLBAR_USER_SCALE_KEY = "piperdraw.toolbarUserScale";
+const TOOLBAR_USER_SCALE_MIN = 0.4;
+const TOOLBAR_USER_SCALE_MAX = 2.0;
 
-// Returns a CSS scale factor that keeps the toolbar at its natural size when
-// it fits in the viewport, and shrinks it just enough to fit when it doesn't.
-function useToolbarScale(toolbarRef: React.RefObject<HTMLDivElement | null>): number {
-  const [scale, setScale] = useState(1);
-  useEffect(() => {
-    let frame = 0;
-    const recompute = () => {
-      if (frame) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        const node = toolbarRef.current;
-        if (!node) return;
-        // offsetWidth is the layout (untransformed) width — independent of
-        // the scale we apply, so this measurement is stable across renders.
-        const natural = node.offsetWidth;
-        if (natural === 0) return;
-        const available = window.innerWidth - TOOLBAR_VIEWPORT_MARGIN_PX;
-        setScale(Math.min(1, available / natural));
-      });
-    };
-    const node = toolbarRef.current;
-    const ro = node ? new ResizeObserver(recompute) : null;
-    if (node && ro) ro.observe(node);
-    window.addEventListener("resize", recompute);
-    recompute();
-    return () => {
-      ro?.disconnect();
-      window.removeEventListener("resize", recompute);
-      if (frame) cancelAnimationFrame(frame);
-    };
-  }, [toolbarRef]);
-  return scale;
+function loadToolbarUserScale(): number {
+  if (typeof window === "undefined") return 1;
+  const raw = window.localStorage.getItem(TOOLBAR_USER_SCALE_KEY);
+  if (raw == null) return 1;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(TOOLBAR_USER_SCALE_MAX, Math.max(TOOLBAR_USER_SCALE_MIN, n));
 }
 
 // ---------------------------------------------------------------------------
@@ -99,24 +79,49 @@ const blockBtnStyle = (active: boolean, disabled?: boolean) => ({
 // Toolbar component
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCamera: () => void; controlsRef: React.RefObject<any>; toolbarRef: React.RefObject<HTMLDivElement | null> }) {
-  const scale = useToolbarScale(toolbarRef);
+export function Toolbar({
+  onResetCamera,
+  controlsRef,
+  toolbarRef,
+  fpsRef,
+  onOpenKeybindEditor,
+}: {
+  onResetCamera: () => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  controlsRef: React.RefObject<any>;
+  toolbarRef: React.RefObject<HTMLDivElement | null>;
+  fpsRef: React.RefObject<HTMLSpanElement | null>;
+  onOpenKeybindEditor: (mode: KeybindMode) => void;
+}) {
+  const [userScale, setUserScale] = useState<number>(loadToolbarUserScale);
+  useEffect(() => {
+    window.localStorage.setItem(TOOLBAR_USER_SCALE_KEY, String(userScale));
+  }, [userScale]);
+  const scale = useViewportFitScale(toolbarRef, VIEWPORT_FIT_MARGIN_PX, userScale);
   const mode = useBlockStore((s) => s.mode);
   const setMode = useBlockStore((s) => s.setMode);
+  const armedTool = useBlockStore((s) => s.armedTool);
+  const setArmedTool = useBlockStore((s) => s.setArmedTool);
   const cubeType = useBlockStore((s) => s.cubeType);
   const pipeVariant = useBlockStore((s) => s.pipeVariant);
   const setCubeType = useBlockStore((s) => s.setCubeType);
   const setPipeVariant = useBlockStore((s) => s.setPipeVariant);
+  const setPlacePort = useBlockStore((s) => s.setPlacePort);
+  const setPaletteDragging = useBlockStore((s) => s.setPaletteDragging);
+  const cycleBlock = useBlockStore((s) => s.cycleBlock);
+  const cyclePipe = useBlockStore((s) => s.cyclePipe);
+  const cycleSelectedType = useBlockStore((s) => s.cycleSelectedType);
   const historyLen = useBlockStore((s) => s.history.length);
   const futureLen = useBlockStore((s) => s.future.length);
   const undo = useBlockStore((s) => s.undo);
   const redo = useBlockStore((s) => s.redo);
   const clearAll = useBlockStore((s) => s.clearAll);
   const loadBlocks = useBlockStore((s) => s.loadBlocks);
+  const insertBlocks = useBlockStore((s) => s.insertBlocks);
   const blocksEmpty = useBlockStore((s) => s.blocks.size === 0);
   const freeBuild = useBlockStore((s) => s.freeBuild);
   const toggleFreeBuild = useBlockStore((s) => s.toggleFreeBuild);
+  const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
   const selectedCount = useBlockStore((s) => {
     if (s.selectedKeys.size === 0) return 0;
     let count = 0;
@@ -124,15 +129,44 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
     return count;
   });
   const deleteSelected = useBlockStore((s) => s.deleteSelected);
+  const flipSelected = useBlockStore((s) => s.flipSelected);
 
   const buildCursor = useBlockStore((s) => s.buildCursor);
   const moveBuildCursor = useBlockStore((s) => s.moveBuildCursor);
   const buildCursorBlockType = useBlockStore((s) => {
     if (s.mode !== "build" || !s.buildCursor) return null;
-    // Undetermined cubes should not highlight any button
-    if (s.undeterminedCubes.has(posKey(s.buildCursor))) return null;
     const block = s.blocks.get(posKey(s.buildCursor));
-    return block && !isPipeType(block.type) ? block.type : null;
+    if (!block || isPipeType(block.type)) return null;
+    // Always report the cube's actual displayed type, even when multiple options
+    // remain — the toolbar highlights which type is currently selected so the user
+    // can see what R-cycling will change away from.
+    return block.type;
+  });
+  // True when the build cursor is sitting on a port (no cube at that position).
+  // Lets the toolbar highlight the Port button as "currently selected" while in Keyboard Build mode.
+  const buildCursorOnPort = useBlockStore((s) => {
+    if (s.mode !== "build" || !s.buildCursor) return false;
+    return !s.blocks.has(posKey(s.buildCursor));
+  });
+  // True when the cursor position has ≥2 attached pipes — i.e. it can't be
+  // converted back to a port without first removing a pipe. Used to dim the
+  // Port button in Keyboard Build mode so users don't click it expecting a no-op.
+  const buildCursorPortAllowed = useBlockStore((s) => {
+    if (s.mode !== "build" || !s.buildCursor) return true;
+    const coords: [number, number, number] = [s.buildCursor.x, s.buildCursor.y, s.buildCursor.z];
+    let pipeCount = 0;
+    for (let axis = 0; axis < 3; axis++) {
+      for (const offset of [1, -2]) {
+        const nc: [number, number, number] = [coords[0], coords[1], coords[2]];
+        nc[axis] += offset;
+        const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
+        if (n && isPipeType(n.type)) {
+          const openAxis = n.type.replace("H", "").indexOf("O");
+          if (openAxis === axis) pipeCount++;
+        }
+      }
+    }
+    return pipeCount < 2;
   });
   // Returns a stable string of valid cube types (comma-separated) to avoid
   // infinite re-renders from creating new Set objects in the selector.
@@ -141,7 +175,6 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
     const cursor = s.buildCursor;
     const coords: [number, number, number] = [cursor.x, cursor.y, cursor.z];
     let pipeCount = 0;
-    let yValid = true;
     for (let axis = 0; axis < 3; axis++) {
       for (const offset of [1, -2]) {
         const nc: [number, number, number] = [coords[0], coords[1], coords[2]];
@@ -149,10 +182,7 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
         if (n && isPipeType(n.type)) {
           const openAxis = n.type.replace("H", "").indexOf("O");
-          if (openAxis === axis) {
-            pipeCount++;
-            if (openAxis !== 2) yValid = false;
-          }
+          if (openAxis === axis) pipeCount++;
         }
       }
     }
@@ -163,16 +193,139 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
           const result = determineCubeOptions(cursor, s.blocks);
           return result.determined ? [result.type] : [...result.options];
         })();
-    if (yValid) opts.push("Y");
+    // Y is a leaf: only valid with at most one attached (Z-open) pipe.
+    if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", cursor, s.blocks)) opts.push("Y");
     return opts.join(",");
   });
   const buildValidTypes = buildValidTypesStr != null ? new Set(buildValidTypesStr.split(",").filter(Boolean)) : null;
-  // Find the adjacent pipe connecting cursor to an undetermined cube (for R cycling)
-  const findUndeterminedPipeKey = (s: { buildCursor: Position3D | null; blocks: Map<string, { pos: Position3D; type: BlockType }>; undeterminedCubes: Map<string, unknown> }): string | null => {
+
+  // When exactly one cube-slot thing is selected in Drag / Drop mode (a single port OR a
+  // single cube/Y block), compute info used to grey out and highlight toolbar
+  // entries: the currently placed type, whether port-conversion is still legal,
+  // and which cube types remain valid replacements at that position.
+  // Encoded as "currentType;portAllowedFlag;valid1,valid2,..." to keep the
+  // selector returning a primitive (avoids new-object-per-render re-renders).
+  // currentType is "PORT" for a selected port, or the BlockType string ("XZZ", "Y", …).
+  const selectedCubeSlotInfoStr = useBlockStore((s): string | null => {
+    if (s.mode !== "edit" || s.armedTool !== "pointer") return null;
+    let pos: Position3D;
+    let currentType: string;
+    if (s.selectedKeys.size === 0 && s.selectedPortPositions.size === 1) {
+      const k = s.selectedPortPositions.values().next().value as string;
+      const [x, y, z] = k.split(",").map(Number);
+      pos = { x, y, z };
+      currentType = "PORT";
+    } else if (s.selectedKeys.size === 1 && s.selectedPortPositions.size === 0) {
+      const k = s.selectedKeys.values().next().value as string;
+      const b = s.blocks.get(k);
+      if (!b || isPipeType(b.type)) return null;
+      pos = b.pos;
+      currentType = b.type;
+    } else {
+      return null;
+    }
+    const coords: [number, number, number] = [pos.x, pos.y, pos.z];
+    let pipeCount = 0;
+    for (let axis = 0; axis < 3; axis++) {
+      for (const offset of [1, -2]) {
+        const nc: [number, number, number] = [coords[0], coords[1], coords[2]];
+        nc[axis] += offset;
+        const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
+        if (n && isPipeType(n.type)) {
+          const openAxis = n.type.replace("H", "").indexOf("O");
+          if (openAxis === axis) pipeCount++;
+        }
+      }
+    }
+    const result = determineCubeOptions(pos, s.blocks);
+    const opts: string[] = result.determined ? [result.type] : [...result.options];
+    // Y is a leaf: only valid with at most one attached (Z-open) pipe.
+    if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", pos, s.blocks)) opts.push("Y");
+    return `${currentType};${pipeCount < 2 ? "1" : "0"};${opts.join(",")}`;
+  });
+  const selectedCubeSlotInfo = (() => {
+    if (selectedCubeSlotInfoStr == null) return null;
+    const [currentType, portAllowedFlag, validStr] = selectedCubeSlotInfoStr.split(";");
+    return {
+      currentType,
+      portAllowed: portAllowedFlag === "1",
+      validTypes: new Set(validStr.split(",").filter(Boolean)),
+    };
+  })();
+
+  // When exactly one pipe is selected in Drag / Drop mode, compute (a) its current
+  // toolbar variant (for highlighting) and (b) which other variants would still
+  // be valid at that position — i.e. swapping to that variant keeps every
+  // committed neighbour cube within its valid CUBE_TYPES set. Mirrors the
+  // build-mode pipe-validity logic in `buildValidPipeVariantsStr`.
+  const selectedPipeInfoStr = useBlockStore((s): string | null => {
+    if (s.mode !== "edit" || s.armedTool !== "pointer") return null;
+    if (s.selectedKeys.size !== 1 || s.selectedPortPositions.size !== 0) return null;
+    const k = s.selectedKeys.values().next().value as string;
+    const pipeBlock = s.blocks.get(k);
+    if (!pipeBlock || !isPipeType(pipeBlock.type)) return null;
+    const currentVariant = PIPE_TYPE_TO_VARIANT[pipeBlock.type as PipeType];
+    const base = (pipeBlock.type as string).replace("H", "");
+    const openAxis = base.indexOf("O") as 0 | 1 | 2;
+    const pipeCoords: [number, number, number] = [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z];
+    const valid: string[] = [];
+    for (const v of PIPE_VARIANTS) {
+      const candidate = VARIANT_AXIS_MAP[v][openAxis];
+      const tmp = new Map(s.blocks);
+      tmp.set(k, { pos: pipeBlock.pos, type: candidate });
+      let ok = true;
+      for (const offset of [-1, 2]) {
+        const nc: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
+        nc[openAxis] += offset;
+        const nKey = posKey({ x: nc[0], y: nc[1], z: nc[2] });
+        const neighbor = tmp.get(nKey);
+        if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
+        const opts = determineCubeOptions(neighbor.pos, tmp);
+        const currentType = neighbor.type;
+        if (opts.determined) {
+          if (opts.type !== currentType) { ok = false; break; }
+        } else if (!opts.options.includes(currentType as CubeType)) {
+          ok = false; break;
+        }
+      }
+      if (ok) valid.push(v);
+    }
+    return `${currentVariant};${valid.join(",")}`;
+  });
+  const selectedPipeInfo = (() => {
+    if (selectedPipeInfoStr == null) return null;
+    const [currentVariant, validStr] = selectedPipeInfoStr.split(";");
+    return {
+      currentVariant: currentVariant as PipeVariant,
+      validVariants: new Set(validStr.split(",").filter(Boolean)),
+    };
+  })();
+  // Find the adjacent pipe connecting cursor to an ambiguous endpoint (for R cycling).
+  // An endpoint is "ambiguous" when the pipe's color on that side isn't uniquely fixed:
+  //   - the slot is a port (no cube) — any cube type could land there
+  //   - the slot has a cube with multiple valid CUBE_TYPES given its adjacent pipes
+  const isAmbiguousCubeEnd = (key: string, blocks: Map<string, { pos: Position3D; type: BlockType }>): boolean => {
+    const b = blocks.get(key);
+    if (!b) return true;
+    if (isPipeType(b.type) || b.type === "Y") return false;
+    const opts = determineCubeOptions(b.pos, blocks);
+    return !opts.determined && opts.options.length > 1;
+  };
+  // In free build mode, any adjacent pipe is cycle-eligible (mirrors cyclePipe).
+  // Outside free build, only pipes with an ambiguous end qualify — those are the
+  // only ones where cycling isn't constrained to a single valid type. If 2+ are
+  // eligible, prefer the pipe traversed by the last build step (same tiebreaker
+  // cyclePipe uses); otherwise return null to grey out the toolbar.
+  const findUndeterminedPipeKey = (s: {
+    buildCursor: Position3D | null;
+    blocks: Map<string, { pos: Position3D; type: BlockType }>;
+    freeBuild: boolean;
+    buildHistory: BuildStep[];
+  }): string | null => {
     if (!s.buildCursor) return null;
     const cc: [number, number, number] = [s.buildCursor.x, s.buildCursor.y, s.buildCursor.z];
-    const cursorUndetermined = s.undeterminedCubes.has(posKey(s.buildCursor));
-    let found: string | null = null;
+    const cursorAmbiguous = isAmbiguousCubeEnd(posKey(s.buildCursor), s.blocks);
+    const eligible: string[] = [];
     for (let axis = 0; axis < 3; axis++) {
       for (const offset of [1, -2]) {
         const pc: [number, number, number] = [cc[0], cc[1], cc[2]];
@@ -181,16 +334,26 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         const pipe = s.blocks.get(pk);
         if (!pipe || !isPipeType(pipe.type)) continue;
         if ((pipe.type as string).replace("H", "").indexOf("O") !== axis) continue;
-        const fc: [number, number, number] = [cc[0], cc[1], cc[2]];
-        fc[axis] += offset === 1 ? 3 : -3;
-        const farKey = posKey({ x: fc[0], y: fc[1], z: fc[2] });
-        if (cursorUndetermined || s.undeterminedCubes.has(farKey)) {
-          if (found !== null) return null; // 2+ undetermined pipes — can't determine which to cycle
-          found = pk;
+        let ok = s.freeBuild;
+        if (!ok) {
+          const fc: [number, number, number] = [cc[0], cc[1], cc[2]];
+          fc[axis] += offset === 1 ? 3 : -3;
+          const farKey = posKey({ x: fc[0], y: fc[1], z: fc[2] });
+          ok = cursorAmbiguous || isAmbiguousCubeEnd(farKey, s.blocks);
         }
+        if (ok) eligible.push(pk);
       }
     }
-    return found;
+    if (eligible.length === 0) return null;
+    if (eligible.length === 1) return eligible[0];
+    if (s.freeBuild) return eligible[0];
+    const last = s.buildHistory[s.buildHistory.length - 1];
+    if (last) {
+      const preferred = last.pipe?.key
+        ?? traversedPipeKey(last.prevCursorPos, last.destCursorPos);
+      if (eligible.includes(preferred)) return preferred;
+    }
+    return null;
   };
   const buildActivePipeVariant = useBlockStore((s): PipeVariant | null => {
     if (s.mode !== "build") return null;
@@ -204,6 +367,8 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
     if (s.mode !== "build") return null;
     const pk = findUndeterminedPipeKey(s);
     if (!pk) return null;
+    // Free build lets the user cycle to any variant unconditionally.
+    if (s.freeBuild) return PIPE_VARIANTS.join(",");
     const pipeBlock = s.blocks.get(pk);
     if (!pipeBlock || !isPipeType(pipeBlock.type)) return null;
     const base = (pipeBlock.type as string).replace("H", "");
@@ -221,8 +386,15 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         const nKey = posKey({ x: nc[0], y: nc[1], z: nc[2] });
         const neighbor = tmp.get(nKey);
         if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
+        // Mirror cyclePipe: a committed neighbour cube must remain valid
+        // (its current type still in the option set) under the candidate pipe.
         const opts = determineCubeOptions(neighbor.pos, tmp);
-        if (!opts.determined && opts.options.length === 0) { ok = false; break; }
+        const currentType = neighbor.type;
+        if (opts.determined) {
+          if (opts.type !== currentType) { ok = false; break; }
+        } else if (!opts.options.includes(currentType as CubeType)) {
+          ok = false; break;
+        }
       }
       if (ok) valid.push(v);
     }
@@ -236,16 +408,20 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
   const validationStatus = useValidationStore((s) => s.status);
   const runValidation = useValidationStore((s) => s.validate);
 
-  const setCameraPreset = (position: [number, number, number]) => {
-    const controls = controlsRef.current;
-    if (!controls) return;
-    animateCamera(controls, new THREE.Vector3(0, 0, 0), new THREE.Vector3(...position));
-  };
+  const viewMode = useBlockStore((s) => s.viewMode);
+  const setPerspView = useBlockStore((s) => s.setPerspView);
+  const setIsoView = useBlockStore((s) => s.setIsoView);
+  const stepSlice = useBlockStore((s) => s.stepSlice);
 
   const previewImg = (key: string) => {
     const src = previewImages.get(key);
     return src ? (
-      <img src={src} alt={key} style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} />
+      <img
+        src={src}
+        alt={key}
+        draggable={false}
+        style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }}
+      />
     ) : null;
   };
 
@@ -270,39 +446,60 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
       }}
     >
-      {/* Mode buttons */}
+      {/* Mode segmented control */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
-        <button onClick={() => setMode("place")} style={btnStyle(mode === "place")}>
-          Place
+        <ModeSegmented mode={mode} setMode={setMode} />
+      </div>
+
+      {/* View buttons: 3D (perspective + free orbit) and Iso (axis-locked elevation) */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
+        <button
+          onClick={setPerspView}
+          style={{ ...btnStyle(viewMode.kind === "persp"), whiteSpace: "nowrap" }}
+          title="Free 3D perspective view with orbit"
+        >
+          3D
         </button>
-        <button onClick={() => setMode("select")} style={btnStyle(mode === "select")}>
-          Select
-        </button>
-        <button onClick={() => setMode("delete")} style={btnStyle(mode === "delete")}>
-          Delete
-        </button>
-        <button onClick={() => setMode("build")} style={btnStyle(mode === "build")}>
-          Build
-        </button>
-        <button onClick={onResetCamera} style={btnStyle(false)}>
+        <IsoMenu
+          viewMode={viewMode}
+          onPick={setIsoView}
+        />
+        {viewMode.kind === "iso" && (
+          <div style={{ display: "flex", gap: "2px", alignItems: "center" }}>
+            <button
+              onClick={() => stepSlice(-3)}
+              title="Move slice toward negative depth"
+              style={{ ...btnStyle(false), padding: "2px 6px", fontSize: "11px", flex: 1 }}
+            >
+              ◂
+            </button>
+            <span
+              title="Active slice on the depth axis (TQEC units / 3)"
+              style={{
+                fontFamily: "monospace",
+                fontSize: "11px",
+                color: "#555",
+                minWidth: 28,
+                textAlign: "center",
+              }}
+            >
+              {viewMode.slice / 3}
+            </span>
+            <button
+              onClick={() => stepSlice(3)}
+              title="Move slice toward positive depth"
+              style={{ ...btnStyle(false), padding: "2px 6px", fontSize: "11px", flex: 1 }}
+            >
+              ▸
+            </button>
+          </div>
+        )}
+        <button onClick={onResetCamera} style={btnStyle(false)} title="Recenter the camera on the origin">
           Origin
         </button>
       </div>
 
-      {/* View buttons */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
-        <button onClick={() => setCameraPreset([35, 35, 0.01])} style={{ ...btnStyle(false), whiteSpace: "nowrap" }}>
-          X View
-        </button>
-        <button onClick={() => setCameraPreset([0.01, 35, -35])} style={{ ...btnStyle(false), whiteSpace: "nowrap" }}>
-          Y View
-        </button>
-        <button onClick={() => setCameraPreset([0, 50, 0.01])} style={{ ...btnStyle(false), whiteSpace: "nowrap" }}>
-          Z View
-        </button>
-      </div>
-
-      {/* Undo / Redo / Clear */}
+      {/* History + Flows */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
         <button
           onClick={undo}
@@ -319,24 +516,32 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
           Redo
         </button>
         <button
-          onClick={() => {
-            if (!window.confirm("Are you sure you want to delete the whole diagram?")) return;
-            clearAll();
-            onResetCamera();
+          onClick={() => useBlockStore.getState().toggleFlowsPanel()}
+          title="Show stabilizer flows for the current diagram (computed by the tqec package)"
+          style={{
+            ...btnStyle(flowsPanelOpen),
+            borderColor: flowsPanelOpen ? "#4a9eff" : "#ccc",
+            background: flowsPanelOpen ? "#e8f0fe" : "#fff",
           }}
-          disabled={blocksEmpty}
-          style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
         >
-          Clear
+          Flows (tqec)
         </button>
-        {selectedCount > 0 && (
-          <button
-            onClick={deleteSelected}
-            style={{ ...btnStyle(false), borderColor: "#dc3545", color: "#dc3545" }}
-          >
-            Delete {selectedCount}
-          </button>
-        )}
+      </div>
+
+      {/* Settings + File menu + Verify */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
+        <SettingsMenu
+          freeBuild={freeBuild}
+          toggleFreeBuild={toggleFreeBuild}
+          onOpenKeybindEditor={onOpenKeybindEditor}
+        />
+        <FileMenu
+          loadBlocks={loadBlocks}
+          insertBlocks={insertBlocks}
+          clearAll={clearAll}
+          onResetCamera={onResetCamera}
+          blocksEmpty={blocksEmpty}
+        />
         <button
           onClick={runValidation}
           disabled={blocksEmpty || validationStatus === "loading"}
@@ -358,55 +563,110 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
         >
           {validationStatus === "loading" ? "Verifying..." : "Verify (tqec)"}
         </button>
-        <button
-          onClick={toggleFreeBuild}
-          title="Disable color-matching checks when placing blocks"
-          style={{
-            ...btnStyle(false),
-            fontSize: "10px",
-            padding: "2px 6px",
-            borderColor: freeBuild ? "#e67e22" : "#ccc",
-            background: freeBuild ? "#fdebd0" : "#fff",
-            color: freeBuild ? "#a04000" : "#333",
-          }}
-        >
-          Free Build {freeBuild ? "ON" : "OFF"}
-        </button>
-      </div>
-
-      {/* Import / Export */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
-        <button onClick={() => triggerDaeImport(loadBlocks)} style={btnStyle(false)}>
-          Import
-        </button>
-        <button
-          onClick={() => downloadDae(useBlockStore.getState().blocks)}
-          disabled={blocksEmpty}
-          style={{ ...btnStyle(false), opacity: blocksEmpty ? 0.4 : 1, cursor: blocksEmpty ? "default" : "pointer" }}
-        >
-          Export
-        </button>
-        <TemplatePicker onLoad={loadBlocks} />
       </div>
 
       {/* Separator */}
       <div style={{ width: 1, background: "#ddd" }} />
 
-      {/* Blocks group (ZXCubes + Y) */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px", pointerEvents: mode === "build" ? "none" : "auto" }}>
+      {/* Tool group (Pointer) */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+        <span style={groupLabelStyle}>Tool</span>
+        <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
+          <button
+            key="pointer"
+            onClick={() => {
+              if (mode === "build") setMode("edit");
+              setArmedTool("pointer");
+            }}
+            title="Select and move blocks"
+            style={blockBtnStyle(mode === "edit" && armedTool === "pointer")}
+          >
+            Select
+            <div style={previewWrapStyle}>
+              <PointerIcon />
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Separator */}
+      <div style={{ width: 1, background: "#ddd" }} />
+
+      {/* Blocks group (Port + ZXCubes + Y) */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <span style={groupLabelStyle}>Blocks</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
+          <button
+            key="port"
+            onPointerDown={() => {
+              if (mode !== "edit") return;
+              // With a single block/port selected, defer to onClick (which
+              // replaces the selection in place); calling setPlacePort here
+              // would clear the selection before the click is handled.
+              if (selectedCubeSlotInfo != null) return;
+              setPlacePort(true);
+              setPaletteDragging(true);
+            }}
+            onClick={() => {
+              if (mode === "build") {
+                // In Keyboard Build mode, clicking Port converts the cursor cube back to a port
+                // (only valid when pipeCount < 2; cycleBlock validates and no-ops otherwise).
+                cycleBlock(null);
+                return;
+              }
+              // Single block/port selected → replace it in place rather than
+              // dropping the selection and arming the placement tool.
+              if (selectedCubeSlotInfo != null && selectedCubeSlotInfo.portAllowed) {
+                cycleSelectedType(1, { kind: "port" });
+                return;
+              }
+              setPlacePort(true);
+            }}
+            title="Place or convert to a port"
+            style={blockBtnStyle(
+              (mode === "edit" && armedTool === "port") ||
+              (mode === "build" && buildCursorOnPort) ||
+              (mode === "edit" && selectedCubeSlotInfo?.currentType === "PORT"),
+              (mode === "build" && !freeBuild && !buildCursorPortAllowed) ||
+              (mode === "edit" && selectedCubeSlotInfo != null && !selectedCubeSlotInfo.portAllowed),
+            )}
+          >
+            Port
+            <div style={previewWrapStyle}>{previewImg("Port")}</div>
+          </button>
           {CUBE_TYPES.map((ct) => (
             <button
               key={ct}
-              onClick={() => {
+              onPointerDown={() => {
+                if (mode !== "edit") return;
+                if (selectedCubeSlotInfo != null) return;
                 setCubeType(ct as BlockType);
-                setMode("place");
+                setPaletteDragging(true);
+              }}
+              onClick={() => {
+                if (mode === "build") {
+                  cycleBlock(ct);
+                  return;
+                }
+                if (selectedCubeSlotInfo != null && selectedCubeSlotInfo.validTypes.has(ct)) {
+                  cycleSelectedType(1, { kind: "cube", type: ct });
+                  return;
+                }
+                setCubeType(ct as BlockType);
               }}
               style={blockBtnStyle(
-                (cubeType === ct && mode === "place") ||
-                (mode === "build" && buildCursorBlockType === ct),
-                mode === "build" && !freeBuild && buildValidTypes != null && !buildValidTypes.has(ct),
+                (mode === "edit" && armedTool === "cube" && cubeType === ct) ||
+                (mode === "build" && buildCursorBlockType === ct) ||
+                (mode === "edit" && selectedCubeSlotInfo?.currentType === ct),
+                // Never disable the cube type currently sitting at the build cursor or
+                // selected — it's the placed type and showing it as highlighted +
+                // greyed at the same time is a visual contradiction (mirrors the
+                // pipe-button rule).
+                (mode === "build" && !freeBuild && buildCursorBlockType !== ct
+                  && buildValidTypes != null && !buildValidTypes.has(ct)) ||
+                (mode === "edit" && selectedCubeSlotInfo != null
+                  && selectedCubeSlotInfo.currentType !== ct
+                  && !selectedCubeSlotInfo.validTypes.has(ct)),
               )}
             >
               {ct}
@@ -414,14 +674,32 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
             </button>
           ))}
           <button
-            onClick={() => {
+            onPointerDown={() => {
+              if (mode !== "edit") return;
+              if (selectedCubeSlotInfo != null) return;
               setCubeType("Y");
-              setMode("place");
+              setPaletteDragging(true);
+            }}
+            onClick={() => {
+              if (mode === "build") {
+                cycleBlock("Y");
+                return;
+              }
+              if (selectedCubeSlotInfo != null && selectedCubeSlotInfo.validTypes.has("Y")) {
+                cycleSelectedType(1, { kind: "cube", type: "Y" });
+                return;
+              }
+              setCubeType("Y");
             }}
             style={blockBtnStyle(
-              (cubeType === "Y" && mode === "place") ||
-              (mode === "build" && buildCursorBlockType === "Y"),
-              mode === "build" && !freeBuild && buildValidTypes != null && !buildValidTypes.has("Y" as CubeType),
+              (mode === "edit" && armedTool === "cube" && cubeType === "Y") ||
+              (mode === "build" && buildCursorBlockType === "Y") ||
+              (mode === "edit" && selectedCubeSlotInfo?.currentType === "Y"),
+              (mode === "build" && !freeBuild && buildCursorBlockType !== "Y"
+                && buildValidTypes != null && !buildValidTypes.has("Y" as CubeType)) ||
+              (mode === "edit" && selectedCubeSlotInfo != null
+                && selectedCubeSlotInfo.currentType !== "Y"
+                && !selectedCubeSlotInfo.validTypes.has("Y")),
             )}
           >
             Y
@@ -434,20 +712,41 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
       <div style={{ width: 1, background: "#ddd" }} />
 
       {/* Pipes group */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px", pointerEvents: mode === "build" ? "none" : "auto" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <span style={groupLabelStyle}>Pipes</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           {PIPE_VARIANTS.map((v) => (
             <button
               key={v}
-              onClick={() => {
+              onPointerDown={() => {
+                if (mode !== "edit") return;
+                if (selectedPipeInfo != null) return;
                 setPipeVariant(v);
-                setMode("place");
+                setPaletteDragging(true);
+              }}
+              onClick={() => {
+                if (mode === "build") {
+                  cyclePipe(v);
+                  return;
+                }
+                if (selectedPipeInfo != null && selectedPipeInfo.validVariants.has(v)) {
+                  cycleSelectedType(1, { kind: "pipe", variant: v });
+                  return;
+                }
+                setPipeVariant(v);
               }}
               style={blockBtnStyle(
-                (pipeVariant === v && mode === "place") ||
-                (mode === "build" && buildActivePipeVariant === v),
-                mode === "build" && !freeBuild && (buildValidPipeVariants == null || !buildValidPipeVariants.has(v)),
+                (mode === "edit" && armedTool === "pipe" && pipeVariant === v) ||
+                (mode === "build" && buildActivePipeVariant === v) ||
+                (mode === "edit" && selectedPipeInfo?.currentVariant === v),
+                // Never disable the currently-active pipe variant — it's always
+                // valid by construction (it's what's placed), and showing it as
+                // highlighted + greyed at the same time is a visual contradiction.
+                (mode === "build" && !freeBuild && buildActivePipeVariant !== v
+                  && (buildValidPipeVariants == null || !buildValidPipeVariants.has(v))) ||
+                (mode === "edit" && selectedPipeInfo != null
+                  && selectedPipeInfo.currentVariant !== v
+                  && !selectedPipeInfo.validVariants.has(v)),
               )}
             >
               {v}
@@ -459,31 +758,197 @@ export function Toolbar({ onResetCamera, controlsRef, toolbarRef }: { onResetCam
 
       {/* Position display */}
       <div style={{ width: 1, background: "#ddd" }} />
-      <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", fontFamily: "monospace", fontSize: "12px", color: "#555", lineHeight: "1.6", minWidth: 90 }}>
-        <span style={groupLabelStyle}>Position</span>
-        {mode === "build" && buildCursor ? (
-          <PositionEditor pos={buildCursor} onCommit={moveBuildCursor} />
-        ) : (() => {
-          const pos: Position3D | null = hoveredGridPos;
-          const bt: BlockType | null = useBlockStore.getState().hoveredBlockType;
-          if (!pos) return <><span>X: —</span><span>Y: —</span><span>Z: —</span></>;
-          const isPipe = bt ? isPipeType(bt) : pipeAxisFromPos(pos) !== null;
-          if (isPipe) {
-            const axis = pipeAxisFromPos(pos);
-            const coords = [pos.x, pos.y, pos.z];
-            const labels = ["X", "Y", "Z"];
-            return labels.map((l, i) => {
-              if (i === axis) {
-                const c1 = (coords[i] - 1) / 3;
-                const c2 = (coords[i] + 2) / 3;
-                return <span key={i}>{l}: {c1} → {c2}</span>;
-              }
-              return <span key={i}>{l}: {coords[i] / 3}</span>;
-            });
-          }
-          return <><span>X: {pos.x / 3}</span><span>Y: {pos.y / 3}</span><span>Z: {pos.z / 3}</span></>;
-        })()}
+      <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", fontFamily: "monospace", fontSize: "12px", color: "#555", lineHeight: "1.6", minWidth: 90 }}>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <span style={groupLabelStyle}>Position</span>
+          {mode === "build" && buildCursor ? (
+            <PositionEditor pos={buildCursor} onCommit={moveBuildCursor} />
+          ) : (() => {
+            const pos: Position3D | null = hoveredGridPos;
+            const bt: BlockType | null = useBlockStore.getState().hoveredBlockType;
+            if (!pos) return <><span>X: —</span><span>Y: —</span><span>Z: —</span></>;
+            const isPipe = bt ? isPipeType(bt) : pipeAxisFromPos(pos) !== null;
+            if (isPipe) {
+              const axis = pipeAxisFromPos(pos);
+              const coords = [pos.x, pos.y, pos.z];
+              const labels = ["X", "Y", "Z"];
+              return labels.map((l, i) => {
+                if (i === axis) {
+                  const c1 = (coords[i] - 1) / 3;
+                  const c2 = (coords[i] + 2) / 3;
+                  return <span key={i}>{l}: {c1} → {c2}</span>;
+                }
+                return <span key={i}>{l}: {coords[i] / 3}</span>;
+              });
+            }
+            return <><span>X: {pos.x / 3}</span><span>Y: {pos.y / 3}</span><span>Z: {pos.z / 3}</span></>;
+          })()}
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <FpsDisplay spanRef={fpsRef} />
+        </div>
       </div>
+
+      {selectedCount > 0 && mode === "edit" && (
+        <>
+          <div style={{ width: 1, background: "#ddd" }} />
+          <SelectionInspector
+            count={selectedCount}
+            onDelete={deleteSelected}
+            onFlip={flipSelected}
+          />
+        </>
+      )}
+      <ResizeHandle toolbarRef={toolbarRef} userScale={userScale} setUserScale={setUserScale} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Resize handle — drag to set the persisted toolbar scale.
+// ---------------------------------------------------------------------------
+// The toolbar is centered (translateX(-50%)) so horizontal drag changes the
+// width symmetrically: a 1px drag at the right edge grows the visible width
+// by 2px. We drive the new scale from the starting natural width so the
+// grabbed corner tracks the cursor.
+function ResizeHandle({
+  toolbarRef,
+  userScale,
+  setUserScale,
+}: {
+  toolbarRef: React.RefObject<HTMLDivElement | null>;
+  userScale: number;
+  setUserScale: (n: number) => void;
+}) {
+  const dragRef = useRef<{ startX: number; startScale: number; natural: number } | null>(null);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const node = toolbarRef.current;
+    if (!node) return;
+    const natural = node.offsetWidth;
+    if (natural === 0) return;
+    dragRef.current = { startX: e.clientX, startScale: userScale, natural };
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const delta = (e.clientX - d.startX) * 2;
+    const next = d.startScale + delta / d.natural;
+    const clamped = Math.min(TOOLBAR_USER_SCALE_MAX, Math.max(TOOLBAR_USER_SCALE_MIN, next));
+    setUserScale(clamped);
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+  };
+
+  const onDoubleClick = () => setUserScale(1);
+
+  return (
+    <div
+      role="separator"
+      aria-label="Resize toolbar"
+      title="Drag to resize toolbar (double-click to reset)"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onDoubleClick={onDoubleClick}
+      style={{
+        position: "absolute",
+        right: 0,
+        bottom: 0,
+        width: 14,
+        height: 14,
+        cursor: "nwse-resize",
+        touchAction: "none",
+        // Diagonal grip lines.
+        backgroundImage:
+          "linear-gradient(135deg, transparent 0 6px, #999 6px 7px, transparent 7px 10px, #999 10px 11px, transparent 11px)",
+        borderBottomRightRadius: 8,
+      }}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Iso view menu — dropdown to pick which axis to view down
+// ---------------------------------------------------------------------------
+
+const ISO_AXIS_LABEL: Record<IsoAxis, string> = {
+  x: "Iso X",
+  y: "Iso Y",
+  z: "Iso Z",
+};
+
+function IsoMenu({ viewMode, onPick }: { viewMode: ViewMode; onPick: (axis: IsoAxis) => void }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const active = viewMode.kind === "iso";
+  const label = active ? ISO_AXIS_LABEL[viewMode.axis] : "Iso";
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const pick = (axis: IsoAxis) => {
+    onPick(axis);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{ ...btnStyle(active), whiteSpace: "nowrap", width: "100%" }}
+        title="Axis-locked orthographic elevation view"
+      >
+        {label} ▾
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            background: "#fff",
+            border: "1px solid #ccc",
+            borderRadius: 4,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            padding: 4,
+            minWidth: 90,
+            zIndex: 1000,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          {(["x", "y", "z"] as IsoAxis[]).map((axis) => (
+            <button
+              key={axis}
+              onClick={() => pick(axis)}
+              style={{
+                ...btnStyle(active && viewMode.axis === axis),
+                textAlign: "left",
+                padding: "4px 10px",
+              }}
+            >
+              {ISO_AXIS_LABEL[axis]}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -498,14 +963,9 @@ function PositionEditor({ pos, onCommit }: { pos: Position3D; onCommit: (p: Posi
   const valueOf = (k: "x" | "y" | "z") => draft[k] ?? String(pos[k] / 3);
 
   const commit = () => {
-    const parse = (s: string): number | null => {
-      if (s.trim() === "") return null;
-      const n = Number(s);
-      return Number.isInteger(n) ? n : null;
-    };
-    const nx = draft.x !== undefined ? parse(draft.x) : pos.x / 3;
-    const ny = draft.y !== undefined ? parse(draft.y) : pos.y / 3;
-    const nz = draft.z !== undefined ? parse(draft.z) : pos.z / 3;
+    const nx = draft.x !== undefined ? evalCoordExpr(draft.x) : pos.x / 3;
+    const ny = draft.y !== undefined ? evalCoordExpr(draft.y) : pos.y / 3;
+    const nz = draft.z !== undefined ? evalCoordExpr(draft.z) : pos.z / 3;
     if (nx === null || ny === null || nz === null) {
       setDraft({});
       return;
@@ -536,8 +996,8 @@ function PositionEditor({ pos, onCommit }: { pos: Position3D; onCommit: (p: Posi
     <label key={k} style={{ display: "flex", alignItems: "center", gap: 4 }}>
       {k.toUpperCase()}:
       <input
-        type="number"
-        step={1}
+        type="text"
+        inputMode="numeric"
         value={valueOf(k)}
         onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
         onKeyDown={onKeyDown}
@@ -559,15 +1019,339 @@ function PositionEditor({ pos, onCommit }: { pos: Position3D; onCommit: (p: Posi
 }
 
 // ---------------------------------------------------------------------------
-// Template picker — lists bundled .dae files generated from tqec.gallery
+// Mode segmented control — Drag / Drop | Keyboard Build pill
 // ---------------------------------------------------------------------------
 
-function TemplatePicker({ onLoad }: { onLoad: (blocks: Map<string, import("../types").Block>) => void }) {
+function ModeSegmented({
+  mode,
+  setMode,
+}: {
+  mode: "edit" | "build";
+  setMode: (m: "edit" | "build") => void;
+}) {
+  const segStyle = (active: boolean): React.CSSProperties => ({
+    padding: "4px 12px",
+    fontSize: "13px",
+    fontFamily: "sans-serif",
+    cursor: "pointer",
+    border: "none",
+    background: active ? "#4a9eff" : "transparent",
+    color: active ? "#fff" : "#555",
+    fontWeight: active ? 600 : "normal",
+    borderRadius: 3,
+    transition: "background 0.1s, color 0.1s",
+  });
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        flexDirection: "column",
+        border: "2px solid #4a9eff",
+        borderRadius: 6,
+        overflow: "hidden",
+        padding: 2,
+        background: "#fff",
+      }}
+    >
+      <button onClick={() => setMode("edit")} style={segStyle(mode === "edit")}>
+        Drag / Drop
+      </button>
+      <button onClick={() => setMode("build")} style={segStyle(mode === "build")}>
+        Keyboard Build
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SelectionInspector — Flip / Delete actions for the current selection
+// ---------------------------------------------------------------------------
+
+function SelectionInspector({
+  count,
+  onDelete,
+  onFlip,
+}: {
+  count: number;
+  onDelete: () => void;
+  onFlip: () => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
+      <span style={groupLabelStyle}>Selection ({count})</span>
+      <button
+        onClick={onFlip}
+        title="Swap X↔Z colors on all selected blocks"
+        style={{ ...btnStyle(false), borderColor: "#4a9eff", color: "#4a9eff" }}
+      >
+        Flip
+      </button>
+      <button
+        onClick={onDelete}
+        style={{ ...btnStyle(false), borderColor: "#dc3545", color: "#dc3545" }}
+      >
+        Delete
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FileMenu — Import / Export / Photo / Templates / Clear dropdown
+// ---------------------------------------------------------------------------
+
+function FileMenu({
+  loadBlocks,
+  insertBlocks,
+  clearAll,
+  onResetCamera,
+  blocksEmpty,
+}: {
+  loadBlocks: (blocks: Map<string, import("../types").Block>) => void;
+  insertBlocks: (blocks: Map<string, import("../types").Block>) => void;
+  clearAll: () => void;
+  onResetCamera: () => void;
+  blocksEmpty: boolean;
+}) {
   const [open, setOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [templates, setTemplates] = useState<TemplateEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [loadingFile, setLoadingFile] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) {
+        setOpen(false);
+        setTemplatesOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const toggleTemplates = async () => {
+    const next = !templatesOpen;
+    setTemplatesOpen(next);
+    if (next && templates === null && templatesError === null) {
+      try {
+        setTemplates(await fetchTemplateManifest());
+      } catch (err) {
+        setTemplatesError(err instanceof Error ? err.message : String(err));
+      }
+    }
+  };
+
+  const pickTemplate = async (entry: TemplateEntry, action: "load" | "insert") => {
+    setLoadingFile(entry.filename);
+    try {
+      const blocks = await loadTemplateBlocks(entry.filename);
+      if (action === "insert") insertBlocks(blocks);
+      else loadBlocks(blocks);
+      setOpen(false);
+      setTemplatesOpen(false);
+    } catch (err) {
+      alert(`Failed to ${action} template: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setLoadingFile(null);
+    }
+  };
+
+  const item = (disabled: boolean): React.CSSProperties => ({
+    ...btnStyle(false),
+    textAlign: "left",
+    padding: "4px 10px",
+    opacity: disabled ? 0.4 : 1,
+    cursor: disabled ? "default" : "pointer",
+    whiteSpace: "nowrap",
+  });
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{ ...btnStyle(open), whiteSpace: "nowrap", width: "100%" }}
+        title="Import / Export / Templates / Clear"
+      >
+        File ▾
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            background: "#fff",
+            border: "1px solid #ccc",
+            borderRadius: 4,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            padding: 4,
+            minWidth: 140,
+            zIndex: 1000,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          <button
+            onClick={() => {
+              triggerDaeImport(loadBlocks);
+              setOpen(false);
+            }}
+            title="Load a .dae file (replaces current scene)"
+            style={item(false)}
+          >
+            Import…
+          </button>
+          <button
+            onClick={() => {
+              triggerDaeImport(insertBlocks);
+              setOpen(false);
+            }}
+            title="Insert a .dae file next to current scene; inserted blocks stay selected so you can drag them into place"
+            style={item(false)}
+          >
+            Insert…
+          </button>
+          <button
+            onClick={() => {
+              downloadDae(useBlockStore.getState().blocks);
+              setOpen(false);
+            }}
+            disabled={blocksEmpty}
+            style={item(blocksEmpty)}
+          >
+            Export
+          </button>
+          <button
+            onClick={() => {
+              useBlockStore.getState().requestPhoto();
+              setOpen(false);
+            }}
+            disabled={blocksEmpty}
+            title="Save current view as PNG"
+            style={item(blocksEmpty)}
+          >
+            Screenshot
+          </button>
+          <button
+            onClick={toggleTemplates}
+            style={{
+              ...item(false),
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              background: templatesOpen ? "#e8f0fe" : "#fff",
+            }}
+          >
+            Templates <span style={{ opacity: 0.6, marginLeft: 6 }}>{templatesOpen ? "▾" : "▸"}</span>
+          </button>
+          {templatesOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: "100%",
+                marginLeft: 4,
+                background: "#fff",
+                border: "1px solid #ccc",
+                borderRadius: 4,
+                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                padding: 4,
+                minWidth: 220,
+                zIndex: 1001,
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+              }}
+            >
+              {templatesError && <div style={{ padding: 6, color: "#c0392b", fontSize: 12 }}>{templatesError}</div>}
+              {!templatesError && templates === null && <div style={{ padding: 6, fontSize: 12, color: "#666" }}>Loading…</div>}
+              {templates?.map((t) => (
+                <div key={t.filename} style={{ display: "flex", gap: 2 }}>
+                  <button
+                    onClick={() => pickTemplate(t, "load")}
+                    disabled={loadingFile !== null}
+                    title={`Load (replace scene): ${t.description} (${t.filename})`}
+                    style={{
+                      ...btnStyle(false),
+                      textAlign: "left",
+                      padding: "6px 10px",
+                      flex: 1,
+                      opacity: loadingFile && loadingFile !== t.filename ? 0.5 : 1,
+                    }}
+                  >
+                    {loadingFile === t.filename ? `${t.name}…` : t.name}
+                  </button>
+                  <button
+                    onClick={() => pickTemplate(t, "insert")}
+                    disabled={loadingFile !== null}
+                    title={`Insert next to current scene (selected for placement): ${t.name}`}
+                    style={{
+                      ...btnStyle(false),
+                      padding: "6px 8px",
+                      opacity: loadingFile && loadingFile !== t.filename ? 0.5 : 1,
+                      fontWeight: "bold",
+                    }}
+                  >
+                    +
+                  </button>
+                </div>
+              ))}
+              {templates && (
+                <div style={{ padding: "4px 6px 2px", fontSize: 10, color: "#888" }}>
+                  From <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a>
+                </div>
+              )}
+            </div>
+          )}
+          <div style={{ height: 1, background: "#eee", margin: "4px 0" }} />
+          <button
+            onClick={() => {
+              if (!window.confirm("Are you sure you want to delete the whole diagram?")) return;
+              clearAll();
+              onResetCamera();
+              setOpen(false);
+            }}
+            disabled={blocksEmpty}
+            style={{ ...item(blocksEmpty), color: "#dc3545" }}
+          >
+            Clear all
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SettingsMenu — Free Build, navigation style, keybind editor entry
+// ---------------------------------------------------------------------------
+
+const NAV_STYLE_LABELS: Record<NavStyle, string> = {
+  pan: "Drag to pan",
+  rotate: "Drag to rotate",
+};
+
+function SettingsMenu({
+  freeBuild,
+  toggleFreeBuild,
+  onOpenKeybindEditor,
+}: {
+  freeBuild: boolean;
+  toggleFreeBuild: () => void;
+  onOpenKeybindEditor: (mode: KeybindMode) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const navStyle = useKeybindStore((s) => s.navStyle);
+  const setNavStyle = useKeybindStore((s) => s.setNavStyle);
+  const cameraFollowsBuild = useKeybindStore((s) => s.cameraFollowsBuild);
+  const toggleCameraFollowsBuild = useKeybindStore((s) => s.toggleCameraFollowsBuild);
+  const axisAbsoluteWasd = useKeybindStore((s) => s.axisAbsoluteWasd);
+  const toggleAxisAbsoluteWasd = useKeybindStore((s) => s.toggleAxisAbsoluteWasd);
 
   useEffect(() => {
     if (!open) return;
@@ -578,79 +1362,111 @@ function TemplatePicker({ onLoad }: { onLoad: (blocks: Map<string, import("../ty
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  const toggle = async () => {
-    const next = !open;
-    setOpen(next);
-    if (next && templates === null) {
-      try {
-        setTemplates(await fetchTemplateManifest());
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    }
-  };
-
-  const pick = async (entry: TemplateEntry) => {
-    setLoadingFile(entry.filename);
-    try {
-      const blocks = await loadTemplateBlocks(entry.filename);
-      onLoad(blocks);
-      setOpen(false);
-    } catch (err) {
-      alert(`Failed to load template: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setLoadingFile(null);
-    }
-  };
-
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
-      <button onClick={toggle} style={btnStyle(open)} title="Load a bundled template diagram from tqec.gallery">
-        Templates ▾
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Settings"
+        style={{ ...btnStyle(open || freeBuild), whiteSpace: "nowrap", width: "100%" }}
+      >
+        ⚙ Settings
       </button>
       {open && (
         <div
           style={{
             position: "absolute",
             top: "calc(100% + 4px)",
-            right: 0,
+            left: 0,
             background: "#fff",
             border: "1px solid #ccc",
             borderRadius: 4,
             boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-            padding: 4,
-            minWidth: 220,
+            padding: 8,
+            width: 320,
             zIndex: 1000,
             display: "flex",
             flexDirection: "column",
-            gap: 2,
+            gap: 8,
+            fontFamily: "sans-serif",
+            fontSize: 12,
           }}
         >
-          {error && <div style={{ padding: 6, color: "#c0392b", fontSize: 12 }}>{error}</div>}
-          {!error && templates === null && <div style={{ padding: 6, fontSize: 12, color: "#666" }}>Loading…</div>}
-          {templates?.map((t) => (
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={freeBuild} onChange={toggleFreeBuild} style={{ marginTop: 2 }} />
+            <span>
+              Ignore color rules
+              <div style={{ fontSize: 10, color: "#888", whiteSpace: "nowrap" }}>
+                (“Free Build” — skips color-matching checks)
+              </div>
+            </span>
+          </label>
+
+          <div style={{ height: 1, background: "#eee" }} />
+
+          <div>
+            <div style={{ fontWeight: 600, color: "#555", marginBottom: 4 }}>Navigation style</div>
+            {(["pan", "rotate"] as NavStyle[]).map((v) => (
+              <label key={v} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "2px 0" }}>
+                <input
+                  type="radio"
+                  name="navstyle"
+                  checked={navStyle === v}
+                  onChange={() => setNavStyle(v)}
+                />
+                {NAV_STYLE_LABELS[v]}
+              </label>
+            ))}
+          </div>
+
+          <div style={{ height: 1, background: "#eee" }} />
+
+          <div>
+            <div style={{ fontWeight: 600, color: "#555", marginBottom: 4 }}>Keyboard Build</div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "2px 0" }}>
+              <input type="checkbox" checked={cameraFollowsBuild} onChange={toggleCameraFollowsBuild} />
+              <span title="When off, the camera stays put while you build with the keyboard">
+                Camera follows build cursor
+              </span>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "2px 0" }}>
+              <input type="checkbox" checked={axisAbsoluteWasd} onChange={toggleAxisAbsoluteWasd} />
+              <span title="When on, W/S = ±X and A/D = ±Y regardless of camera angle">
+                Axis-locked WASD
+              </span>
+            </label>
+          </div>
+
+          <div style={{ height: 1, background: "#eee" }} />
+
+          <div>
+            <div style={{ fontWeight: 600, color: "#555", marginBottom: 4 }}>Keybindings</div>
             <button
-              key={t.filename}
-              onClick={() => pick(t)}
-              disabled={loadingFile !== null}
-              title={`${t.description} (${t.filename})`}
-              style={{
-                ...btnStyle(false),
-                textAlign: "left",
-                padding: "6px 10px",
-                opacity: loadingFile && loadingFile !== t.filename ? 0.5 : 1,
-              }}
+              onClick={() => { onOpenKeybindEditor("edit"); setOpen(false); }}
+              style={{ ...btnStyle(false), padding: "4px 8px", width: "100%" }}
             >
-              {loadingFile === t.filename ? `${t.name}…` : t.name}
+              Edit keybindings…
             </button>
-          ))}
-          {templates && (
-            <div style={{ padding: "4px 6px 2px", fontSize: 10, color: "#888" }}>
-              From <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a>
-            </div>
-          )}
+          </div>
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Small inline icon for the Pointer tool button
+// ---------------------------------------------------------------------------
+
+function PointerIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M3 2 L3 12 L6 9.5 L8 13.5 L10 12.5 L8 8.5 L12 8 Z"
+        fill="#333"
+        stroke="#333"
+        strokeWidth="0.5"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }

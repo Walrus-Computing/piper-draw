@@ -1,4 +1,4 @@
-import { useRef, useLayoutEffect, useMemo, useEffect } from "react";
+import { useRef, useLayoutEffect, useMemo, useEffect, useState } from "react";
 import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
@@ -21,6 +21,10 @@ import {
   VARIANT_AXIS_MAP,
 } from "../types";
 import type { BlockType, CubeType, Block, FaceMask, Position3D, PipeVariant } from "../types";
+import { posInActiveSlice } from "../utils/isoView";
+
+const DIMMED_OPACITY = 0.18;
+const DIMMED_EDGE_OPACITY = 0.25;
 
 const MIN_CAPACITY = 64;
 
@@ -32,8 +36,15 @@ const geometryCache = new Map<string, THREE.BufferGeometry>();
 const fullBoxCache = new Map<BlockType, THREE.BoxGeometry>();
 const edgesCache = new Map<string, THREE.BufferGeometry>();
 const edgeLineMaterial = new THREE.LineBasicMaterial({ color: "#000000" });
+const dimmedEdgeLineMaterial = new THREE.LineBasicMaterial({
+  color: "#000000",
+  transparent: true,
+  opacity: DIMMED_EDGE_OPACITY,
+  depthWrite: false,
+});
 
-function resolvePipeTypeFromFace(
+// eslint-disable-next-line react-refresh/only-export-components
+export function resolvePipeTypeFromFace(
   srcPos: Position3D,
   srcType: BlockType,
   normal: THREE.Vector3,
@@ -85,24 +96,25 @@ function TypedInstances({
   blocks,
   hiddenFaces,
   allBlocks,
+  dimmed,
 }: {
   cubeType: BlockType;
   blocks: Block[];
   hiddenFaces: FaceMask;
   allBlocks: Map<string, Block>;
+  dimmed: boolean;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const blocksRef = useRef(blocks);
-  blocksRef.current = blocks;
-  const capacityRef = useRef(MIN_CAPACITY);
+  useEffect(() => {
+    blocksRef.current = blocks;
+  });
+  const [capacity, setCapacity] = useState(MIN_CAPACITY);
 
   // Double capacity when needed; never shrink (avoids thrashing remounts)
-  if (blocks.length > capacityRef.current) {
-    while (capacityRef.current < blocks.length) {
-      capacityRef.current *= 2;
-    }
-  }
-  const maxCount = capacityRef.current;
+  let maxCount = capacity;
+  while (maxCount < blocks.length) maxCount *= 2;
+  if (maxCount !== capacity) setCapacity(maxCount);
 
   const pipe = isPipeType(cubeType);
   const geometry = getCachedGeometry(cubeType, hiddenFaces);
@@ -111,8 +123,14 @@ function TypedInstances({
     () => new THREE.MeshLambertMaterial({
       vertexColors: true,
       side: THREE.DoubleSide,
+      transparent: dimmed,
+      opacity: dimmed ? DIMMED_OPACITY : 1,
+      depthWrite: !dimmed,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
     }),
-    [],
+    [dimmed],
   );
   const dummy = useMemo(() => new THREE.Matrix4(), []);
 
@@ -201,9 +219,22 @@ function TypedInstances({
     const b = blocksRef.current;
     if (e.instanceId == null || e.instanceId >= b.length) return;
     const store = useBlockStore.getState();
-    if (store.mode === "delete" || store.mode === "select" || store.mode === "build") {
+    // X-held delete preview: show a red hover on the block itself, no ghost.
+    if (store.xHeld && store.mode === "edit") {
+      store.setHoveredGridPos(b[e.instanceId].pos, b[e.instanceId].type);
+      return;
+    }
+    const armed = store.armedTool;
+    if (
+      store.mode === "build" ||
+      (store.mode === "edit" && armed === "pointer")
+    ) {
       // Read the actual block type from the instance, not the group prop
       store.setHoveredGridPos(b[e.instanceId].pos, b[e.instanceId].type);
+    } else if (store.mode === "edit" && armed === "port") {
+      // Port-conversion tool: no ghost preview on existing blocks — the click
+      // either removes the cube or does nothing (and sets a warning).
+      store.setHoveredGridPos(null);
     } else {
       // Place mode: check if we can replace the hovered block itself
       const hovered = b[e.instanceId];
@@ -273,21 +304,32 @@ function TypedInstances({
     const b = blocksRef.current;
     if (e.instanceId == null || e.instanceId >= b.length) return;
     const store = useBlockStore.getState();
+    if (store.isDraggingSelection) return;
+    // X-held single-click delete (Drag / Drop mode only) short-circuits everything.
+    if (store.xHeld && store.mode === "edit") {
+      store.removeBlock(b[e.instanceId].pos);
+      return;
+    }
     if (store.mode === "build") {
-      // In build mode, clicking a cube moves the cursor there
+      // In Keyboard Build mode, clicking a cube moves the cursor there
       const clicked = b[e.instanceId];
       if (!isPipeType(clicked.type)) {
         store.moveBuildCursor(clicked.pos);
       }
       return;
     }
-    if (store.mode === "select") {
+    const armed = store.armedTool;
+    if (armed === "pointer") {
       store.selectBlock(b[e.instanceId].pos, e.nativeEvent.shiftKey);
       return;
     }
-    if (store.mode === "delete") {
-      store.removeBlock(b[e.instanceId].pos);
-    } else {
+    {
+      // Port-conversion tool: click on a cube to remove it (leaving a port
+      // if a pipe was attached). Never falls through to pipe-placement.
+      if (armed === "port") {
+        store.convertBlockToPort(b[e.instanceId].pos);
+        return;
+      }
       // Place mode: try replacing the clicked block if the selected type
       // is valid at the clicked block's position
       const clicked = b[e.instanceId];
@@ -328,7 +370,7 @@ function TypedInstances({
         onClick={handleClick}
       />
       {batchedEdgesGeo && (
-        <lineSegments geometry={batchedEdgesGeo} material={edgeLineMaterial} />
+        <lineSegments geometry={batchedEdgesGeo} material={dimmed ? dimmedEdgeLineMaterial : edgeLineMaterial} />
       )}
     </>
   );
@@ -337,21 +379,20 @@ function TypedInstances({
 export function BlockInstances() {
   const blocks = useBlockStore((s) => s.blocks);
   const hiddenFaces = useBlockStore((s) => s.hiddenFaces);
-  const undeterminedCubes = useBlockStore((s) => s.undeterminedCubes);
+  const viewMode = useBlockStore((s) => s.viewMode);
 
   const grouped = useMemo(() => {
     type Group = {
       type: BlockType;
       hiddenFaces: FaceMask;
+      dimmed: boolean;
       blocks: Block[];
     };
-    // Hidden faces are pre-computed in the store — just group by (type, mask)
-    // Skip undetermined cubes (rendered by BuildCursor instead)
     const map = new Map<string, Group>();
     for (const block of blocks.values()) {
-      if (undeterminedCubes.has(posKey(block.pos))) continue;
       const hf = hiddenFaces.get(posKey(block.pos)) ?? 0;
-      const key = `${block.type}:${hf}`;
+      const dimmed = viewMode.kind === "iso" && !posInActiveSlice(viewMode, block.pos);
+      const key = `${block.type}:${hf}:${dimmed ? 1 : 0}`;
       const existing = map.get(key);
       if (existing) {
         existing.blocks.push(block);
@@ -359,22 +400,24 @@ export function BlockInstances() {
         map.set(key, {
           type: block.type,
           hiddenFaces: hf,
+          dimmed,
           blocks: [block],
         });
       }
     }
     return map;
-  }, [blocks, hiddenFaces, undeterminedCubes]);
+  }, [blocks, hiddenFaces, viewMode]);
 
   return (
     <>
-      {Array.from(grouped.values()).map((group) => (
+      {Array.from(grouped.entries()).map(([key, group]) => (
         <TypedInstances
-          key={`${group.type}:${group.hiddenFaces}`}
+          key={key}
           cubeType={group.type}
           hiddenFaces={group.hiddenFaces}
           blocks={group.blocks}
           allBlocks={blocks}
+          dimmed={group.dimmed}
         />
       ))}
     </>

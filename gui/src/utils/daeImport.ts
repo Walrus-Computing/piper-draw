@@ -1,5 +1,12 @@
-import type { Block, BlockType, Position3D } from "../types";
-import { CUBE_TYPES, PIPE_TYPES, posKey } from "../types";
+import type { Block, BlockType, CubeType, Position3D } from "../types";
+import { CUBE_TYPES, PIPE_TYPES, posKey, isPipeType, determineCubeOptions, countAttachedPipes } from "../types";
+import {
+  adjustHadamardDirection,
+  getAxesDirections,
+  isIdentityRotation,
+  pipeDirectionIndex,
+  rotateBlockKind,
+} from "./blockRotation";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -10,16 +17,6 @@ const ALL_BLOCK_TYPES: ReadonlySet<string> = new Set([
   ...PIPE_TYPES,
   "Y",
 ]);
-
-// Hadamard direction-flip equivalences (same as tqec's adjust_hadamards_direction)
-const HDM_EQUIVALENCES: Record<string, string> = {
-  ZXOH: "XZOH",
-  XOZH: "ZOXH",
-  OXZH: "OZXH",
-};
-const HDM_INVERSE: Record<string, string> = Object.fromEntries(
-  Object.entries(HDM_EQUIVALENCES).map(([k, v]) => [v, k]),
-);
 
 // ---------------------------------------------------------------------------
 // XML helpers
@@ -86,91 +83,6 @@ function getScale(sub: number[][]): [number, number, number] {
 /** Normalize the 3x3 submatrix by dividing each row by its norm → rotation matrix. */
 function getRotation(sub: number[][], scale: [number, number, number]): number[][] {
   return sub.map((row, i) => row.map((v) => (scale[i] > 1e-12 ? v / scale[i] : 0)));
-}
-
-/** Check if a 3x3 matrix is approximately identity. */
-function isIdentityRotation(rot: number[][]): boolean {
-  for (let i = 0; i < 3; i++) {
-    for (let j = 0; j < 3; j++) {
-      const expected = i === j ? 1 : 0;
-      if (Math.abs(rot[i][j] - expected) > 1e-6) return false;
-    }
-  }
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-// Rotation → block kind remapping (port of tqec's rotate_block_kind_by_matrix)
-// ---------------------------------------------------------------------------
-
-/**
- * Get axis direction multipliers from a rotation matrix.
- * For each row, return +1 or -1 based on the sum of elements.
- */
-function getAxesDirections(rot: number[][]): Record<string, number> {
-  const dirs: Record<string, number> = {};
-  const labels = ["X", "Y", "Z"];
-  for (let i = 0; i < 3; i++) {
-    const sum = rot[i][0] + rot[i][1] + rot[i][2];
-    dirs[labels[i]] = sum < 0 ? -1 : 1;
-  }
-  return dirs;
-}
-
-/**
- * Rotate a block kind name using the rotation matrix.
- * Port of tqec's `rotate_block_kind_by_matrix`.
- */
-function rotateBlockKind(kindStr: string, rot: number[][]): string {
-  const isY = kindStr === "Y";
-  // For Y blocks, use "Y-!" as the base for the rotation check
-  const originalName = isY ? "Y-!" : kindStr.slice(0, 3);
-
-  let rotatedName = "";
-  for (const row of rot) {
-    let entry = "";
-    for (let j = 0; j < 3; j++) {
-      const count = Math.abs(Math.round(row[j]));
-      entry += originalName[j].repeat(count);
-    }
-    rotatedName += entry;
-  }
-
-  const axesDirs = getAxesDirections(rot);
-
-  // Y / cultivation blocks: reject invalid rotations, keep original name
-  if (rotatedName.includes("!")) {
-    if (!rotatedName.endsWith("!") || axesDirs["Z"] < 0) {
-      throw new Error(
-        `Invalid rotation for ${kindStr} block: cultivation and Y blocks only allow rotation around Z axis.`,
-      );
-    }
-    return kindStr;
-  }
-
-  // Hadamard: append 'H' if original had it
-  if (kindStr.endsWith("H")) {
-    rotatedName += "H";
-  }
-
-  return rotatedName.toUpperCase();
-}
-
-/**
- * Adjust Hadamard pipe direction when pointing in negative direction.
- * Port of tqec's `adjust_hadamards_direction`.
- */
-function adjustHadamardDirection(kindStr: string): string {
-  if (kindStr in HDM_EQUIVALENCES) return HDM_EQUIVALENCES[kindStr];
-  if (kindStr in HDM_INVERSE) return HDM_INVERSE[kindStr];
-  return kindStr;
-}
-
-/**
- * Get the pipe direction axis index from a pipe kind (position of 'O').
- */
-function pipeDirectionIndex(kindStr: string): number {
-  return kindStr.slice(0, 3).indexOf("O");
 }
 
 // ---------------------------------------------------------------------------
@@ -362,7 +274,38 @@ export function parseDaeToBlocks(xmlString: string): Map<string, Block> {
     blocks.set(key, { pos, type: blockType });
   }
 
+  canonicaliseImportedCubes(blocks);
   return blocks;
+}
+
+/**
+ * After import, normalise each cube whose type is ambiguous given its adjacent
+ * pipes (e.g. a cube sandwiched between two Z-pipes could be XZZ or XZX — both
+ * are distinct TQEC kinds but indistinguishable in piper-draw's visuals).
+ * Piper-draw collapses this ambiguity by always picking the first valid type in
+ * CUBE_TYPES order. See CLAUDE.md "Canonicalisation assumption".
+ */
+function canonicaliseImportedCubes(blocks: Map<string, Block>): void {
+  for (const [key, block] of blocks) {
+    if (isPipeType(block.type) || block.type === "Y") continue;
+    // Only canonicalise when pipes actually constrain the cube to 2+ options.
+    // An isolated cube (no adjacent pipes) has all 6 types valid but the user's
+    // declared type should be preserved.
+    if (countAttachedPipes(block.pos, blocks) < 2) continue;
+    const result = determineCubeOptions(block.pos, blocks);
+    if (result.determined) continue;
+    if (result.options.length < 2) continue;
+    if (!result.options.includes(block.type as CubeType)) continue;
+    for (const ct of CUBE_TYPES) {
+      if (result.options.includes(ct)) {
+        if (ct !== block.type) {
+          console.log(`[dae import] canonicalising cube at ${key}: ${block.type} → ${ct}`);
+          blocks.set(key, { pos: block.pos, type: ct });
+        }
+        break;
+      }
+    }
+  }
 }
 
 /**

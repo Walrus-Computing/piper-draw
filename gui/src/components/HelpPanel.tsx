@@ -87,16 +87,23 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
 
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Modes</h4>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
-          <li><b>Place</b> — pick a block or pipe, then click a grid cell to add it.</li>
-          <li><b>Select</b> — click or drag to select blocks; Shift-click to add/remove.</li>
-          <li><b>Delete</b> — click a block to remove it.</li>
-          <li><b>Build</b> — move a cursor with the keyboard to extend from the last block.</li>
+          <li>
+            <b>Drag / Drop</b> — arm a tool in the toolbar to place cubes,
+            pipes, or ports, or use the pointer to click/drag-select blocks
+            (Shift-click to add/remove). Hold the delete modifier to
+            click-to-delete.
+          </li>
+          <li>
+            <b>Keyboard Build</b> — move a cursor with the keyboard to extend
+            from the last block.
+          </li>
         </ul>
 
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Tips</h4>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
           <li>Use <b>Undo</b>/<b>Redo</b> or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z.</li>
-          <li><b>Verify</b> checks that the diagram is a valid TQEC structure.</li>
+          <li><b>Verify (tqec)</b> checks that the diagram is a valid TQEC structure via the <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a> package.</li>
+          <li><b>Flows (tqec)</b> computes stabilizer flows (correlation surfaces) for the diagram via the <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a> package.</li>
           <li><b>Import</b>/<b>Export</b> round-trip through Collada (.dae) files.</li>
           <li>Use the X / Y / Z view buttons or drag to rotate the camera.</li>
         </ul>
