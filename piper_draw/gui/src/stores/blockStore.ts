@@ -269,6 +269,17 @@ interface BlockStore {
   freeBuild: boolean;
   toggleFreeBuild: () => void;
 
+  // View-chrome visibility toggles (keyboard shortcuts G / H).
+  showGrid: boolean;
+  showHints: boolean;
+  toggleShowGrid: () => void;
+  toggleShowHints: () => void;
+
+  // In-memory clipboard for copy/paste (Ctrl+C / Ctrl+V). Not persisted.
+  clipboard: Map<string, Block> | null;
+  copySelection: () => void;
+  paste: () => void;
+
   // Photo export — transient flag consumed by ScreenshotCapture inside <Canvas>.
   photoRequest: boolean;
   requestPhoto: () => void;
@@ -453,6 +464,29 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
   freeBuild: false,
   toggleFreeBuild: () => set((s) => ({ freeBuild: !s.freeBuild })),
+
+  showGrid: true,
+  showHints: true,
+  toggleShowGrid: () => set((s) => ({ showGrid: !s.showGrid })),
+  toggleShowHints: () => set((s) => ({ showHints: !s.showHints })),
+
+  clipboard: null,
+  copySelection: () => {
+    const s = get();
+    if (s.selectedKeys.size === 0) return;
+    const cb = new Map<string, Block>();
+    for (const key of s.selectedKeys) {
+      const b = s.blocks.get(key);
+      if (b) cb.set(key, b);
+    }
+    if (cb.size === 0) return;
+    set({ clipboard: cb });
+  },
+  paste: () => {
+    const s = get();
+    if (!s.clipboard || s.clipboard.size === 0) return;
+    s.insertBlocks(s.clipboard);
+  },
 
   photoRequest: false,
   requestPhoto: () => set({ photoRequest: true }),
