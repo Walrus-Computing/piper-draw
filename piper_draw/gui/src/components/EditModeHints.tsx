@@ -21,7 +21,6 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
     const hints: Array<readonly [string, string]> = [
       ["Click block", "Delete"],
       [`Release ${bindingToLabel(b.holdToDelete)}`, "Exit delete"],
-      [bindingToLabel(b.undo), "Undo"],
     ];
     return <HintBar hints={hints} trailing={<CustomizeLink onClick={onCustomize} />} />;
   }
@@ -41,8 +40,6 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
       [bindingToLabel(b.flipColors), "Flip colors"],
       [`${bindingToLabel(b.rotateCcw)}/${bindingToLabel(b.rotateCw)}`, "Rotate CCW/CW (Z)"],
       [`Hold ${bindingToLabel(b.holdToDelete)}`, "Click-to-delete"],
-      [bindingToLabel(b.undo), "Undo"],
-      [bindingToLabel(b.redo), "Redo"],
       [bindingToLabel(b.deleteSelection), "Delete selected"],
       [bindingToLabel(b.clearSelection), "Clear selection"],
     );
@@ -70,8 +67,6 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
       ["Scroll", "Zoom"],
       [`Hold ${bindingToLabel(b.holdToDelete)}`, "Click-to-delete"],
       [bindingToLabel(b.clearSelection), "Disarm (→ pointer)"],
-      [bindingToLabel(b.undo), "Undo"],
-      [bindingToLabel(b.redo), "Redo"],
     );
     if (isIso) {
       hints.push([
