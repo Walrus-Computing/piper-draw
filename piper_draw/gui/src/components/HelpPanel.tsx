@@ -102,7 +102,8 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Tips</h4>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
           <li>Use <b>Undo</b>/<b>Redo</b> or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z.</li>
-          <li><b>Verify</b> checks that the diagram is a valid TQEC structure.</li>
+          <li><b>Verify (tqec)</b> checks that the diagram is a valid TQEC structure via the <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a> package.</li>
+          <li><b>Flows (tqec)</b> computes stabilizer flows (correlation surfaces) for the diagram via the <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a> package.</li>
           <li><b>Import</b>/<b>Export</b> round-trip through Collada (.dae) files.</li>
           <li>Use the X / Y / Z view buttons or drag to rotate the camera.</li>
         </ul>

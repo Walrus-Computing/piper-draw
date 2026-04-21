@@ -260,7 +260,18 @@ export function FlowsPanel() {
           justifyContent: "space-between",
         }}
       >
-        <span style={{ fontWeight: 600, fontSize: 13 }}>Stabilizer flows</span>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>
+          Stabilizer flows (
+          <a
+            href="https://github.com/tqec/tqec"
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: "#4a9eff", textDecoration: "underline" }}
+          >
+            tqec
+          </a>
+          )
+        </span>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <button
             onClick={() => setHelpOpen((v) => !v)}
