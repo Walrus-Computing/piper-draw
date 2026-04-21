@@ -1003,7 +1003,7 @@ export default function App() {
         {!photoRequest && !flowVizMode && <DragGhost />}
         {!photoRequest && !flowVizMode && <BuildCursor />}
         {!photoRequest && !flowVizMode && <OpenPipeGhosts />}
-      {!photoRequest && !flowVizMode && (flowsPanelOpen || zxPanelOpen) && <PortLabels3D />}
+      {!photoRequest && (flowsPanelOpen || zxPanelOpen || flowVizMode) && <PortLabels3D />}
         {!photoRequest && <FlowSurfaceOverlay />}
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
