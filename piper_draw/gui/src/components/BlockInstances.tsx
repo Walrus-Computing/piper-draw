@@ -1,4 +1,4 @@
-import { useRef, useLayoutEffect, useMemo, useEffect } from "react";
+import { useRef, useLayoutEffect, useMemo, useEffect, useState } from "react";
 import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
@@ -106,16 +106,15 @@ function TypedInstances({
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const blocksRef = useRef(blocks);
-  blocksRef.current = blocks;
-  const capacityRef = useRef(MIN_CAPACITY);
+  useEffect(() => {
+    blocksRef.current = blocks;
+  });
+  const [capacity, setCapacity] = useState(MIN_CAPACITY);
 
   // Double capacity when needed; never shrink (avoids thrashing remounts)
-  if (blocks.length > capacityRef.current) {
-    while (capacityRef.current < blocks.length) {
-      capacityRef.current *= 2;
-    }
-  }
-  const maxCount = capacityRef.current;
+  let maxCount = capacity;
+  while (maxCount < blocks.length) maxCount *= 2;
+  if (maxCount !== capacity) setCapacity(maxCount);
 
   const pipe = isPipeType(cubeType);
   const geometry = getCachedGeometry(cubeType, hiddenFaces);

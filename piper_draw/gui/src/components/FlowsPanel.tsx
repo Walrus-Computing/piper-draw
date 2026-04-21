@@ -43,12 +43,14 @@ function PortLabelInput({
   onCommit: (pos: Position3D, label: string) => void;
 }) {
   const [draft, setDraft] = useState(label);
+  const [prevLabel, setPrevLabel] = useState(label);
 
   // Re-sync when the store-side label changes from outside (e.g. a fresh
   // auto-allocation after submit, or load-from-localStorage).
-  useEffect(() => {
+  if (label !== prevLabel) {
+    setPrevLabel(label);
     setDraft(label);
-  }, [label]);
+  }
 
   const commit = () => {
     if (draft.trim() === label) {
