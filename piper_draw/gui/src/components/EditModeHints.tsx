@@ -62,7 +62,11 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
     hints.push(
       ["Click", placeLabel],
       ["Drag", dragRotates ? "Rotate" : "Pan"],
-      ...(isIso ? [] : [["Shift+Drag", dragRotates ? "Pan" : "Rotate"] as const]),
+      ...(isIso
+        ? []
+        : dragRotates
+          ? [["Shift+Drag", "Pan"] as const]
+          : [[`${altKey}Drag`, "Rotate"] as const]),
       ["Scroll", "Zoom"],
       [`Hold ${bindingToLabel(b.holdToDelete)}`, "Click-to-delete"],
       [bindingToLabel(b.clearSelection), "Disarm (→ pointer)"],
