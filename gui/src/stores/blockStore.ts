@@ -212,8 +212,16 @@ interface BlockStore {
    * cycle the selected item through the toolbar options that remain valid at its
    * position. Selection is preserved (the selected-indicator follows the new type).
    * No-op if selection is empty, multi-select, or the only valid option is current.
+   * If `target` is provided, jump directly to that option instead of cycling
+   * (used by toolbar-button clicks). `dir` is ignored when `target` is provided.
    */
-  cycleSelectedType: (dir: -1 | 1) => void;
+  cycleSelectedType: (
+    dir: -1 | 1,
+    target?:
+      | { kind: "port" }
+      | { kind: "cube"; type: CubeType | "Y" }
+      | { kind: "pipe"; variant: PipeVariant },
+  ) => void;
   setPaletteDragging: (on: boolean) => void;
   convertBlockToPort: (pos: Position3D) => void;
   clearPortWarning: () => void;
@@ -286,6 +294,12 @@ interface BlockStore {
   // Free build (disables color-matching validation)
   freeBuild: boolean;
   toggleFreeBuild: () => void;
+
+  // View-chrome visibility toggles (keyboard shortcuts G / H).
+  showGrid: boolean;
+  showHints: boolean;
+  toggleShowGrid: () => void;
+  toggleShowHints: () => void;
 
   // Photo export — transient flag consumed by ScreenshotCapture inside <Canvas>.
   photoRequest: boolean;
@@ -553,6 +567,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   freeBuild: false,
   toggleFreeBuild: () => set((s) => ({ freeBuild: !s.freeBuild })),
 
+  showGrid: true,
+  showHints: true,
+  toggleShowGrid: () => set((s) => ({ showGrid: !s.showGrid })),
+  toggleShowHints: () => set((s) => ({ showHints: !s.showHints })),
+
   photoRequest: false,
   requestPhoto: () => set({ photoRequest: true }),
   clearPhotoRequest: () => set({ photoRequest: false }),
@@ -682,7 +701,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     else if (target.kind === "cube") s.setCubeType(target.cubeType);
     else s.setPipeVariant(target.variant);
   },
-  cycleSelectedType: (dir) => {
+  cycleSelectedType: (dir, target) => {
     const state = get();
     if (state.mode !== "edit" || state.armedTool !== "pointer") return;
 
@@ -728,10 +747,16 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           }
           if (cycle.length <= 1) return s;
 
-          const curIdx = cycle.indexOf(currentVariant);
-          if (curIdx === -1) return s;
-          const nextIdx = (((curIdx + dir) % cycle.length) + cycle.length) % cycle.length;
-          const nextVariant = cycle[nextIdx];
+          let nextVariant: PipeVariant;
+          if (target !== undefined) {
+            if (target.kind !== "pipe" || !cycle.includes(target.variant)) return s;
+            nextVariant = target.variant;
+          } else {
+            const curIdx = cycle.indexOf(currentVariant);
+            if (curIdx === -1) return s;
+            const nextIdx = (((curIdx + dir) % cycle.length) + cycle.length) % cycle.length;
+            nextVariant = cycle[nextIdx];
+          }
           if (nextVariant === currentVariant) return s;
 
           const newType = VARIANT_AXIS_MAP[nextVariant][openAxis];
@@ -785,7 +810,6 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       const coords: [number, number, number] = [pos.x, pos.y, pos.z];
       let pipeCount = 0;
-      let yValid = true;
       for (let axis = 0; axis < 3; axis++) {
         for (const offset of [1, -2]) {
           const nc: [number, number, number] = [coords[0], coords[1], coords[2]];
@@ -793,16 +817,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
           if (n && isPipeType(n.type)) {
             const openAxis = n.type.replace("H", "").indexOf("O");
-            if (openAxis === axis) {
-              pipeCount++;
-              if (openAxis !== 2) yValid = false;
-            }
+            if (openAxis === axis) pipeCount++;
           }
         }
       }
       const result = determineCubeOptions(pos, s.blocks);
       const cubeOpts = new Set<CubeType | "Y">(result.determined ? [result.type] : result.options);
-      if (yValid) cubeOpts.add("Y");
+      // Y is a leaf: only valid with at most one attached (Z-open) pipe.
+      if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", pos, s.blocks)) cubeOpts.add("Y");
       const portAllowed = pipeCount < 2;
 
       type Opt = { kind: "port" } | { kind: "cube"; type: CubeType | "Y" };
@@ -814,19 +836,32 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       if (cubeOpts.has("Y") || currentKind === "Y") cycle.push({ kind: "cube", type: "Y" });
       if (cycle.length <= 1) return s;
 
-      const curIdx = cycle.findIndex((o) =>
-        currentKind === "PORT" ? o.kind === "port" : (o.kind === "cube" && o.type === currentKind)
-      );
-      if (curIdx === -1) return s;
-      const nextIdx = (((curIdx + dir) % cycle.length) + cycle.length) % cycle.length;
-      const target = cycle[nextIdx];
+      let nextOpt: Opt;
+      if (target !== undefined) {
+        if (target.kind === "pipe") return s;
+        const found = cycle.find((o) =>
+          target.kind === "port" ? o.kind === "port" : (o.kind === "cube" && o.type === target.type),
+        );
+        if (!found) return s;
+        nextOpt = found;
+      } else {
+        const curIdx = cycle.findIndex((o) =>
+          currentKind === "PORT" ? o.kind === "port" : (o.kind === "cube" && o.type === currentKind)
+        );
+        if (curIdx === -1) return s;
+        const nextIdx = (((curIdx + dir) % cycle.length) + cycle.length) % cycle.length;
+        nextOpt = cycle[nextIdx];
+      }
+      // No-op if target equals current (toolbar click on the already-placed type).
+      if (nextOpt.kind === "port" && currentKind === "PORT") return s;
+      if (nextOpt.kind === "cube" && nextOpt.type === currentKind) return s;
 
       let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
       const oldPortMarker = s.portPositions.has(key);
       let newBlock: Block | null;
       let newPortMarker: boolean;
 
-      if (target.kind === "port") {
+      if (nextOpt.kind === "port") {
         if (existingBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, key, existingBlock));
         }
@@ -838,7 +873,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (existingBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, key, existingBlock));
         }
-        newBlock = { pos, type: target.type };
+        newBlock = { pos, type: nextOpt.type };
         ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, key, newBlock));
         // Placing a cube clears any explicit port marker at this position
         // (mirrors addBlock's behaviour when a cube lands on a user-placed port).
@@ -2818,9 +2853,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       const cursorKey = posKey(cursor);
       const coords: [number, number, number] = [cursor.x, cursor.y, cursor.z];
 
-      // Count adjacent pipes and check if Y is valid (only Z-open pipes)
+      // Count adjacent pipes (Y validity uses hasYCubePipeAxisConflict below).
       let pipeCount = 0;
-      let yValid = true;
       for (let axis = 0; axis < 3; axis++) {
         for (const pipeOffset of [1, -2]) {
           const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
@@ -2828,10 +2862,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const n = state.blocks.get(posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] }));
           if (n && isPipeType(n.type)) {
             const openAxis = n.type.replace("H", "").indexOf("O");
-            if (openAxis === axis) {
-              pipeCount++;
-              if (openAxis !== 2) yValid = false;
-            }
+            if (openAxis === axis) pipeCount++;
           }
         }
       }
@@ -2847,7 +2878,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
               const result = determineCubeOptions(cursor, state.blocks);
               return result.determined ? [result.type] : result.options;
             })();
-        if (yValid) cubeOptions.push("Y");
+        // Y is a leaf: only valid with at most one attached (Z-open) pipe.
+        if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", cursor, state.blocks)) cubeOptions.push("Y");
       }
       if (cubeOptions.length === 0) return state;
 

@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
     "dev:frontend": "vite",
-    "dev:backend": "cd ../.. && uv run uvicorn server:app --reload --port 8000",
+    "dev:backend": "cd .. && uv run uvicorn server:app --reload --port 8000",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "node --require ./scripts/vitest-crypto-shim.cjs ./node_modules/vitest/vitest.mjs run --run",
