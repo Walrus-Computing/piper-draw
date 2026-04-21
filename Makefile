@@ -13,7 +13,12 @@ test-gui: install  ## Run GUI (Vitest) tests
 	cd gui && npm test
 
 dev: install  ## Start dev servers (frontend + backend)
-	cd gui && npm run dev
+	cd gui && npm run dev && open
+
+URL := http://localhost:5173
+
+open: install dev
+	@which xdg-open > /dev/null && xdg-open $(URL) || which open > /dev/null && open $(URL) || start $(URL) 
 
 build: install  ## Build the GUI for production
 	cd gui && npm run build
