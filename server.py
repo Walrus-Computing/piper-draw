@@ -11,11 +11,12 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from tqec.computation.block_graph import BlockGraph
+from tqec.interop.collada._correlation import CorrelationSurfaceTransformationHelper
+from tqec.utils.exceptions import TQECError
+
 # `_correlation` is a private TQEC module but it's the only public surface
 # that exposes correlation-surface geometry pieces (unit quads with transforms)
 # needed to render flow surfaces in 3D. Pinned via git dep in pyproject.toml.
-from tqec.interop.collada._correlation import CorrelationSurfaceTransformationHelper
-from tqec.utils.exceptions import TQECError
 
 app = FastAPI()
 
