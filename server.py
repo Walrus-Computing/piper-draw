@@ -5,11 +5,16 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import numpy as np
 import pyzx
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from tqec.computation.block_graph import BlockGraph
+# `_correlation` is a private TQEC module but it's the only public surface
+# that exposes correlation-surface geometry pieces (unit quads with transforms)
+# needed to render flow surfaces in 3D. Pinned via git dep in pyproject.toml.
+from tqec.interop.collada._correlation import CorrelationSurfaceTransformationHelper
 from tqec.utils.exceptions import TQECError
 
 app = FastAPI()
@@ -72,9 +77,16 @@ class FlowsRequest(BaseModel):
     port_io: dict[str, str] = {}
 
 
+class SurfacePiece(BaseModel):
+    basis: str  # "X" or "Z"
+    # 4 quad corners in Three.js world coords, flattened as [x0,y0,z0,...,x3,y3,z3]
+    vertices: list[float]
+
+
 class Flow(BaseModel):
     inputs: dict[str, str]
     outputs: dict[str, str]
+    surfaces: list[SurfacePiece] = []
 
 
 class FlowsResponse(BaseModel):
@@ -270,6 +282,39 @@ def _tqec_to_piper_pos(tqec_pos: tuple[int, int, int]) -> list[float]:
     return [float(c * 3) for c in tqec_pos]
 
 
+# Basis change from TQEC (X spatial, Y spatial, Z temporal) to Three.js
+# (X, Y up, Z out-of-screen). Piper-draw's frontend uses TQEC-X→Three-X,
+# TQEC-Y→Three-(-Z), TQEC-Z→Three-Y; see `tqecToThree` in gui/src/types/index.ts.
+_TQEC_TO_THREE = np.array(
+    [
+        [1, 0, 0],
+        [0, 0, 1],
+        [0, -1, 0],
+    ],
+    dtype=np.float32,
+)
+
+
+def _quad_vertices_three(basis: str, trans) -> list[float]:  # type: ignore[no-untyped-def]
+    """Compute the 4 corner vertices of a correlation-surface quad in Three.js world coords.
+
+    TQEC's helper returns a transform (translation, rotation, scale) that maps a
+    unit XY-plane quad (corners at (0,0,0), (1,0,0), (1,1,0), (0,1,0)) to the
+    piece's world position in TQEC coords. We apply the transform to the four
+    corners, then change basis to Three.js.
+    """
+    corners = np.array(
+        [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
+        dtype=np.float32,
+    )
+    # Scale then rotate then translate, matching the collada convention.
+    scaled = corners * trans.scale
+    rotated = scaled @ trans.rotation.T
+    world_tqec = rotated + trans.translation
+    world_three = world_tqec @ _TQEC_TO_THREE.T
+    return world_three.flatten().tolist()
+
+
 def convert_blocks(
     blocks: list[BlockInput],
     port_labels: dict[str, str] | None = None,
@@ -419,14 +464,24 @@ async def flows(req: FlowsRequest) -> FlowsResponse:
             error=f"find_correlation_surfaces failed: {e}",
         )
 
+    # `pipe_length=2.0` makes the helper's output positions land on piper-draw's
+    # 3-unit grid (cube=1 + pipe=2 per TQEC unit step).
+    helper = CorrelationSurfaceTransformationHelper(graph, pipe_length=2.0)
+
     flows_out: list[Flow] = []
     for surface in surfaces:
         pauli = surface.external_stabilizer_on_graph(graph)
         per_port = dict(zip(ordered_ports, pauli))
+        pieces = helper.get_transformations_for_correlation_surface(surface)
+        surface_out = [
+            SurfacePiece(basis=basis.value, vertices=_quad_vertices_three(basis.value, trans))
+            for basis, trans in pieces
+        ]
         flows_out.append(
             Flow(
                 inputs={p: per_port[p] for p in inputs},
                 outputs={p: per_port[p] for p in outputs},
+                surfaces=surface_out,
             )
         )
 

@@ -123,6 +123,11 @@ export function FlowsPanel({
   const portPositions = useBlockStore((s) => s.portPositions);
   const setFlowsPanelOpen = useBlockStore((s) => s.setFlowsPanelOpen);
   const ensurePortLabels = useBlockStore((s) => s.ensurePortLabels);
+  const setFlowsStore = useBlockStore((s) => s.setFlows);
+  const setSelectedFlowIndex = useBlockStore((s) => s.setSelectedFlowIndex);
+  const setFlowVizMode = useBlockStore((s) => s.setFlowVizMode);
+  const flowVizMode = useBlockStore((s) => s.flowVizMode);
+  const selectedFlowIndex = useBlockStore((s) => s.selectedFlowIndex);
 
   const [result, setResult] = useState<FlowsResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -201,10 +206,20 @@ export function FlowsPanel({
     const s = useBlockStore.getState();
     const res = await computeFlows(s.blocks, s.portMeta);
     setResult(res);
-    setComputedSig(signature(s.blocks, s.portMeta));
+    const sig = signature(s.blocks, s.portMeta);
+    setComputedSig(sig);
     setQueries([]);
     setLoading(false);
-  }, [ensurePortLabels]);
+    // Publish to store so the 3D overlay can read surfaces by index.
+    if (res.ok) setFlowsStore(res.flows, sig);
+    else setFlowsStore([], sig);
+  }, [ensurePortLabels, setFlowsStore]);
+
+  // When the diagram changes after a compute, auto-exit flow viz mode so the
+  // overlay doesn't display surfaces that no longer match the scene.
+  useEffect(() => {
+    if (stale && flowVizMode) setFlowVizMode(false);
+  }, [stale, flowVizMode, setFlowVizMode]);
 
   const generatorSpan = useMemo(() => {
     if (!result || !result.ok) return null;
@@ -327,6 +342,31 @@ export function FlowsPanel({
             }}
           >
             {loading ? "Computing…" : "Compute"}
+          </button>
+          <button
+            onClick={() => setFlowVizMode(!flowVizMode)}
+            disabled={!result?.ok || result.flows.length === 0 || stale}
+            title={
+              flowVizMode
+                ? "Hide correlation surfaces in 3D"
+                : "Show the selected flow's correlation surfaces in 3D"
+            }
+            style={{
+              padding: "4px 10px",
+              fontSize: 12,
+              borderRadius: 4,
+              border: `1px solid ${flowVizMode ? "#4a9eff" : "#888"}`,
+              background: flowVizMode ? "#4a9eff" : "#fff",
+              color: flowVizMode ? "#fff" : "#333",
+              cursor:
+                !result?.ok || result.flows.length === 0 || stale
+                  ? "default"
+                  : "pointer",
+              opacity:
+                !result?.ok || result.flows.length === 0 || stale ? 0.5 : 1,
+            }}
+          >
+            View in 3D
           </button>
           <button
             onClick={() => setFlowsPanelOpen(false)}
@@ -465,27 +505,42 @@ export function FlowsPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {result.flows.map((flow, i) => (
-                    <tr key={i}>
-                      {result.inputs.map((label) => (
-                        <td
-                          key={`in-${label}`}
-                          style={{ padding: "3px 6px", textAlign: "center" }}
-                        >
-                          <PauliCell pauli={flow.inputs[label] ?? "I"} />
-                        </td>
-                      ))}
-                      <td style={{ padding: "0 4px", color: "#888" }}>→</td>
-                      {result.outputs.map((label) => (
-                        <td
-                          key={`out-${label}`}
-                          style={{ padding: "3px 6px", textAlign: "center" }}
-                        >
-                          <PauliCell pauli={flow.outputs[label] ?? "I"} />
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
+                  {result.flows.map((flow, i) => {
+                    const isActive = flowVizMode && selectedFlowIndex === i;
+                    return (
+                      <tr
+                        key={i}
+                        onClick={() => {
+                          if (!result.ok || stale) return;
+                          setSelectedFlowIndex(i);
+                          if (!flowVizMode) setFlowVizMode(true);
+                        }}
+                        style={{
+                          cursor: result.ok && !stale ? "pointer" : "default",
+                          background: isActive ? "#e0efff" : undefined,
+                          outline: isActive ? "2px solid #4a9eff" : undefined,
+                        }}
+                      >
+                        {result.inputs.map((label) => (
+                          <td
+                            key={`in-${label}`}
+                            style={{ padding: "3px 6px", textAlign: "center" }}
+                          >
+                            <PauliCell pauli={flow.inputs[label] ?? "I"} />
+                          </td>
+                        ))}
+                        <td style={{ padding: "0 4px", color: "#888" }}>→</td>
+                        {result.outputs.map((label) => (
+                          <td
+                            key={`out-${label}`}
+                            style={{ padding: "3px 6px", textAlign: "center" }}
+                          >
+                            <PauliCell pauli={flow.outputs[label] ?? "I"} />
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
