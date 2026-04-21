@@ -4,12 +4,15 @@ import pytest
 
 from server import (
     BlockInput,
+    PortLabelInput,
     ValidateRequest,
+    ZXRequest,
     _pipe_endpoints,
     _piper_to_tqec_pos,
     _tqec_to_piper_pos,
     convert_blocks,
     validate,
+    zx,
 )
 
 
@@ -293,3 +296,209 @@ class TestValidateEndpoint:
         )
         assert result["valid"] is False
         assert result["errors"][0]["position"] is None
+
+
+class TestZXEndpoint:
+    def _run(self, req: ZXRequest) -> dict:
+        resp = asyncio.run(zx(req))
+        return {
+            "ok": resp.ok,
+            "vertices": [v.model_dump() for v in resp.vertices],
+            "edges": [e.model_dump() for e in resp.edges],
+            "qgraph": resp.qgraph,
+            "simplified": resp.simplified,
+            "circuit": resp.circuit.model_dump() if resp.circuit else None,
+            "circuit_error": resp.circuit_error,
+            "error": resp.error,
+        }
+
+    def test_empty_diagram(self):
+        result = self._run(ZXRequest(blocks=[]))
+        assert result["ok"] is False
+        assert result["error"] == "Empty diagram"
+
+    def test_two_cubes_one_pipe(self):
+        # Two ZXZ cubes joined by an X-open pipe -> two X-spiders + one simple edge
+        result = self._run(
+            ZXRequest(
+                blocks=[
+                    BlockInput(pos=[0, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[3, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[1, 0, 0], type="OXZ"),
+                ]
+            )
+        )
+        assert result["ok"] is True
+        assert result["error"] is None
+        kinds = sorted(v["kind"] for v in result["vertices"])
+        assert kinds == ["X", "X"]
+        assert len(result["edges"]) == 1
+        assert result["edges"][0]["hadamard"] is False
+        assert result["qgraph"]
+
+    def test_hadamard_pipe_produces_hadamard_edge(self):
+        result = self._run(
+            ZXRequest(
+                blocks=[
+                    BlockInput(pos=[0, 0, 0], type="XZZ"),
+                    BlockInput(pos=[0, 3, 0], type="ZZX"),
+                    BlockInput(pos=[0, 1, 0], type="XOZH"),
+                ]
+            )
+        )
+        assert result["ok"] is True
+        assert len(result["edges"]) == 1
+        assert result["edges"][0]["hadamard"] is True
+
+    def test_port_label_propagates(self):
+        # Open-ended pipe creates a port at piper (-3,0,0); label it "in"
+        result = self._run(
+            ZXRequest(
+                blocks=[
+                    BlockInput(pos=[0, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[-2, 0, 0], type="OXZ"),
+                ],
+                port_labels=[PortLabelInput(pos=[-3, 0, 0], label="in")],
+            )
+        )
+        assert result["ok"] is True
+        boundary_labels = [v["label"] for v in result["vertices"] if v["kind"] == "BOUNDARY"]
+        assert boundary_labels == ["in"]
+
+    def test_simplify_reduces_graph(self):
+        # Two cubes + one pipe: full_reduce fuses the two X-spiders (both phase 0)
+        blocks = [
+            BlockInput(pos=[0, 0, 0], type="ZXZ"),
+            BlockInput(pos=[3, 0, 0], type="ZXZ"),
+            BlockInput(pos=[1, 0, 0], type="OXZ"),
+        ]
+        raw = self._run(ZXRequest(blocks=blocks, simplify=False))
+        simplified = self._run(ZXRequest(blocks=blocks, simplify=True))
+        assert simplified["ok"] is True
+        assert simplified["simplified"] is True
+        assert len(simplified["vertices"]) <= len(raw["vertices"])
+
+    def test_invalid_diagram_returns_error(self):
+        # Mismatched pipe colors -> tqec validation error surfaces
+        result = self._run(
+            ZXRequest(
+                blocks=[
+                    BlockInput(pos=[0, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[3, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[1, 0, 0], type="OZX"),
+                ]
+            )
+        )
+        assert result["ok"] is False
+        assert result["error"] is not None
+        assert "Cannot compute ZX graph" in result["error"]
+
+    def test_qgraph_roundtrips_through_pyzx(self):
+        import pyzx
+
+        result = self._run(
+            ZXRequest(
+                blocks=[
+                    BlockInput(pos=[0, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[3, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[1, 0, 0], type="OXZ"),
+                ]
+            )
+        )
+        g = pyzx.Graph.from_json(result["qgraph"])
+        assert g.num_vertices() == len(result["vertices"])
+        assert g.num_edges() == len(result["edges"])
+
+    def test_simplify_normalises_layout(self):
+        # After full_reduce + normalize() every surviving vertex should have
+        # a meaningful (qubit, row); the backend projects that to pos.
+        result = self._run(
+            ZXRequest(
+                blocks=[
+                    BlockInput(pos=[0, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[-2, 0, 0], type="OXZ"),
+                    BlockInput(pos=[1, 0, 0], type="OXZ"),
+                ],
+                port_labels=[
+                    PortLabelInput(pos=[-3, 0, 0], label="a"),
+                    PortLabelInput(pos=[3, 0, 0], label="b"),
+                ],
+                port_io={"a": "in", "b": "out"},
+                simplify=True,
+            )
+        )
+        assert result["ok"] is True
+        # Every vertex placed (no nulls) — proves normalize ran.
+        assert all(v["pos"] is not None for v in result["vertices"])
+
+    def test_extract_circuit_returns_qasm(self):
+        # a -> ZXZ -> b chain: extract_circuit should produce a 1-qubit circuit.
+        result = self._run(
+            ZXRequest(
+                blocks=[
+                    BlockInput(pos=[0, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[-2, 0, 0], type="OXZ"),
+                    BlockInput(pos=[1, 0, 0], type="OXZ"),
+                ],
+                port_labels=[
+                    PortLabelInput(pos=[-3, 0, 0], label="a"),
+                    PortLabelInput(pos=[3, 0, 0], label="b"),
+                ],
+                port_io={"a": "in", "b": "out"},
+                simplify=True,
+                extract=True,
+            )
+        )
+        assert result["ok"] is True
+        assert result["circuit_error"] is None
+        assert result["circuit"] is not None
+        assert result["circuit"]["qubits"] >= 1
+        assert "OPENQASM" in result["circuit"]["qasm"]
+        # Structured gate list is populated for the circuit drawer.
+        assert isinstance(result["circuit"]["gates"], list)
+        for gate in result["circuit"]["gates"]:
+            assert isinstance(gate["name"], str)
+            assert isinstance(gate["qubits"], list)
+            assert all(isinstance(q, int) for q in gate["qubits"])
+
+    def test_extract_without_simplify_errors(self):
+        result = self._run(
+            ZXRequest(
+                blocks=[
+                    BlockInput(pos=[0, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[-2, 0, 0], type="OXZ"),
+                    BlockInput(pos=[1, 0, 0], type="OXZ"),
+                ],
+                port_labels=[
+                    PortLabelInput(pos=[-3, 0, 0], label="a"),
+                    PortLabelInput(pos=[3, 0, 0], label="b"),
+                ],
+                port_io={"a": "in", "b": "out"},
+                simplify=False,
+                extract=True,
+            )
+        )
+        assert result["ok"] is True
+        assert result["circuit"] is None
+        assert "requires simplification" in (result["circuit_error"] or "")
+
+    def test_extract_without_outputs_errors(self):
+        result = self._run(
+            ZXRequest(
+                blocks=[
+                    BlockInput(pos=[0, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[-2, 0, 0], type="OXZ"),
+                    BlockInput(pos=[1, 0, 0], type="OXZ"),
+                ],
+                port_labels=[
+                    PortLabelInput(pos=[-3, 0, 0], label="a"),
+                    PortLabelInput(pos=[3, 0, 0], label="b"),
+                ],
+                # All ports default to "in" — no outputs configured.
+                simplify=True,
+                extract=True,
+            )
+        )
+        assert result["ok"] is True
+        assert result["circuit"] is None
+        assert "output" in (result["circuit_error"] or "").lower()

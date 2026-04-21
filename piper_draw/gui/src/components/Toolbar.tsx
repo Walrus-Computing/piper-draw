@@ -102,6 +102,7 @@ export function Toolbar({
   const freeBuild = useBlockStore((s) => s.freeBuild);
   const toggleFreeBuild = useBlockStore((s) => s.toggleFreeBuild);
   const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
+  const zxPanelOpen = useBlockStore((s) => s.zxPanelOpen);
   const selectedCount = useBlockStore((s) => {
     if (s.selectedKeys.size === 0) return 0;
     let count = 0;
@@ -511,6 +512,17 @@ export function Toolbar({
           }}
         >
           Flows (tqec)
+        </button>
+        <button
+          onClick={() => useBlockStore.getState().toggleZXPanel()}
+          title="Show the ZX-calculus diagram corresponding to this pipe diagram (tqec builds the graph, pyzx owns the .qgraph export and full_reduce simplification)"
+          style={{
+            ...btnStyle(zxPanelOpen),
+            borderColor: zxPanelOpen ? "#4a9eff" : "#ccc",
+            background: zxPanelOpen ? "#e8f0fe" : "#fff",
+          }}
+        >
+          ZX (tqec + pyzx)
         </button>
       </div>
 

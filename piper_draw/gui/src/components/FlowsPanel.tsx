@@ -3,6 +3,7 @@ import { useBlockStore } from "../stores/blockStore";
 import { computeFlows, type FlowsResult } from "../utils/flows";
 import { getAllPortPositions, posKey, type Position3D } from "../types";
 import { isInSpanGF2, pauliToSymplectic } from "../utils/stabilizerSpan";
+import { ResizeGrip, useFloatingPanel } from "../hooks/useFloatingPanel";
 
 type Pauli = "I" | "X" | "Y" | "Z";
 const PAULI_CYCLE: Pauli[] = ["I", "X", "Y", "Z"];
@@ -162,6 +163,18 @@ export function FlowsPanel() {
   const [nextQueryId, setNextQueryId] = useState(1);
   const [helpOpen, setHelpOpen] = useState(false);
 
+  const { containerStyle, dragHandleProps, resizeGripProps } = useFloatingPanel({
+    id: "flows",
+    defaultGeometry: {
+      x: typeof window !== "undefined" ? window.innerWidth - 352 : 12,
+      y: 64,
+      width: 340,
+      height: typeof window !== "undefined" ? window.innerHeight - 76 : 600,
+    },
+    minWidth: 280,
+    minHeight: 220,
+  });
+
   const portList = useMemo(() => {
     const positions = getAllPortPositions(blocks, portPositions);
     return positions.map((pos) => {
@@ -234,11 +247,7 @@ export function FlowsPanel() {
   return (
     <div
       style={{
-        position: "fixed",
-        top: 64,
-        right: 12,
-        bottom: 12,
-        width: 340,
+        ...containerStyle,
         zIndex: 50,
         background: "#fff",
         borderRadius: 10,
@@ -252,7 +261,9 @@ export function FlowsPanel() {
       }}
     >
       <header
+        {...dragHandleProps}
         style={{
+          ...dragHandleProps.style,
           padding: "10px 12px",
           borderBottom: "1px solid #eee",
           display: "flex",
@@ -678,6 +689,7 @@ export function FlowsPanel() {
           </>
         )}
       </div>
+      <ResizeGrip {...resizeGripProps} />
     </div>
   );
 }

@@ -27,6 +27,7 @@ import { DragGhost } from "./components/DragGhost";
 import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { FlowsPanel } from "./components/FlowsPanel";
+import { ZXPanel } from "./components/ZXPanel";
 import { PortLabels3D } from "./components/PortLabels3D";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
 import { BuildModeHints } from "./components/BuildModeHints";
@@ -813,6 +814,7 @@ export default function App() {
       </button>
       {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
       <FlowsPanel />
+      <ZXPanel />
       <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />
       <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />
       {keybindEditorMode && (

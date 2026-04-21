@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+import pyzx
 from fastapi import FastAPI
 from pydantic import BaseModel
 from tqec.computation.block_graph import BlockGraph
@@ -76,6 +77,92 @@ class FlowsResponse(BaseModel):
     outputs: list[str]
     flows: list[Flow]
     error: str | None = None
+
+
+class ZXRequest(BaseModel):
+    blocks: list[BlockInput]
+    port_labels: list[PortLabelInput] = []
+    port_io: dict[str, str] = {}
+    simplify: bool = False
+    extract: bool = False
+
+
+class ZXVertex(BaseModel):
+    id: int
+    kind: str  # "Z" | "X" | "H" | "BOUNDARY"
+    phase: str
+    pos: list[float] | None
+    label: str | None = None
+
+
+class ZXEdge(BaseModel):
+    source: int
+    target: int
+    hadamard: bool
+
+
+class ZXGate(BaseModel):
+    name: str
+    # Qubit indices touched by the gate. For controlled gates, controls come
+    # first; the last entry is the target. (Frontend uses this ordering to
+    # decide which qubits get a control dot vs. the gate body.)
+    qubits: list[int]
+    controls: int = 0  # number of leading qubits that act as controls
+    phase: str | None = None
+    adjoint: bool = False
+
+
+class ZXCircuit(BaseModel):
+    qubits: int
+    gate_count: int
+    qasm: str
+    gates: list[ZXGate]
+
+
+class ZXResponse(BaseModel):
+    ok: bool
+    vertices: list[ZXVertex]
+    edges: list[ZXEdge]
+    qgraph: str
+    simplified: bool
+    circuit: ZXCircuit | None = None
+    circuit_error: str | None = None
+    error: str | None = None
+
+
+def _serialize_gate(g) -> ZXGate:
+    """Convert a pyzx Gate into a JSON-friendly ZXGate.
+
+    pyzx gates expose `target` and (optionally) `control`, `ctrl1`, `ctrl2`,
+    `phase`, `adjoint` as instance attributes. Anything else is gate-specific
+    and we don't render it.
+    """
+    qubits: list[int] = []
+    controls = 0
+    for attr in ("ctrl1", "ctrl2", "control"):
+        v = getattr(g, attr, None)
+        if v is not None:
+            qubits.append(int(v))
+            controls += 1
+    target = getattr(g, "target", None)
+    if target is not None:
+        qubits.append(int(target))
+    phase = getattr(g, "phase", None)
+    return ZXGate(
+        name=type(g).__name__,
+        qubits=qubits,
+        controls=controls,
+        phase=str(phase) if phase is not None else None,
+        adjoint=bool(getattr(g, "adjoint", False)),
+    )
+
+
+_ZX_VERTEX_KIND = {
+    pyzx.VertexType.BOUNDARY: "BOUNDARY",
+    pyzx.VertexType.Z: "Z",
+    pyzx.VertexType.X: "X",
+    pyzx.VertexType.H_BOX: "H",
+}
 
 
 def _piper_to_tqec_pos(pos: list[float]) -> tuple[int, int, int]:
@@ -274,4 +361,130 @@ async def flows(req: FlowsRequest) -> FlowsResponse:
         inputs=inputs,
         outputs=outputs,
         flows=flows_out,
+    )
+
+
+@app.post("/api/zx")
+async def zx(req: ZXRequest) -> ZXResponse:
+    if not req.blocks:
+        return ZXResponse(
+            ok=False,
+            vertices=[],
+            edges=[],
+            qgraph="",
+            simplified=False,
+            error="Empty diagram",
+        )
+
+    try:
+        label_map = _build_port_label_map(req.port_labels)
+        graph_dict = convert_blocks(req.blocks, label_map)
+        graph = BlockGraph.from_dict(graph_dict)
+        graph.validate()
+        pzx = graph.to_zx_graph()
+    except (TQECError, ValueError, KeyError) as e:
+        return ZXResponse(
+            ok=False,
+            vertices=[],
+            edges=[],
+            qgraph="",
+            simplified=False,
+            error=f"Cannot compute ZX graph: {e}",
+        )
+
+    # Port labels are on BlockGraph cubes; resolve each to the pyzx vertex id
+    # via PositionedZX.p2v before any simplification rewrites vertex ids.
+    port_label_by_vertex: dict[int, str] = {}
+    input_vs: list[int] = []
+    output_vs: list[int] = []
+    for cube in graph.cubes:
+        if cube.is_port and cube.position in pzx.p2v:
+            v = int(pzx.p2v[cube.position])
+            port_label_by_vertex[v] = cube.label
+            io = req.port_io.get(cube.label, "in")
+            (output_vs if io == "out" else input_vs).append(v)
+
+    # Register boundary vertices as pyzx inputs/outputs (required by
+    # pyzx.extract_circuit, harmless otherwise).
+    if input_vs:
+        pzx.g.set_inputs(tuple(input_vs))
+    if output_vs:
+        pzx.g.set_outputs(tuple(output_vs))
+
+    if req.simplify:
+        pyzx.simplify.full_reduce(pzx.g)
+        # normalize() places inputs/outputs at sensible (qubit, row) — required
+        # before extract_circuit and nicer for display.
+        pzx.g.normalize()
+
+    circuit_info: ZXCircuit | None = None
+    circuit_error: str | None = None
+    if req.extract:
+        if not req.simplify:
+            circuit_error = "Circuit extraction requires simplification (full_reduce)."
+        elif not output_vs:
+            circuit_error = (
+                "Circuit extraction requires at least one port marked as output. "
+                "Set a port's direction to 'out' in the Flows panel."
+            )
+        else:
+            try:
+                c = pyzx.extract_circuit(pzx.g.copy())
+                # Decompose to basic gates so the renderer only has to handle
+                # a small alphabet (HAD, NOT, Z, S, T, CNOT, CZ, ZPhase, …).
+                basic = c.to_basic_gates()
+                circuit_info = ZXCircuit(
+                    qubits=c.qubits,
+                    gate_count=len(basic.gates),
+                    qasm=c.to_qasm(),
+                    gates=[_serialize_gate(g) for g in basic.gates],
+                )
+            except Exception as e:  # pyzx raises various errors; surface them all
+                circuit_error = f"extract_circuit failed: {e}"
+
+    g = pzx.g
+    vertices: list[ZXVertex] = []
+    for v in g.vertices():
+        if req.simplify:
+            # After full_reduce + normalize the tqec positions no longer map
+            # to surviving vertices; pyzx's (qubit, row) is the meaningful
+            # layout. Project row→x, qubit→-z so time flows horizontally.
+            q = g.qubit(v)
+            r = g.row(v)
+            pos_list = [float(r), 0.0, -float(q)] if q != -1 and r != -1 else None
+        else:
+            pos = pzx.positions.get(v)
+            pos_list = (
+                [float(pos.x), float(pos.y), float(pos.z)] if pos is not None else None
+            )
+        vertices.append(
+            ZXVertex(
+                id=int(v),
+                kind=_ZX_VERTEX_KIND.get(pyzx.VertexType(g.type(v)), str(g.type(v))),
+                phase=str(g.phase(v)),
+                pos=pos_list,
+                label=port_label_by_vertex.get(int(v)),
+            )
+        )
+
+    edges: list[ZXEdge] = []
+    for e in g.edges():
+        u, w = e
+        edges.append(
+            ZXEdge(
+                source=int(u),
+                target=int(w),
+                hadamard=(g.edge_type(e) == pyzx.EdgeType.HADAMARD),
+            )
+        )
+
+    return ZXResponse(
+        ok=True,
+        vertices=vertices,
+        edges=edges,
+        qgraph=g.to_json(),
+        simplified=req.simplify,
+        circuit=circuit_info,
+        circuit_error=circuit_error,
+        error=None,
     )
