@@ -3281,8 +3281,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       return { portMeta: next };
     }),
 
-  setFlowsPanelOpen: (open) => set({ flowsPanelOpen: open }),
-  toggleFlowsPanel: () => set((s) => ({ flowsPanelOpen: !s.flowsPanelOpen })),
+  setFlowsPanelOpen: (open) =>
+    set(open ? { flowsPanelOpen: true } : { flowsPanelOpen: false, flowVizMode: false }),
+  toggleFlowsPanel: () =>
+    set((s) =>
+      s.flowsPanelOpen
+        ? { flowsPanelOpen: false, flowVizMode: false }
+        : { flowsPanelOpen: true },
+    ),
 
   setFlows: (flows, signature) =>
     set({
