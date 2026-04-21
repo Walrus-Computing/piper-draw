@@ -42,7 +42,7 @@ import {
 import { rotateBlockAroundZ } from "../utils/blockRotation";
 
 export type Mode = "edit" | "build";
-export type ArmedTool = "pointer" | "cube" | "pipe" | "port";
+export type ArmedTool = "pointer" | "cube" | "pipe" | "port" | "paste";
 
 const MAX_HISTORY = 100;
 
@@ -169,6 +169,11 @@ interface BlockStore {
    * not cube-grid-aligned. Cleared whenever the selection itself changes. */
   selectionPivot: Position3D | null;
 
+  /** Clipboard populated by `copySelection`. Entries are normalized so the
+   * selection's bounding-box min corner sits at (0,0,0). In-memory only —
+   * clears on refresh. `null` = nothing copied yet. */
+  clipboard: Map<string, Block> | null;
+
   /**
    * Per-port metadata (label + input/output direction) used by the Stabilizer
    * Flows panel. Keyed by posKey. Entries are allocated lazily via
@@ -226,6 +231,27 @@ interface BlockStore {
    * group into its final position. Switches to edit/pointer. Undo-safe.
    */
   insertBlocks: (blocks: Map<string, Block>) => void;
+  /**
+   * Snapshot currently-selected blocks into `clipboard`, normalized so the
+   * bounding-box min corner sits at (0,0,0). No-op on empty selection — does
+   * NOT clobber an existing clipboard.
+   */
+  copySelection: () => void;
+  /**
+   * Arm "placing paste" mode — a translucent ghost of the clipboard follows
+   * the cursor and commits on click (or on a second invocation of this
+   * action). Esc cancels. No-op if the clipboard is empty. If paste mode is
+   * already armed, this commits at the current hover (so Cmd+V → Cmd+V
+   * pastes in one spot without needing a click).
+   */
+  pasteClipboard: () => void;
+  /**
+   * Commit the clipboard into the scene at the currently hovered grid cell
+   * (snapped to the cube-slot grid). If nothing is hovered, falls back to
+   * the same +X auto-offset as `insertBlocks`. Leaves pasted blocks selected,
+   * switches to edit/pointer. Undo-safe.
+   */
+  commitPaste: () => void;
   hydrateBlocks: (blocks: Map<string, Block>) => void;
   clearAll: () => void;
   canUndo: () => boolean;
@@ -384,6 +410,86 @@ function syncPortsAndPromote(
   return { blocks: curBlocks, hiddenFaces: curHidden, addedEntries, promotedPortKeys };
 }
 
+/**
+ * Translate `incoming` by `delta`, skip entries that collide with existing
+ * blocks or land on invalid positions, and commit the surviving set as a
+ * single `bulk-add` undo step. Returns the state patch callers can spread,
+ * or `null` if nothing made it through (caller returns unchanged state).
+ * Shared between `insertBlocks` (delta = +X auto-offset) and `pasteClipboard`
+ * (delta = snapped hover, or +X fallback).
+ */
+function mergeBlocksWithDelta(
+  state: BlockStore,
+  incoming: Map<string, Block>,
+  delta: Position3D,
+): Partial<BlockStore> | null {
+  const mergedBlocks = new Map(state.blocks);
+  const entries: Array<{ key: string; block: Block }> = [];
+  for (const b of incoming.values()) {
+    const newPos: Position3D = {
+      x: b.pos.x + delta.x,
+      y: b.pos.y + delta.y,
+      z: b.pos.z + delta.z,
+    };
+    if (!isValidPos(newPos, b.type)) continue;
+    const newKey = posKey(newPos);
+    if (mergedBlocks.has(newKey)) continue;
+    const newBlock: Block = { pos: newPos, type: b.type };
+    mergedBlocks.set(newKey, newBlock);
+    entries.push({ key: newKey, block: newBlock });
+  }
+  if (entries.length === 0) return null;
+
+  const { spatialIndex, hiddenFaces, undeterminedCubes } = computeDerivedFromBlocks(mergedBlocks);
+  const cmd: UndoCommand = { kind: "bulk-add", entries };
+  return {
+    blocks: mergedBlocks,
+    spatialIndex,
+    hiddenFaces,
+    undeterminedCubes,
+    history: [...state.history, cmd].slice(-MAX_HISTORY),
+    future: [],
+    hoveredGridPos: null,
+    selectedKeys: new Set(entries.map((e) => e.key)),
+    selectedPortPositions: new Set<string>(),
+    mode: "edit",
+    armedTool: "pointer",
+  };
+}
+
+/**
+ * Reducer for actually committing the clipboard. Extracted so it can run from
+ * both `commitPaste` (click / second Cmd+V) and a double Cmd+V inside
+ * `pasteClipboard` while paste mode is armed.
+ */
+function commitPasteReducer(state: BlockStore): Partial<BlockStore> | BlockStore {
+  const clip = state.clipboard;
+  if (!clip || clip.size === 0) return state;
+  const hover = state.hoveredGridPos;
+  if (hover) {
+    const delta: Position3D = {
+      x: Math.floor(hover.x / 3) * 3,
+      y: Math.floor(hover.y / 3) * 3,
+      z: Math.floor(hover.z / 3) * 3,
+    };
+    return mergeBlocksWithDelta(state, clip, delta) ?? state;
+  }
+  let delta: Position3D = { x: 0, y: 0, z: 0 };
+  if (state.blocks.size > 0) {
+    let existingMaxX = -Infinity;
+    for (const b of state.blocks.values()) {
+      if (b.pos.x > existingMaxX) existingMaxX = b.pos.x;
+    }
+    let incomingMinX = Infinity;
+    for (const b of clip.values()) {
+      if (b.pos.x < incomingMinX) incomingMinX = b.pos.x;
+    }
+    const raw = existingMaxX + 3 - incomingMinX;
+    delta = { x: Math.ceil(raw / 3) * 3, y: 0, z: 0 };
+  }
+  return mergeBlocksWithDelta(state, clip, delta) ?? state;
+}
+
 function computeDerivedFromBlocks(blocks: Map<string, Block>): {
   spatialIndex: SpatialIndex;
   hiddenFaces: Map<string, FaceMask>;
@@ -431,6 +537,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   portMeta: new Map(),
   flowsPanelOpen: false,
   selectionPivot: null,
+  clipboard: null,
 
   isDraggingSelection: false,
   dragDelta: null,
@@ -1773,39 +1880,58 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         delta = { x: Math.ceil(raw / 3) * 3, y: 0, z: 0 };
       }
 
-      const mergedBlocks = new Map(state.blocks);
-      const entries: Array<{ key: string; block: Block }> = [];
-      for (const b of incoming.values()) {
-        const newPos: Position3D = {
-          x: b.pos.x + delta.x,
-          y: b.pos.y + delta.y,
-          z: b.pos.z + delta.z,
-        };
-        if (!isValidPos(newPos, b.type)) continue;
-        const newKey = posKey(newPos);
-        if (mergedBlocks.has(newKey)) continue;
-        const newBlock: Block = { pos: newPos, type: b.type };
-        mergedBlocks.set(newKey, newBlock);
-        entries.push({ key: newKey, block: newBlock });
-      }
-      if (entries.length === 0) return state;
+      return mergeBlocksWithDelta(state, incoming, delta) ?? state;
+    }),
 
-      const { spatialIndex, hiddenFaces, undeterminedCubes } = computeDerivedFromBlocks(mergedBlocks);
-      const cmd: UndoCommand = { kind: "bulk-add", entries };
+  copySelection: () =>
+    set((state) => {
+      if (state.selectedKeys.size === 0) return state;
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      for (const key of state.selectedKeys) {
+        const b = state.blocks.get(key);
+        if (!b) continue;
+        if (b.pos.x < minX) minX = b.pos.x;
+        if (b.pos.y < minY) minY = b.pos.y;
+        if (b.pos.z < minZ) minZ = b.pos.z;
+      }
+      if (minX === Infinity) return state;
+      const clipboard = new Map<string, Block>();
+      for (const key of state.selectedKeys) {
+        const b = state.blocks.get(key);
+        if (!b) continue;
+        const pos: Position3D = { x: b.pos.x - minX, y: b.pos.y - minY, z: b.pos.z - minZ };
+        clipboard.set(posKey(pos), { pos, type: b.type });
+      }
+      if (clipboard.size === 0) return state;
+      return { clipboard };
+    }),
+
+  pasteClipboard: () =>
+    set((state) => {
+      const clip = state.clipboard;
+      if (!clip || clip.size === 0) return state;
+      // Second invocation while paste is armed → commit at hover.
+      if (state.armedTool === "paste") {
+        return commitPasteReducer(state);
+      }
       return {
-        blocks: mergedBlocks,
-        spatialIndex,
-        hiddenFaces,
-        undeterminedCubes,
-        history: [...state.history, cmd].slice(-MAX_HISTORY),
-        future: [],
-        hoveredGridPos: null,
-        selectedKeys: new Set(entries.map((e) => e.key)),
-        selectedPortPositions: new Set<string>(),
+        armedTool: "paste",
         mode: "edit",
-        armedTool: "pointer",
+        pipeVariant: null,
+        portWarning: null,
+        hoveredGridPos: null,
+        hoveredBlockType: null,
+        hoveredInvalid: false,
+        hoveredInvalidReason: null,
+        hoveredReplace: false,
+        selectedKeys: new Set<string>(),
+        selectedPortPositions: new Set<string>(),
+        selectionPivot: null,
       };
     }),
+
+  commitPaste: () =>
+    set((state) => commitPasteReducer(state)),
 
   hydrateBlocks: (incoming) =>
     set((state) => {

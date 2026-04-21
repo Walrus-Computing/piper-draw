@@ -25,6 +25,7 @@ function reset() {
     selectionPivot: null,
     undeterminedCubes: new Map(),
     freeBuild: false,
+    clipboard: null,
   });
 }
 
@@ -1120,6 +1121,153 @@ describe("blockStore", () => {
       const origin = useBlockStore.getState().blocks.get("0,0,0");
       expect(origin).toBeDefined();
       expect(origin!.type).not.toMatch(/O/); // cube, not pipe
+    });
+  });
+
+  describe("copy / paste", () => {
+    it("copySelection snapshots selected blocks normalized to origin", () => {
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 6, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().copySelection();
+      const clip = useBlockStore.getState().clipboard!;
+      expect(clip.size).toBe(2);
+      // Min corner translated to origin.
+      expect(clip.has("0,0,0")).toBe(true);
+      expect(clip.has("3,0,0")).toBe(true);
+    });
+
+    it("pasteClipboard arms paste mode and clears selection without mutating blocks", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().copySelection();
+      const blocksBefore = useBlockStore.getState().blocks.size;
+      useBlockStore.setState({ hoveredGridPos: { x: 9, y: 0, z: 0 } });
+      useBlockStore.getState().pasteClipboard();
+      const s = useBlockStore.getState();
+      expect(s.armedTool).toBe("paste");
+      expect(s.mode).toBe("edit");
+      expect(s.blocks.size).toBe(blocksBefore); // no commit yet
+      expect(s.selectedKeys.size).toBe(0); // selection cleared on arm
+    });
+
+    it("commitPaste at a hovered cell merges translated clipboard entries", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().copySelection();
+      useBlockStore.getState().clearAll();
+
+      useBlockStore.getState().pasteClipboard(); // arm
+      useBlockStore.setState({ hoveredGridPos: { x: 9, y: 0, z: 0 } });
+      useBlockStore.getState().commitPaste();
+      const s = useBlockStore.getState();
+      expect(s.blocks.has("9,0,0")).toBe(true);
+      expect(s.blocks.has("12,0,0")).toBe(true);
+      expect(s.selectedKeys.has("9,0,0")).toBe(true);
+      expect(s.selectedKeys.has("12,0,0")).toBe(true);
+      expect(s.mode).toBe("edit");
+      expect(s.armedTool).toBe("pointer");
+    });
+
+    it("double pasteClipboard (arm then commit) pastes at the hovered cell", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().copySelection();
+      useBlockStore.getState().clearAll();
+
+      useBlockStore.getState().pasteClipboard(); // arm
+      useBlockStore.setState({ hoveredGridPos: { x: 9, y: 0, z: 0 } });
+      useBlockStore.getState().pasteClipboard(); // commits while armed
+      const s = useBlockStore.getState();
+      expect(s.blocks.has("9,0,0")).toBe(true);
+      expect(s.armedTool).toBe("pointer");
+    });
+
+    it("commitPaste with no hover falls back to the +X auto-offset", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().copySelection();
+      useBlockStore.getState().pasteClipboard(); // arm
+      useBlockStore.setState({ hoveredGridPos: null });
+      useBlockStore.getState().commitPaste();
+      const s = useBlockStore.getState();
+      expect(s.blocks.has("0,0,0")).toBe(true); // original
+      expect(s.blocks.has("3,0,0")).toBe(true); // pasted past the right edge
+    });
+
+    it("commitPaste snaps fractional hover to the cube-slot grid (period 3)", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().copySelection();
+      useBlockStore.getState().clearAll();
+      useBlockStore.getState().pasteClipboard(); // arm
+      // Hover at (5,0,0) snaps to (3,0,0).
+      useBlockStore.setState({ hoveredGridPos: { x: 5, y: 0, z: 0 } });
+      useBlockStore.getState().commitPaste();
+      const s = useBlockStore.getState();
+      expect(s.blocks.has("3,0,0")).toBe(true);
+      expect(s.blocks.has("5,0,0")).toBe(false);
+    });
+
+    it("copySelection with empty selection is a no-op and preserves prior clipboard", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().copySelection();
+      const first = useBlockStore.getState().clipboard;
+      useBlockStore.getState().clearSelection();
+      useBlockStore.getState().copySelection();
+      expect(useBlockStore.getState().clipboard).toBe(first);
+    });
+
+    it("pasteClipboard with null clipboard does not arm paste mode", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().pasteClipboard();
+      expect(useBlockStore.getState().armedTool).toBe("cube");
+    });
+
+    it("setArmedTool('pointer') cancels paste mode", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().copySelection();
+      useBlockStore.getState().pasteClipboard();
+      expect(useBlockStore.getState().armedTool).toBe("paste");
+      useBlockStore.getState().setArmedTool("pointer");
+      expect(useBlockStore.getState().armedTool).toBe("pointer");
+      // Blocks unchanged.
+      expect(useBlockStore.getState().blocks.size).toBe(1);
+    });
+
+    it("undo removes blocks added by commitPaste", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().copySelection();
+      useBlockStore.getState().pasteClipboard();
+      useBlockStore.setState({ hoveredGridPos: { x: 9, y: 0, z: 0 } });
+      useBlockStore.getState().commitPaste();
+      expect(useBlockStore.getState().blocks.has("9,0,0")).toBe(true);
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.has("9,0,0")).toBe(false);
+      // Original block is untouched.
+      expect(useBlockStore.getState().blocks.has("0,0,0")).toBe(true);
+    });
+
+    it("commitPaste skips entries that collide with existing blocks", () => {
+      // Two cubes, copy both.
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().copySelection();
+      useBlockStore.getState().pasteClipboard();
+      // Paste so the first clipboard entry would land on the existing (0,0,0).
+      useBlockStore.setState({ hoveredGridPos: { x: 0, y: 0, z: 0 } });
+      useBlockStore.getState().commitPaste();
+      const s = useBlockStore.getState();
+      expect(s.blocks.size).toBe(2); // (0,0,0) existed, (3,0,0) existed → nothing new.
+      // No history entry because no entries were added.
+      // (Original two adds + no paste step = 2 history entries.)
+      expect(s.history.length).toBe(2);
     });
   });
 });

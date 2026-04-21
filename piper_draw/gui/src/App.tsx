@@ -14,6 +14,7 @@ import {
 import { BlockInstances } from "./components/BlockInstances";
 import { GridPlane } from "./components/GridPlane";
 import { GhostBlock } from "./components/GhostBlock";
+import { PasteGhost } from "./components/PasteGhost";
 import { AxisLabels } from "./components/AxisLabels";
 import { FpsSampler } from "./components/FpsCounter";
 import { OrientationGizmo } from "./components/OrientationGizmo";
@@ -534,6 +535,18 @@ export default function App() {
             store.deleteSelected();
           }
           return;
+        case "copy":
+          if (store.selectedKeys.size > 0) {
+            e.preventDefault();
+            store.copySelection();
+          }
+          return;
+        case "paste":
+          if (store.clipboard && store.clipboard.size > 0) {
+            e.preventDefault();
+            store.pasteClipboard();
+          }
+          return;
         case "clearSelection":
           // Escape: disarm tool first (type → pointer → clear selection).
           if (store.armedTool !== "pointer") {
@@ -839,6 +852,7 @@ export default function App() {
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
         {!photoRequest && <GhostBlock />}
+        {!photoRequest && <PasteGhost />}
         <AxisLabels />
         <FpsSampler targetRef={fpsRef} />
         {!photoRequest && <CheckerboardGrid />}
