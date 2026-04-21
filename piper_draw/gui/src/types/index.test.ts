@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createBlockGeometry, getHiddenFaceMaskForPos, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, CUBE_TYPES, PIPE_TYPES } from "./index";
+import { createBlockGeometry, getHiddenFaceMaskForPos, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, CUBE_TYPES, PIPE_TYPES } from "./index";
 import type { PipeType, CubeType } from "./index";
 import type { BlockType } from "./index";
 import { Vector3 } from "three";
@@ -522,5 +522,35 @@ describe("flipBlockType", () => {
   it("is an involution", () => {
     for (const ct of CUBE_TYPES) expect(flipBlockType(flipBlockType(ct))).toBe(ct);
     for (const pt of PIPE_TYPES) expect(flipBlockType(flipBlockType(pt))).toBe(pt);
+  });
+});
+
+describe("defaultPortIO", () => {
+  it("port at +z end of a Z-axis pipe defaults to 'out'", () => {
+    // ZXO is Z-axis pipe (third char 'O') at z=1; ports at z=0 and z=3.
+    const blocks = makeBlocks([{ x: 0, y: 0, z: 1, type: "ZXO" }]);
+    expect(defaultPortIO({ x: 0, y: 0, z: 3 }, blocks)).toBe("out");
+  });
+
+  it("port at -z end of a Z-axis pipe defaults to 'in'", () => {
+    const blocks = makeBlocks([{ x: 0, y: 0, z: 1, type: "ZXO" }]);
+    expect(defaultPortIO({ x: 0, y: 0, z: 0 }, blocks)).toBe("in");
+  });
+
+  it("Hadamard variant ZXOH still infers from the Z geometry", () => {
+    const blocks = makeBlocks([{ x: 0, y: 0, z: 1, type: "ZXOH" }]);
+    expect(defaultPortIO({ x: 0, y: 0, z: 3 }, blocks)).toBe("out");
+    expect(defaultPortIO({ x: 0, y: 0, z: 0 }, blocks)).toBe("in");
+  });
+
+  it("ports of an X-axis pipe both default to 'in'", () => {
+    // OXZ is X-axis (first char 'O'); ports at x=0 and x=3 of pipe at x=1.
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OXZ" }]);
+    expect(defaultPortIO({ x: 0, y: 0, z: 0 }, blocks)).toBe("in");
+    expect(defaultPortIO({ x: 3, y: 0, z: 0 }, blocks)).toBe("in");
+  });
+
+  it("port with no surrounding pipe defaults to 'in'", () => {
+    expect(defaultPortIO({ x: 0, y: 0, z: 0 }, makeBlocks([]))).toBe("in");
   });
 });

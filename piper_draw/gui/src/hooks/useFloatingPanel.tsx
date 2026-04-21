@@ -40,6 +40,44 @@ function loadGeometry(id: string, fallback: PanelGeometry): PanelGeometry {
   }
 }
 
+/**
+ * Read a panel's last-persisted geometry without mounting the hook.
+ * Returns null if nothing has been persisted yet.
+ */
+export function readPanelGeometry(id: string): PanelGeometry | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(storageKey(id));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<PanelGeometry>;
+    if (
+      !Number.isFinite(parsed.x) ||
+      !Number.isFinite(parsed.y) ||
+      !Number.isFinite(parsed.width) ||
+      !Number.isFinite(parsed.height)
+    ) {
+      return null;
+    }
+    return {
+      x: Number(parsed.x),
+      y: Number(parsed.y),
+      width: Number(parsed.width),
+      height: Number(parsed.height),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function rectsOverlap(a: PanelGeometry, b: PanelGeometry): boolean {
+  return (
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
+  );
+}
+
 function clampPosition(x: number, y: number, w: number, h: number): { x: number; y: number } {
   if (typeof window === "undefined") return { x, y };
   const maxX = window.innerWidth - KEEP_ON_SCREEN;
@@ -192,7 +230,19 @@ export function useFloatingPanel(opts: FloatingPanelOptions) {
     [onResizePointerDown, onResizePointerMove, onResizePointerUp],
   );
 
-  return { containerStyle, dragHandleProps, resizeGripProps };
+  const setGeometry = useCallback(
+    (patch: Partial<PanelGeometry>) => {
+      setGeom((g) => {
+        const width = Math.max(minWidth, patch.width ?? g.width);
+        const height = Math.max(minHeight, patch.height ?? g.height);
+        const pos = clampPosition(patch.x ?? g.x, patch.y ?? g.y, width, height);
+        return { x: pos.x, y: pos.y, width, height };
+      });
+    },
+    [minWidth, minHeight],
+  );
+
+  return { containerStyle, dragHandleProps, resizeGripProps, geometry: geom, setGeometry };
 }
 
 export function ResizeGrip(props: {

@@ -469,6 +469,7 @@ export default function App() {
   const threeStateRef = useRef<ThreeState | null>(null);
   const photoRequest = useBlockStore((s) => s.photoRequest);
   const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
+  const zxPanelOpen = useBlockStore((s) => s.zxPanelOpen);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -835,7 +836,7 @@ export default function App() {
         {!photoRequest && <DragGhost />}
         {!photoRequest && <BuildCursor />}
         {!photoRequest && <OpenPipeGhosts />}
-      {!photoRequest && flowsPanelOpen && <PortLabels3D />}
+      {!photoRequest && (flowsPanelOpen || zxPanelOpen) && <PortLabels3D />}
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
         {!photoRequest && <GhostBlock />}

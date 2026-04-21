@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBlockStore } from "../stores/blockStore";
-import { ResizeGrip, useFloatingPanel } from "../hooks/useFloatingPanel";
+import {
+  ResizeGrip,
+  readPanelGeometry,
+  rectsOverlap,
+  useFloatingPanel,
+} from "../hooks/useFloatingPanel";
+import { PortsTable } from "./PortsTable";
 import {
   computeZX,
   downloadQGraph,
@@ -235,6 +241,7 @@ function ZXSvg({ result }: { result: ZXResult }) {
 
 export function ZXPanel() {
   const open = useBlockStore((s) => s.zxPanelOpen);
+  const flowsOpen = useBlockStore((s) => s.flowsPanelOpen);
   const blocks = useBlockStore((s) => s.blocks);
   const portMeta = useBlockStore((s) => s.portMeta);
   const portPositions = useBlockStore((s) => s.portPositions);
@@ -247,7 +254,13 @@ export function ZXPanel() {
   const [extract, setExtract] = useState(false);
   const debounceRef = useRef<number | null>(null);
 
-  const { containerStyle, dragHandleProps, resizeGripProps } = useFloatingPanel({
+  const {
+    containerStyle,
+    dragHandleProps,
+    resizeGripProps,
+    geometry,
+    setGeometry,
+  } = useFloatingPanel({
     id: "zx",
     defaultGeometry: {
       x: typeof window !== "undefined" ? window.innerWidth - 372 : 12,
@@ -258,6 +271,19 @@ export function ZXPanel() {
     minWidth: 280,
     minHeight: 220,
   });
+
+  // When this panel opens while the Flows panel is already open and the two
+  // would overlap, move this panel to the left edge so both stay visible.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (open && !wasOpen.current && flowsOpen) {
+      const other = readPanelGeometry("flows");
+      if (other && rectsOverlap(geometry, other)) {
+        setGeometry({ x: 12, y: 64 });
+      }
+    }
+    wasOpen.current = open;
+  }, [open, flowsOpen, geometry, setGeometry]);
 
   const sig = useMemo(() => signature(blocks, portMeta), [blocks, portMeta]);
 
@@ -364,6 +390,10 @@ export function ZXPanel() {
       </header>
 
       <div style={{ padding: "10px 12px", overflowY: "auto", flex: 1 }}>
+        <PortsTable />
+
+        <hr style={{ margin: "12px 0", border: "none", borderTop: "1px solid #eee" }} />
+
         <div
           style={{
             display: "flex",

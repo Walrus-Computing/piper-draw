@@ -7,6 +7,7 @@ import type {
 import {
   posKey,
   getAllPortPositions,
+  defaultPortIO,
   hasBlockOverlap,
   hasCubeColorConflict,
   hasPipeColorConflict,
@@ -3056,7 +3057,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       };
 
       for (const pos of missing) {
-        next.set(posKey(pos), { label: allocLabel(), io: "in" });
+        next.set(posKey(pos), {
+          label: allocLabel(),
+          io: defaultPortIO(pos, state.blocks),
+        });
       }
       return { portMeta: next };
     }),

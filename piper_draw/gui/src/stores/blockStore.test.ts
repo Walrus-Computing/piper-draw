@@ -1122,4 +1122,39 @@ describe("blockStore", () => {
       expect(origin!.type).not.toMatch(/O/); // cube, not pipe
     });
   });
+
+  describe("ensurePortLabels — default io from pipe geometry", () => {
+    function seed(blocks: Array<{ x: number; y: number; z: number; type: Block["type"] }>) {
+      const map = new Map<string, Block>();
+      for (const b of blocks) {
+        map.set(`${b.x},${b.y},${b.z}`, { pos: { x: b.x, y: b.y, z: b.z }, type: b.type });
+      }
+      useBlockStore.setState({ blocks: map, portMeta: new Map() });
+    }
+
+    it("Z-axis pipe: -z port defaults to 'in', +z port defaults to 'out'", () => {
+      seed([{ x: 0, y: 0, z: 1, type: "ZXO" }]);
+      useBlockStore.getState().ensurePortLabels();
+      const meta = useBlockStore.getState().portMeta;
+      expect(meta.get("0,0,0")?.io).toBe("in");
+      expect(meta.get("0,0,3")?.io).toBe("out");
+    });
+
+    it("X-axis pipe: both ports default to 'in'", () => {
+      seed([{ x: 1, y: 0, z: 0, type: "OXZ" }]);
+      useBlockStore.getState().ensurePortLabels();
+      const meta = useBlockStore.getState().portMeta;
+      expect(meta.get("0,0,0")?.io).toBe("in");
+      expect(meta.get("3,0,0")?.io).toBe("in");
+    });
+
+    it("manual setPortIO override survives a subsequent ensurePortLabels", () => {
+      seed([{ x: 0, y: 0, z: 1, type: "ZXO" }]);
+      useBlockStore.getState().ensurePortLabels();
+      // Flip the +z port from its default 'out' to 'in'.
+      useBlockStore.getState().setPortIO({ x: 0, y: 0, z: 3 }, "in");
+      useBlockStore.getState().ensurePortLabels();
+      expect(useBlockStore.getState().portMeta.get("0,0,3")?.io).toBe("in");
+    });
+  });
 });

@@ -1247,6 +1247,40 @@ export function getAllPortPositions(
 }
 
 /**
+ * Default I/O direction for a port at `pos`, inferred from any Z-axis pipe
+ * touching it: +z dangling end → "out", -z dangling end → "in". Falls back
+ * to "in" for X/Y-axis pipes and stand-alone explicit port markers.
+ *
+ * In lattice-surgery diagrams +z is the time direction, so ports at the top
+ * of the diagram are circuit outputs and ports at the bottom are inputs.
+ */
+export function defaultPortIO(
+  pos: Position3D,
+  blocks: Map<string, Block>,
+): "in" | "out" {
+  // A Z-axis pipe spans piper-grid length 3 along z. A port at piper-z `pz`
+  // is the +z (high) end of a pipe at z = pz - 2, or the -z (low) end of a
+  // pipe at z = pz + 1. See getAllPortPositions for the offset convention.
+  const below = blocks.get(posKey({ x: pos.x, y: pos.y, z: pos.z - 2 }));
+  if (
+    below &&
+    isPipeType(below.type) &&
+    below.type.replace("H", "").indexOf("O") === 2
+  ) {
+    return "out";
+  }
+  const above = blocks.get(posKey({ x: pos.x, y: pos.y, z: pos.z + 1 }));
+  if (
+    above &&
+    isPipeType(above.type) &&
+    above.type.replace("H", "").indexOf("O") === 2
+  ) {
+    return "in";
+  }
+  return "in";
+}
+
+/**
  * Pick a canonical CubeType for a port position, or null if it should remain a port.
  *
  * Rules:

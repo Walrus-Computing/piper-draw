@@ -1,9 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBlockStore } from "../stores/blockStore";
 import { computeFlows, type FlowsResult } from "../utils/flows";
-import { getAllPortPositions, posKey, type Position3D } from "../types";
+import { getAllPortPositions, type Position3D } from "../types";
 import { isInSpanGF2, pauliToSymplectic } from "../utils/stabilizerSpan";
-import { ResizeGrip, useFloatingPanel } from "../hooks/useFloatingPanel";
+import {
+  ResizeGrip,
+  readPanelGeometry,
+  rectsOverlap,
+  useFloatingPanel,
+} from "../hooks/useFloatingPanel";
+import { PortsTable } from "./PortsTable";
 
 type Pauli = "I" | "X" | "Y" | "Z";
 const PAULI_CYCLE: Pauli[] = ["I", "X", "Y", "Z"];
@@ -32,60 +38,6 @@ function signature(
   for (const [k, v] of portMeta) m.push(`${k}=${v.label}/${v.io}`);
   m.sort();
   return b.join("|") + "#" + m.join("|");
-}
-
-function PortLabelInput({
-  pos,
-  label,
-  onCommit,
-}: {
-  pos: Position3D;
-  label: string;
-  onCommit: (pos: Position3D, label: string) => void;
-}) {
-  const [draft, setDraft] = useState(label);
-
-  // Re-sync when the store-side label changes from outside (e.g. a fresh
-  // auto-allocation after submit, or load-from-localStorage).
-  useEffect(() => {
-    setDraft(label);
-  }, [label]);
-
-  const commit = () => {
-    if (draft.trim() === label) {
-      setDraft(label);
-      return;
-    }
-    onCommit(pos, draft);
-  };
-
-  return (
-    <input
-      type="text"
-      value={draft}
-      placeholder="label"
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          (e.target as HTMLInputElement).blur();
-        } else if (e.key === "Escape") {
-          e.preventDefault();
-          setDraft(label);
-          (e.target as HTMLInputElement).blur();
-        }
-      }}
-      style={{
-        flex: 1,
-        fontSize: 12,
-        padding: "2px 6px",
-        border: "1px solid #ccc",
-        borderRadius: 4,
-        fontFamily: "monospace",
-      }}
-    />
-  );
 }
 
 function PauliCell({ pauli }: { pauli: string }) {
@@ -148,13 +100,12 @@ function EditablePauliCell({
 
 export function FlowsPanel() {
   const open = useBlockStore((s) => s.flowsPanelOpen);
+  const zxOpen = useBlockStore((s) => s.zxPanelOpen);
   const blocks = useBlockStore((s) => s.blocks);
   const portMeta = useBlockStore((s) => s.portMeta);
   const portPositions = useBlockStore((s) => s.portPositions);
   const setFlowsPanelOpen = useBlockStore((s) => s.setFlowsPanelOpen);
   const ensurePortLabels = useBlockStore((s) => s.ensurePortLabels);
-  const setPortLabel = useBlockStore((s) => s.setPortLabel);
-  const setPortIO = useBlockStore((s) => s.setPortIO);
 
   const [result, setResult] = useState<FlowsResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -163,7 +114,13 @@ export function FlowsPanel() {
   const [nextQueryId, setNextQueryId] = useState(1);
   const [helpOpen, setHelpOpen] = useState(false);
 
-  const { containerStyle, dragHandleProps, resizeGripProps } = useFloatingPanel({
+  const {
+    containerStyle,
+    dragHandleProps,
+    resizeGripProps,
+    geometry,
+    setGeometry,
+  } = useFloatingPanel({
     id: "flows",
     defaultGeometry: {
       x: typeof window !== "undefined" ? window.innerWidth - 352 : 12,
@@ -175,14 +132,23 @@ export function FlowsPanel() {
     minHeight: 220,
   });
 
-  const portList = useMemo(() => {
-    const positions = getAllPortPositions(blocks, portPositions);
-    return positions.map((pos) => {
-      const key = posKey(pos);
-      const meta = portMeta.get(key);
-      return { pos, key, meta };
-    });
-  }, [blocks, portMeta, portPositions]);
+  // When this panel opens while the ZX panel is already open and the two
+  // would overlap, move this panel to the left edge so both stay visible.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (open && !wasOpen.current && zxOpen) {
+      const other = readPanelGeometry("zx");
+      if (other && rectsOverlap(geometry, other)) {
+        setGeometry({ x: 12, y: 64 });
+      }
+    }
+    wasOpen.current = open;
+  }, [open, zxOpen, geometry, setGeometry]);
+
+  const portCount = useMemo(
+    () => getAllPortPositions(blocks, portPositions).length,
+    [blocks, portPositions],
+  );
 
   const currentSig = useMemo(() => signature(blocks, portMeta), [blocks, portMeta]);
   const stale = result !== null && computedSig !== currentSig;
@@ -303,7 +269,7 @@ export function FlowsPanel() {
           </button>
           <button
             onClick={handleCompute}
-            disabled={loading || portList.length === 0}
+            disabled={loading || portCount === 0}
             style={{
               padding: "4px 10px",
               fontSize: 12,
@@ -311,7 +277,7 @@ export function FlowsPanel() {
               border: "1px solid #4a9eff",
               background: loading ? "#eee" : "#4a9eff",
               color: loading ? "#888" : "#fff",
-              cursor: loading || portList.length === 0 ? "default" : "pointer",
+              cursor: loading || portCount === 0 ? "default" : "pointer",
             }}
           >
             {loading ? "Computing…" : "Compute"}
@@ -387,47 +353,7 @@ export function FlowsPanel() {
       )}
 
       <div style={{ padding: "10px 12px", overflowY: "auto", flex: 1 }}>
-        <section>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>
-            Ports ({portList.length})
-          </div>
-          {portList.length === 0 && (
-            <div style={{ color: "#888" }}>
-              No open ports. Add open pipes or place port markers.
-            </div>
-          )}
-          {portList.map(({ pos, key, meta }) => (
-            <div
-              key={key}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                marginBottom: 4,
-              }}
-            >
-              <PortLabelInput
-                pos={pos}
-                label={meta?.label ?? ""}
-                onCommit={setPortLabel}
-              />
-              <select
-                value={meta?.io ?? "in"}
-                onChange={(e) => setPortIO(pos, e.target.value as "in" | "out")}
-                style={{ fontSize: 12, padding: "2px 4px" }}
-              >
-                <option value="in">in</option>
-                <option value="out">out</option>
-              </select>
-              <span
-                title={`(${pos.x}, ${pos.y}, ${pos.z})`}
-                style={{ color: "#aaa", fontFamily: "monospace", fontSize: 10 }}
-              >
-                {pos.x},{pos.y},{pos.z}
-              </span>
-            </div>
-          ))}
-        </section>
+        <PortsTable />
 
         <hr style={{ margin: "12px 0", border: "none", borderTop: "1px solid #eee" }} />
 
