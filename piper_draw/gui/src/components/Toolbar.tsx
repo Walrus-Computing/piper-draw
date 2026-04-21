@@ -17,6 +17,21 @@ import type { ViewMode } from "../types";
 // the viewport edges when they scale down to fit a narrow window.
 const VIEWPORT_FIT_MARGIN_PX = 20;
 
+// User-controlled toolbar scale is persisted across reloads and clamped to
+// this range so the toolbar stays legible and can't be dragged off-screen.
+const TOOLBAR_USER_SCALE_KEY = "piperdraw.toolbarUserScale";
+const TOOLBAR_USER_SCALE_MIN = 0.4;
+const TOOLBAR_USER_SCALE_MAX = 2.0;
+
+function loadToolbarUserScale(): number {
+  if (typeof window === "undefined") return 1;
+  const raw = window.localStorage.getItem(TOOLBAR_USER_SCALE_KEY);
+  if (raw == null) return 1;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(TOOLBAR_USER_SCALE_MAX, Math.max(TOOLBAR_USER_SCALE_MIN, n));
+}
+
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
@@ -78,7 +93,11 @@ export function Toolbar({
   fpsRef: React.RefObject<HTMLSpanElement | null>;
   onOpenKeybindEditor: (mode: KeybindMode) => void;
 }) {
-  const scale = useViewportFitScale(toolbarRef, VIEWPORT_FIT_MARGIN_PX);
+  const [userScale, setUserScale] = useState<number>(loadToolbarUserScale);
+  useEffect(() => {
+    window.localStorage.setItem(TOOLBAR_USER_SCALE_KEY, String(userScale));
+  }, [userScale]);
+  const scale = useViewportFitScale(toolbarRef, VIEWPORT_FIT_MARGIN_PX, userScale);
   const mode = useBlockStore((s) => s.mode);
   const setMode = useBlockStore((s) => s.setMode);
   const armedTool = useBlockStore((s) => s.armedTool);
@@ -760,7 +779,81 @@ export function Toolbar({
           />
         </>
       )}
+      <ResizeHandle toolbarRef={toolbarRef} userScale={userScale} setUserScale={setUserScale} />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Resize handle — drag to set the persisted toolbar scale.
+// ---------------------------------------------------------------------------
+// The toolbar is centered (translateX(-50%)) so horizontal drag changes the
+// width symmetrically: a 1px drag at the right edge grows the visible width
+// by 2px. We drive the new scale from the starting natural width so the
+// grabbed corner tracks the cursor.
+function ResizeHandle({
+  toolbarRef,
+  userScale,
+  setUserScale,
+}: {
+  toolbarRef: React.RefObject<HTMLDivElement | null>;
+  userScale: number;
+  setUserScale: (n: number) => void;
+}) {
+  const dragRef = useRef<{ startX: number; startScale: number; natural: number } | null>(null);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const node = toolbarRef.current;
+    if (!node) return;
+    const natural = node.offsetWidth;
+    if (natural === 0) return;
+    dragRef.current = { startX: e.clientX, startScale: userScale, natural };
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const delta = (e.clientX - d.startX) * 2;
+    const next = d.startScale + delta / d.natural;
+    const clamped = Math.min(TOOLBAR_USER_SCALE_MAX, Math.max(TOOLBAR_USER_SCALE_MIN, next));
+    setUserScale(clamped);
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+  };
+
+  const onDoubleClick = () => setUserScale(1);
+
+  return (
+    <div
+      role="separator"
+      aria-label="Resize toolbar"
+      title="Drag to resize toolbar (double-click to reset)"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onDoubleClick={onDoubleClick}
+      style={{
+        position: "absolute",
+        right: 0,
+        bottom: 0,
+        width: 14,
+        height: 14,
+        cursor: "nwse-resize",
+        touchAction: "none",
+        // Diagonal grip lines.
+        backgroundImage:
+          "linear-gradient(135deg, transparent 0 6px, #999 6px 7px, transparent 7px 10px, #999 10px 11px, transparent 11px)",
+        borderBottomRightRadius: 8,
+      }}
+    />
   );
 }
 
