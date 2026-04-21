@@ -66,6 +66,10 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
     const store = useBlockStore.getState();
     if (store.mode !== "edit" || store.xHeld) return;
     if (store.armedTool === "pointer") return;
+    // Paste mode: let GridPlane's pointerMove drive hoveredGridPos; the port
+    // ghost is not a valid paste target on its own, but we must NOT fall
+    // through into cube-placement logic below.
+    if (store.armedTool === "paste") return;
 
     // The port tool targets existing cubes, not ports — clicking a port is a no-op,
     // so don't render a misleading placement preview.
@@ -124,6 +128,11 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
     const store = useBlockStore.getState();
     if (store.mode !== "edit" || store.xHeld) return;
     if (store.armedTool === "pointer") return;
+    // Paste mode: commit at whatever is currently hovered.
+    if (store.armedTool === "paste") {
+      store.commitPaste();
+      return;
+    }
     // Port tool: clicking a port is a no-op (it's already a port).
     if (store.armedTool === "port") return;
     if (store.armedTool === "pipe" && store.pipeVariant) {

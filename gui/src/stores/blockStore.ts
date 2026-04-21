@@ -43,7 +43,7 @@ import {
 import { rotateBlockAroundZ } from "../utils/blockRotation";
 
 export type Mode = "edit" | "build";
-export type ArmedTool = "pointer" | "cube" | "pipe" | "port";
+export type ArmedTool = "pointer" | "cube" | "pipe" | "port" | "paste";
 
 const MAX_HISTORY = 100;
 
@@ -170,6 +170,11 @@ interface BlockStore {
    * not cube-grid-aligned. Cleared whenever the selection itself changes. */
   selectionPivot: Position3D | null;
 
+  /** Clipboard populated by `copySelection`. Entries are normalized so the
+   * selection's bounding-box min corner sits at (0,0,0). In-memory only —
+   * clears on refresh. `null` = nothing copied yet. */
+  clipboard: Map<string, Block> | null;
+
   /**
    * Per-port metadata (label + input/output direction) used by the Stabilizer
    * Flows panel. Keyed by posKey. Entries are allocated lazily via
@@ -211,8 +216,16 @@ interface BlockStore {
    * cycle the selected item through the toolbar options that remain valid at its
    * position. Selection is preserved (the selected-indicator follows the new type).
    * No-op if selection is empty, multi-select, or the only valid option is current.
+   * If `target` is provided, jump directly to that option instead of cycling
+   * (used by toolbar-button clicks). `dir` is ignored when `target` is provided.
    */
-  cycleSelectedType: (dir: -1 | 1) => void;
+  cycleSelectedType: (
+    dir: -1 | 1,
+    target?:
+      | { kind: "port" }
+      | { kind: "cube"; type: CubeType | "Y" }
+      | { kind: "pipe"; variant: PipeVariant },
+  ) => void;
   setPaletteDragging: (on: boolean) => void;
   convertBlockToPort: (pos: Position3D) => void;
   clearPortWarning: () => void;
@@ -230,6 +243,27 @@ interface BlockStore {
    * group into its final position. Switches to edit/pointer. Undo-safe.
    */
   insertBlocks: (blocks: Map<string, Block>) => void;
+  /**
+   * Snapshot currently-selected blocks into `clipboard`, normalized so the
+   * bounding-box min corner sits at (0,0,0). No-op on empty selection — does
+   * NOT clobber an existing clipboard.
+   */
+  copySelection: () => void;
+  /**
+   * Arm "placing paste" mode — a translucent ghost of the clipboard follows
+   * the cursor and commits on click (or on a second invocation of this
+   * action). Esc cancels. No-op if the clipboard is empty. If paste mode is
+   * already armed, this commits at the current hover (so Cmd+V → Cmd+V
+   * pastes in one spot without needing a click).
+   */
+  pasteClipboard: () => void;
+  /**
+   * Commit the clipboard into the scene at the currently hovered grid cell
+   * (snapped to the cube-slot grid). If nothing is hovered, falls back to
+   * the same +X auto-offset as `insertBlocks`. Leaves pasted blocks selected,
+   * switches to edit/pointer. Undo-safe.
+   */
+  commitPaste: () => void;
   hydrateBlocks: (blocks: Map<string, Block>) => void;
   clearAll: () => void;
   canUndo: () => boolean;
@@ -266,6 +300,12 @@ interface BlockStore {
   // Free build (disables color-matching validation)
   freeBuild: boolean;
   toggleFreeBuild: () => void;
+
+  // View-chrome visibility toggles (keyboard shortcuts G / H).
+  showGrid: boolean;
+  showHints: boolean;
+  toggleShowGrid: () => void;
+  toggleShowHints: () => void;
 
   // Photo export — transient flag consumed by ScreenshotCapture inside <Canvas>.
   photoRequest: boolean;
@@ -390,6 +430,86 @@ function syncPortsAndPromote(
   return { blocks: curBlocks, hiddenFaces: curHidden, addedEntries, promotedPortKeys };
 }
 
+/**
+ * Translate `incoming` by `delta`, skip entries that collide with existing
+ * blocks or land on invalid positions, and commit the surviving set as a
+ * single `bulk-add` undo step. Returns the state patch callers can spread,
+ * or `null` if nothing made it through (caller returns unchanged state).
+ * Shared between `insertBlocks` (delta = +X auto-offset) and `pasteClipboard`
+ * (delta = snapped hover, or +X fallback).
+ */
+function mergeBlocksWithDelta(
+  state: BlockStore,
+  incoming: Map<string, Block>,
+  delta: Position3D,
+): Partial<BlockStore> | null {
+  const mergedBlocks = new Map(state.blocks);
+  const entries: Array<{ key: string; block: Block }> = [];
+  for (const b of incoming.values()) {
+    const newPos: Position3D = {
+      x: b.pos.x + delta.x,
+      y: b.pos.y + delta.y,
+      z: b.pos.z + delta.z,
+    };
+    if (!isValidPos(newPos, b.type)) continue;
+    const newKey = posKey(newPos);
+    if (mergedBlocks.has(newKey)) continue;
+    const newBlock: Block = { pos: newPos, type: b.type };
+    mergedBlocks.set(newKey, newBlock);
+    entries.push({ key: newKey, block: newBlock });
+  }
+  if (entries.length === 0) return null;
+
+  const { spatialIndex, hiddenFaces, undeterminedCubes } = computeDerivedFromBlocks(mergedBlocks);
+  const cmd: UndoCommand = { kind: "bulk-add", entries };
+  return {
+    blocks: mergedBlocks,
+    spatialIndex,
+    hiddenFaces,
+    undeterminedCubes,
+    history: [...state.history, cmd].slice(-MAX_HISTORY),
+    future: [],
+    hoveredGridPos: null,
+    selectedKeys: new Set(entries.map((e) => e.key)),
+    selectedPortPositions: new Set<string>(),
+    mode: "edit",
+    armedTool: "pointer",
+  };
+}
+
+/**
+ * Reducer for actually committing the clipboard. Extracted so it can run from
+ * both `commitPaste` (click / second Cmd+V) and a double Cmd+V inside
+ * `pasteClipboard` while paste mode is armed.
+ */
+function commitPasteReducer(state: BlockStore): Partial<BlockStore> | BlockStore {
+  const clip = state.clipboard;
+  if (!clip || clip.size === 0) return state;
+  const hover = state.hoveredGridPos;
+  if (hover) {
+    const delta: Position3D = {
+      x: Math.floor(hover.x / 3) * 3,
+      y: Math.floor(hover.y / 3) * 3,
+      z: Math.floor(hover.z / 3) * 3,
+    };
+    return mergeBlocksWithDelta(state, clip, delta) ?? state;
+  }
+  let delta: Position3D = { x: 0, y: 0, z: 0 };
+  if (state.blocks.size > 0) {
+    let existingMaxX = -Infinity;
+    for (const b of state.blocks.values()) {
+      if (b.pos.x > existingMaxX) existingMaxX = b.pos.x;
+    }
+    let incomingMinX = Infinity;
+    for (const b of clip.values()) {
+      if (b.pos.x < incomingMinX) incomingMinX = b.pos.x;
+    }
+    const raw = existingMaxX + 3 - incomingMinX;
+    delta = { x: Math.ceil(raw / 3) * 3, y: 0, z: 0 };
+  }
+  return mergeBlocksWithDelta(state, clip, delta) ?? state;
+}
+
 function computeDerivedFromBlocks(blocks: Map<string, Block>): {
   spatialIndex: SpatialIndex;
   hiddenFaces: Map<string, FaceMask>;
@@ -438,6 +558,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   flowsPanelOpen: false,
   zxPanelOpen: false,
   selectionPivot: null,
+  clipboard: null,
 
   isDraggingSelection: false,
   dragDelta: null,
@@ -452,6 +573,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
   freeBuild: false,
   toggleFreeBuild: () => set((s) => ({ freeBuild: !s.freeBuild })),
+
+  showGrid: true,
+  showHints: true,
+  toggleShowGrid: () => set((s) => ({ showGrid: !s.showGrid })),
+  toggleShowHints: () => set((s) => ({ showHints: !s.showHints })),
 
   photoRequest: false,
   requestPhoto: () => set({ photoRequest: true }),
@@ -582,7 +708,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     else if (target.kind === "cube") s.setCubeType(target.cubeType);
     else s.setPipeVariant(target.variant);
   },
-  cycleSelectedType: (dir) => {
+  cycleSelectedType: (dir, target) => {
     const state = get();
     if (state.mode !== "edit" || state.armedTool !== "pointer") return;
 
@@ -628,10 +754,16 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           }
           if (cycle.length <= 1) return s;
 
-          const curIdx = cycle.indexOf(currentVariant);
-          if (curIdx === -1) return s;
-          const nextIdx = (((curIdx + dir) % cycle.length) + cycle.length) % cycle.length;
-          const nextVariant = cycle[nextIdx];
+          let nextVariant: PipeVariant;
+          if (target !== undefined) {
+            if (target.kind !== "pipe" || !cycle.includes(target.variant)) return s;
+            nextVariant = target.variant;
+          } else {
+            const curIdx = cycle.indexOf(currentVariant);
+            if (curIdx === -1) return s;
+            const nextIdx = (((curIdx + dir) % cycle.length) + cycle.length) % cycle.length;
+            nextVariant = cycle[nextIdx];
+          }
           if (nextVariant === currentVariant) return s;
 
           const newType = VARIANT_AXIS_MAP[nextVariant][openAxis];
@@ -685,7 +817,6 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       const coords: [number, number, number] = [pos.x, pos.y, pos.z];
       let pipeCount = 0;
-      let yValid = true;
       for (let axis = 0; axis < 3; axis++) {
         for (const offset of [1, -2]) {
           const nc: [number, number, number] = [coords[0], coords[1], coords[2]];
@@ -693,16 +824,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
           if (n && isPipeType(n.type)) {
             const openAxis = n.type.replace("H", "").indexOf("O");
-            if (openAxis === axis) {
-              pipeCount++;
-              if (openAxis !== 2) yValid = false;
-            }
+            if (openAxis === axis) pipeCount++;
           }
         }
       }
       const result = determineCubeOptions(pos, s.blocks);
       const cubeOpts = new Set<CubeType | "Y">(result.determined ? [result.type] : result.options);
-      if (yValid) cubeOpts.add("Y");
+      // Y is a leaf: only valid with at most one attached (Z-open) pipe.
+      if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", pos, s.blocks)) cubeOpts.add("Y");
       const portAllowed = pipeCount < 2;
 
       type Opt = { kind: "port" } | { kind: "cube"; type: CubeType | "Y" };
@@ -714,19 +843,32 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       if (cubeOpts.has("Y") || currentKind === "Y") cycle.push({ kind: "cube", type: "Y" });
       if (cycle.length <= 1) return s;
 
-      const curIdx = cycle.findIndex((o) =>
-        currentKind === "PORT" ? o.kind === "port" : (o.kind === "cube" && o.type === currentKind)
-      );
-      if (curIdx === -1) return s;
-      const nextIdx = (((curIdx + dir) % cycle.length) + cycle.length) % cycle.length;
-      const target = cycle[nextIdx];
+      let nextOpt: Opt;
+      if (target !== undefined) {
+        if (target.kind === "pipe") return s;
+        const found = cycle.find((o) =>
+          target.kind === "port" ? o.kind === "port" : (o.kind === "cube" && o.type === target.type),
+        );
+        if (!found) return s;
+        nextOpt = found;
+      } else {
+        const curIdx = cycle.findIndex((o) =>
+          currentKind === "PORT" ? o.kind === "port" : (o.kind === "cube" && o.type === currentKind)
+        );
+        if (curIdx === -1) return s;
+        const nextIdx = (((curIdx + dir) % cycle.length) + cycle.length) % cycle.length;
+        nextOpt = cycle[nextIdx];
+      }
+      // No-op if target equals current (toolbar click on the already-placed type).
+      if (nextOpt.kind === "port" && currentKind === "PORT") return s;
+      if (nextOpt.kind === "cube" && nextOpt.type === currentKind) return s;
 
       let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
       const oldPortMarker = s.portPositions.has(key);
       let newBlock: Block | null;
       let newPortMarker: boolean;
 
-      if (target.kind === "port") {
+      if (nextOpt.kind === "port") {
         if (existingBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, key, existingBlock));
         }
@@ -738,7 +880,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (existingBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, key, existingBlock));
         }
-        newBlock = { pos, type: target.type };
+        newBlock = { pos, type: nextOpt.type };
         ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, key, newBlock));
         // Placing a cube clears any explicit port marker at this position
         // (mirrors addBlock's behaviour when a cube lands on a user-placed port).
@@ -1780,39 +1922,58 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         delta = { x: Math.ceil(raw / 3) * 3, y: 0, z: 0 };
       }
 
-      const mergedBlocks = new Map(state.blocks);
-      const entries: Array<{ key: string; block: Block }> = [];
-      for (const b of incoming.values()) {
-        const newPos: Position3D = {
-          x: b.pos.x + delta.x,
-          y: b.pos.y + delta.y,
-          z: b.pos.z + delta.z,
-        };
-        if (!isValidPos(newPos, b.type)) continue;
-        const newKey = posKey(newPos);
-        if (mergedBlocks.has(newKey)) continue;
-        const newBlock: Block = { pos: newPos, type: b.type };
-        mergedBlocks.set(newKey, newBlock);
-        entries.push({ key: newKey, block: newBlock });
-      }
-      if (entries.length === 0) return state;
+      return mergeBlocksWithDelta(state, incoming, delta) ?? state;
+    }),
 
-      const { spatialIndex, hiddenFaces, undeterminedCubes } = computeDerivedFromBlocks(mergedBlocks);
-      const cmd: UndoCommand = { kind: "bulk-add", entries };
+  copySelection: () =>
+    set((state) => {
+      if (state.selectedKeys.size === 0) return state;
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      for (const key of state.selectedKeys) {
+        const b = state.blocks.get(key);
+        if (!b) continue;
+        if (b.pos.x < minX) minX = b.pos.x;
+        if (b.pos.y < minY) minY = b.pos.y;
+        if (b.pos.z < minZ) minZ = b.pos.z;
+      }
+      if (minX === Infinity) return state;
+      const clipboard = new Map<string, Block>();
+      for (const key of state.selectedKeys) {
+        const b = state.blocks.get(key);
+        if (!b) continue;
+        const pos: Position3D = { x: b.pos.x - minX, y: b.pos.y - minY, z: b.pos.z - minZ };
+        clipboard.set(posKey(pos), { pos, type: b.type });
+      }
+      if (clipboard.size === 0) return state;
+      return { clipboard };
+    }),
+
+  pasteClipboard: () =>
+    set((state) => {
+      const clip = state.clipboard;
+      if (!clip || clip.size === 0) return state;
+      // Second invocation while paste is armed → commit at hover.
+      if (state.armedTool === "paste") {
+        return commitPasteReducer(state);
+      }
       return {
-        blocks: mergedBlocks,
-        spatialIndex,
-        hiddenFaces,
-        undeterminedCubes,
-        history: [...state.history, cmd].slice(-MAX_HISTORY),
-        future: [],
-        hoveredGridPos: null,
-        selectedKeys: new Set(entries.map((e) => e.key)),
-        selectedPortPositions: new Set<string>(),
+        armedTool: "paste",
         mode: "edit",
-        armedTool: "pointer",
+        pipeVariant: null,
+        portWarning: null,
+        hoveredGridPos: null,
+        hoveredBlockType: null,
+        hoveredInvalid: false,
+        hoveredInvalidReason: null,
+        hoveredReplace: false,
+        selectedKeys: new Set<string>(),
+        selectedPortPositions: new Set<string>(),
+        selectionPivot: null,
       };
     }),
+
+  commitPaste: () =>
+    set((state) => commitPasteReducer(state)),
 
   hydrateBlocks: (incoming) =>
     set((state) => {
@@ -2699,9 +2860,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       const cursorKey = posKey(cursor);
       const coords: [number, number, number] = [cursor.x, cursor.y, cursor.z];
 
-      // Count adjacent pipes and check if Y is valid (only Z-open pipes)
+      // Count adjacent pipes (Y validity uses hasYCubePipeAxisConflict below).
       let pipeCount = 0;
-      let yValid = true;
       for (let axis = 0; axis < 3; axis++) {
         for (const pipeOffset of [1, -2]) {
           const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
@@ -2709,10 +2869,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const n = state.blocks.get(posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] }));
           if (n && isPipeType(n.type)) {
             const openAxis = n.type.replace("H", "").indexOf("O");
-            if (openAxis === axis) {
-              pipeCount++;
-              if (openAxis !== 2) yValid = false;
-            }
+            if (openAxis === axis) pipeCount++;
           }
         }
       }
@@ -2728,7 +2885,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
               const result = determineCubeOptions(cursor, state.blocks);
               return result.determined ? [result.type] : result.options;
             })();
-        if (yValid) cubeOptions.push("Y");
+        // Y is a leaf: only valid with at most one attached (Z-open) pipe.
+        if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", cursor, state.blocks)) cubeOptions.push("Y");
       }
       if (cubeOptions.length === 0) return state;
 

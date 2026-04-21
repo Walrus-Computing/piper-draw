@@ -65,9 +65,16 @@ export function GridPlane() {
     if (mode !== "edit") { setHoveredGridPos(null); return; }
 
     const store = useBlockStore.getState();
-    // No grid-plane preview when nothing is armed, or while X-held delete is active.
-    if (store.xHeld || store.armedTool === "pointer") {
+    if (store.xHeld) {
       setHoveredGridPos(null);
+      return;
+    }
+    // Pointer tool: no ghost preview (GhostBlock gates on armedTool), but
+    // still track the hovered cube-slot so paste lands where the cursor is.
+    // Paste tool: PasteGhost reads hoveredGridPos to position its ghost group.
+    if (store.armedTool === "pointer" || store.armedTool === "paste") {
+      const pos = snapForViewMode(viewMode, e.point, false);
+      setHoveredGridPos(pos);
       return;
     }
     // Port tool: snap to the nearest cube slot for hover preview. The dedicated
@@ -122,6 +129,12 @@ export function GridPlane() {
     if (store.xHeld) return;
     if (store.armedTool === "pointer") {
       store.clearSelection();
+      return;
+    }
+    // Paste tool: commit the clipboard at the snapped hover cell, then
+    // return to pointer (commitPaste sets armedTool="pointer").
+    if (store.armedTool === "paste") {
+      store.commitPaste();
       return;
     }
     // Port tool: place an explicit port marker at the snapped cube position.

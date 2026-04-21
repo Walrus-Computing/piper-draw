@@ -26,8 +26,7 @@ See the [README](README.md#getting-started) for prerequisites and setup instruct
 Run the test suite before submitting your PR:
 
 ```sh
-uv run pytest
-cd piper_draw/gui && npm run test
+make test
 ```
 
-See the [README testing section](README.md#testing) for details on test conventions.
+See the [README testing section](README.md) for details on test conventions.

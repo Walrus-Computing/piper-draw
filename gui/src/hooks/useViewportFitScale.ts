@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 
-// Returns a CSS scale factor that keeps an element at its natural size when
-// it fits within the viewport (minus `marginPx` on each side), and shrinks it
-// just enough to fit when it doesn't.
+// Returns a CSS scale factor that keeps an element at `userScale` when it fits
+// within the viewport (minus `marginPx` on each side), and shrinks it further
+// when it doesn't. `userScale` defaults to 1, matching the original cap.
 export function useViewportFitScale(
   ref: React.RefObject<HTMLElement | null>,
   marginPx: number,
+  userScale: number = 1,
 ): number {
-  const [scale, setScale] = useState(1);
+  const [scale, setScale] = useState(userScale);
   useEffect(() => {
     let frame = 0;
     const recompute = () => {
@@ -21,7 +22,7 @@ export function useViewportFitScale(
         const natural = node.offsetWidth;
         if (natural === 0) return;
         const available = window.innerWidth - marginPx;
-        setScale(Math.min(1, available / natural));
+        setScale(Math.min(userScale, available / natural));
       });
     };
     const node = ref.current;
@@ -34,6 +35,6 @@ export function useViewportFitScale(
       window.removeEventListener("resize", recompute);
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [ref, marginPx]);
+  }, [ref, marginPx, userScale]);
   return scale;
 }

@@ -98,7 +98,12 @@ function EditablePauliCell({
   );
 }
 
-export function FlowsPanel() {
+export function FlowsPanel({
+  controlsRef,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  controlsRef: React.RefObject<any>;
+}) {
   const open = useBlockStore((s) => s.flowsPanelOpen);
   const zxOpen = useBlockStore((s) => s.zxPanelOpen);
   const blocks = useBlockStore((s) => s.blocks);
@@ -353,7 +358,7 @@ export function FlowsPanel() {
       )}
 
       <div style={{ padding: "10px 12px", overflowY: "auto", flex: 1 }}>
-        <PortsTable />
+        <PortsTable controlsRef={controlsRef} />
 
         <hr style={{ margin: "12px 0", border: "none", borderTop: "1px solid #eee" }} />
 

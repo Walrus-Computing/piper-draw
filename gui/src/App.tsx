@@ -14,12 +14,14 @@ import {
 import { BlockInstances } from "./components/BlockInstances";
 import { GridPlane } from "./components/GridPlane";
 import { GhostBlock } from "./components/GhostBlock";
+import { PasteGhost } from "./components/PasteGhost";
 import { AxisLabels } from "./components/AxisLabels";
 import { FpsSampler } from "./components/FpsCounter";
 import { OrientationGizmo } from "./components/OrientationGizmo";
 import { Toolbar } from "./components/Toolbar";
 import { ValidationToast } from "./components/ValidationToast";
 import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
+import { LocatePulseHighlight } from "./components/LocatePulseHighlight";
 import { SelectionHighlights } from "./components/SelectionHighlights";
 import { BuildCursor } from "./components/BuildCursor";
 import { SelectModePointer, type ThreeState } from "./components/SelectModePointer";
@@ -32,7 +34,7 @@ import { PortLabels3D } from "./components/PortLabels3D";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
 import { BuildModeHints } from "./components/BuildModeHints";
 import { EditModeHints } from "./components/EditModeHints";
-import { KeybindEditor } from "./components/KeybindEditor";
+import { KeybindEditor, type KeybindEditorTab } from "./components/KeybindEditor";
 import { HelpPanel } from "./components/HelpPanel";
 import { useBlockStore } from "./stores/blockStore";
 import {
@@ -40,13 +42,13 @@ import {
   actionForKey,
   actionToWasdKey,
   type KeyBinding,
-  type Mode,
 } from "./stores/keybindStore";
 import { useValidationStore } from "./stores/validationStore";
-import { wasdToBuildDirection, tqecToThree, posKey, type Block, type ViewMode } from "./types";
+import { wasdToBuildDirection, tqecToThree, posKey, blockTqecSize, type Block, type ViewMode } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
 import { downloadPng } from "./utils/photoExport";
+import { downloadDae } from "./utils/daeExport";
 import { isEditableTarget } from "./utils/editableFocus";
 import {
   ISO_INITIAL_ZOOM,
@@ -464,12 +466,14 @@ export default function App() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
-  const [keybindEditorMode, setKeybindEditorMode] = useState<Mode | null>(null);
+  const [keybindEditorMode, setKeybindEditorMode] = useState<KeybindEditorTab | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const threeStateRef = useRef<ThreeState | null>(null);
   const photoRequest = useBlockStore((s) => s.photoRequest);
   const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
   const zxPanelOpen = useBlockStore((s) => s.zxPanelOpen);
+  const showGrid = useBlockStore((s) => s.showGrid);
+  const showHints = useBlockStore((s) => s.showHints);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -481,6 +485,154 @@ export default function App() {
       const store = useBlockStore.getState();
       const bindings = useKeybindStore.getState().bindings;
       const mode = store.mode;
+
+      // Global shortcuts (work in both modes). Run before mode-specific bindings.
+      // Ctrl/Cmd-modified globals: copy, paste, export.
+      if (ctrl && !alt && !shift) {
+        switch (key) {
+          case "c":
+            if (store.selectedKeys.size > 0) {
+              e.preventDefault();
+              store.copySelection();
+              return;
+            }
+            break;
+          case "v":
+            if (store.clipboard && store.clipboard.size > 0) {
+              e.preventDefault();
+              store.pasteClipboard();
+              return;
+            }
+            break;
+          case "s":
+            e.preventDefault();
+            void downloadDae(store.blocks);
+            return;
+        }
+      }
+
+      if (!ctrl && !alt) {
+        if (!shift) {
+          switch (key) {
+            case "tab":
+              e.preventDefault();
+              store.setMode(mode === "build" ? "edit" : "build");
+              return;
+            case "1": e.preventDefault(); store.setIsoView("x"); return;
+            case "2": e.preventDefault(); store.setIsoView("y"); return;
+            case "3": e.preventDefault(); store.setIsoView("z"); return;
+            case "4": {
+              e.preventDefault();
+              const controls = controlsRef.current;
+              const wasPersp = store.viewMode.kind === "persp";
+              store.setPerspView();
+              // When already in persp, switching is a no-op — re-center camera
+              // to match the fresh-camera behaviour of switching from iso.
+              if (wasPersp && controls?.target0 && controls?.position0) {
+                animateCamera(controls, controls.target0.clone(), controls.position0.clone());
+              }
+              return;
+            }
+            case "g": e.preventDefault(); store.toggleShowGrid(); return;
+            case "h": e.preventDefault(); store.toggleShowHints(); return;
+            case "t": {
+              e.preventDefault();
+              let minX = Infinity, minY = Infinity, minZ = Infinity;
+              let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+              let count = 0;
+              for (const block of store.blocks.values()) {
+                const [sx, sy, sz] = blockTqecSize(block.type);
+                const { x, y, z } = block.pos;
+                if (x < minX) minX = x; if (y < minY) minY = y; if (z < minZ) minZ = z;
+                if (x + sx > maxX) maxX = x + sx;
+                if (y + sy > maxY) maxY = y + sy;
+                if (z + sz > maxZ) maxZ = z + sz;
+                count++;
+              }
+              for (const k of store.portPositions) {
+                const [x, y, z] = k.split(",").map(Number);
+                if (x < minX) minX = x; if (y < minY) minY = y; if (z < minZ) minZ = z;
+                if (x + 1 > maxX) maxX = x + 1;
+                if (y + 1 > maxY) maxY = y + 1;
+                if (z + 1 > maxZ) maxZ = z + 1;
+                count++;
+              }
+              if (count === 0) return;
+              const threeCenter = new THREE.Vector3(
+                (minX + maxX) / 2,
+                (minZ + maxZ) / 2,
+                -(minY + maxY) / 2,
+              );
+              const dX = maxX - minX, dY = maxY - minY, dZ = maxZ - minZ;
+              const diameter = Math.sqrt(dX * dX + dY * dY + dZ * dZ);
+              const controls = controlsRef.current;
+              if (!controls) return;
+              if (store.viewMode.kind === "persp") {
+                const camera = controls.object as THREE.PerspectiveCamera;
+                const fovRad = (camera.fov * Math.PI) / 180;
+                const margin = 1.2;
+                const distance = Math.max(diameter / 2 / Math.tan(fovRad / 2) * margin, 2);
+                const dir = camera.position.clone().sub(controls.target);
+                if (dir.lengthSq() < 1e-6) dir.set(1, 1, -1);
+                dir.normalize();
+                animateCamera(
+                  controls,
+                  threeCenter,
+                  threeCenter.clone().add(dir.multiplyScalar(distance)),
+                );
+              } else {
+                // Iso: step slice to bbox center on depth axis, then pan target in-plane.
+                const axis = store.viewMode.axis;
+                const centerDepth = axis === "x"
+                  ? (minX + maxX) / 2
+                  : axis === "y"
+                  ? (minY + maxY) / 2
+                  : (minZ + maxZ) / 2;
+                const sliceDelta = Math.round(centerDepth) - store.viewMode.slice;
+                if (sliceDelta !== 0) store.stepSlice(sliceDelta);
+                // Let the IsoViewport effect reposition the ortho camera, then
+                // animate the in-plane pan.
+                requestAnimationFrame(() => {
+                  const c = controlsRef.current;
+                  if (!c) return;
+                  const camObj = c.object as THREE.Object3D;
+                  const offset = camObj.position.clone().sub(c.target);
+                  animateCamera(c, threeCenter, threeCenter.clone().add(offset));
+                });
+              }
+              return;
+            }
+            case ".": {
+              e.preventDefault();
+              const all = [
+                ...store.selectedKeys,
+                ...store.selectedPortPositions,
+              ];
+              if (all.length === 0) return;
+              let sx = 0, sy = 0, sz = 0;
+              for (const k of all) {
+                const [x, y, z] = k.split(",").map(Number);
+                sx += x; sy += y; sz += z;
+              }
+              const n = all.length;
+              const [tx, ty, tz] = tqecToThree({ x: sx / n, y: sy / n, z: sz / n });
+              const newTarget = new THREE.Vector3(tx, ty, tz);
+              const controls = controlsRef.current;
+              if (!controls) return;
+              const camera = controls.object as THREE.Object3D;
+              const offset = camera.position.clone().sub(controls.target);
+              animateCamera(controls, newTarget, newTarget.clone().add(offset));
+              return;
+            }
+          }
+        }
+        // ? requires shift (on US layouts); match the literal key.
+        if (e.key === "?") {
+          e.preventDefault();
+          setKeybindEditorMode("general");
+          return;
+        }
+      }
 
       if (mode === "build") {
         const action = actionForKey(bindings.build, key, ctrl, shift, alt);
@@ -533,6 +685,18 @@ export default function App() {
           if (store.selectedKeys.size > 0) {
             e.preventDefault();
             store.deleteSelected();
+          }
+          return;
+        case "copy":
+          if (store.selectedKeys.size > 0) {
+            e.preventDefault();
+            store.copySelection();
+          }
+          return;
+        case "paste":
+          if (store.clipboard && store.clipboard.size > 0) {
+            e.preventDefault();
+            store.pasteClipboard();
           }
           return;
         case "clearSelection":
@@ -814,10 +978,10 @@ export default function App() {
         ?
       </button>
       {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
-      <FlowsPanel />
-      <ZXPanel />
-      <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />
-      <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />
+      <FlowsPanel controlsRef={controlsRef} />
+      <ZXPanel controlsRef={controlsRef} />
+      {showHints && <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />}
+      {showHints && <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />}
       {keybindEditorMode && (
         <KeybindEditor initialMode={keybindEditorMode} onClose={() => setKeybindEditorMode(null)} />
       )}
@@ -832,6 +996,7 @@ export default function App() {
         <BlockInstances />
         {!photoRequest && <FoldOutCubeOverlay />}
         {!photoRequest && <InvalidBlockHighlights />}
+        {!photoRequest && <LocatePulseHighlight />}
         {!photoRequest && <SelectionHighlights />}
         {!photoRequest && <DragGhost />}
         {!photoRequest && <BuildCursor />}
@@ -840,9 +1005,10 @@ export default function App() {
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
         {!photoRequest && <GhostBlock />}
+        {!photoRequest && <PasteGhost />}
         <AxisLabels />
         <FpsSampler targetRef={fpsRef} />
-        {!photoRequest && <CheckerboardGrid />}
+        {!photoRequest && showGrid && <CheckerboardGrid />}
         {!photoRequest && (
           <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
             <OrientationGizmo />

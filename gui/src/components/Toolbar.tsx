@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useBlockStore, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
 import { useKeybindStore, type Mode as KeybindMode, type NavStyle } from "../stores/keybindStore";
-import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
+import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
@@ -16,6 +16,21 @@ import type { ViewMode } from "../types";
 // Horizontal margin (px) kept between fixed overlays (toolbar, hint bar) and
 // the viewport edges when they scale down to fit a narrow window.
 const VIEWPORT_FIT_MARGIN_PX = 20;
+
+// User-controlled toolbar scale is persisted across reloads and clamped to
+// this range so the toolbar stays legible and can't be dragged off-screen.
+const TOOLBAR_USER_SCALE_KEY = "piperdraw.toolbarUserScale";
+const TOOLBAR_USER_SCALE_MIN = 0.4;
+const TOOLBAR_USER_SCALE_MAX = 2.0;
+
+function loadToolbarUserScale(): number {
+  if (typeof window === "undefined") return 1;
+  const raw = window.localStorage.getItem(TOOLBAR_USER_SCALE_KEY);
+  if (raw == null) return 1;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(TOOLBAR_USER_SCALE_MAX, Math.max(TOOLBAR_USER_SCALE_MIN, n));
+}
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -78,7 +93,11 @@ export function Toolbar({
   fpsRef: React.RefObject<HTMLSpanElement | null>;
   onOpenKeybindEditor: (mode: KeybindMode) => void;
 }) {
-  const scale = useViewportFitScale(toolbarRef, VIEWPORT_FIT_MARGIN_PX);
+  const [userScale, setUserScale] = useState<number>(loadToolbarUserScale);
+  useEffect(() => {
+    window.localStorage.setItem(TOOLBAR_USER_SCALE_KEY, String(userScale));
+  }, [userScale]);
+  const scale = useViewportFitScale(toolbarRef, VIEWPORT_FIT_MARGIN_PX, userScale);
   const mode = useBlockStore((s) => s.mode);
   const setMode = useBlockStore((s) => s.setMode);
   const armedTool = useBlockStore((s) => s.armedTool);
@@ -91,6 +110,7 @@ export function Toolbar({
   const setPaletteDragging = useBlockStore((s) => s.setPaletteDragging);
   const cycleBlock = useBlockStore((s) => s.cycleBlock);
   const cyclePipe = useBlockStore((s) => s.cyclePipe);
+  const cycleSelectedType = useBlockStore((s) => s.cycleSelectedType);
   const historyLen = useBlockStore((s) => s.history.length);
   const futureLen = useBlockStore((s) => s.future.length);
   const undo = useBlockStore((s) => s.undo);
@@ -156,7 +176,6 @@ export function Toolbar({
     const cursor = s.buildCursor;
     const coords: [number, number, number] = [cursor.x, cursor.y, cursor.z];
     let pipeCount = 0;
-    let yValid = true;
     for (let axis = 0; axis < 3; axis++) {
       for (const offset of [1, -2]) {
         const nc: [number, number, number] = [coords[0], coords[1], coords[2]];
@@ -164,10 +183,7 @@ export function Toolbar({
         const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
         if (n && isPipeType(n.type)) {
           const openAxis = n.type.replace("H", "").indexOf("O");
-          if (openAxis === axis) {
-            pipeCount++;
-            if (openAxis !== 2) yValid = false;
-          }
+          if (openAxis === axis) pipeCount++;
         }
       }
     }
@@ -178,7 +194,8 @@ export function Toolbar({
           const result = determineCubeOptions(cursor, s.blocks);
           return result.determined ? [result.type] : [...result.options];
         })();
-    if (yValid) opts.push("Y");
+    // Y is a leaf: only valid with at most one attached (Z-open) pipe.
+    if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", cursor, s.blocks)) opts.push("Y");
     return opts.join(",");
   });
   const buildValidTypes = buildValidTypesStr != null ? new Set(buildValidTypesStr.split(",").filter(Boolean)) : null;
@@ -210,7 +227,6 @@ export function Toolbar({
     }
     const coords: [number, number, number] = [pos.x, pos.y, pos.z];
     let pipeCount = 0;
-    let yValid = true;
     for (let axis = 0; axis < 3; axis++) {
       for (const offset of [1, -2]) {
         const nc: [number, number, number] = [coords[0], coords[1], coords[2]];
@@ -218,16 +234,14 @@ export function Toolbar({
         const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
         if (n && isPipeType(n.type)) {
           const openAxis = n.type.replace("H", "").indexOf("O");
-          if (openAxis === axis) {
-            pipeCount++;
-            if (openAxis !== 2) yValid = false;
-          }
+          if (openAxis === axis) pipeCount++;
         }
       }
     }
     const result = determineCubeOptions(pos, s.blocks);
     const opts: string[] = result.determined ? [result.type] : [...result.options];
-    if (yValid) opts.push("Y");
+    // Y is a leaf: only valid with at most one attached (Z-open) pipe.
+    if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", pos, s.blocks)) opts.push("Y");
     return `${currentType};${pipeCount < 2 ? "1" : "0"};${opts.join(",")}`;
   });
   const selectedCubeSlotInfo = (() => {
@@ -598,6 +612,10 @@ export function Toolbar({
             key="port"
             onPointerDown={() => {
               if (mode !== "edit") return;
+              // With a single block/port selected, defer to onClick (which
+              // replaces the selection in place); calling setPlacePort here
+              // would clear the selection before the click is handled.
+              if (selectedCubeSlotInfo != null) return;
               setPlacePort(true);
               setPaletteDragging(true);
             }}
@@ -606,6 +624,12 @@ export function Toolbar({
                 // In Keyboard Build mode, clicking Port converts the cursor cube back to a port
                 // (only valid when pipeCount < 2; cycleBlock validates and no-ops otherwise).
                 cycleBlock(null);
+                return;
+              }
+              // Single block/port selected → replace it in place rather than
+              // dropping the selection and arming the placement tool.
+              if (selectedCubeSlotInfo != null && selectedCubeSlotInfo.portAllowed) {
+                cycleSelectedType(1, { kind: "port" });
                 return;
               }
               setPlacePort(true);
@@ -627,12 +651,17 @@ export function Toolbar({
               key={ct}
               onPointerDown={() => {
                 if (mode !== "edit") return;
+                if (selectedCubeSlotInfo != null) return;
                 setCubeType(ct as BlockType);
                 setPaletteDragging(true);
               }}
               onClick={() => {
                 if (mode === "build") {
                   cycleBlock(ct);
+                  return;
+                }
+                if (selectedCubeSlotInfo != null && selectedCubeSlotInfo.validTypes.has(ct)) {
+                  cycleSelectedType(1, { kind: "cube", type: ct });
                   return;
                 }
                 setCubeType(ct as BlockType);
@@ -659,12 +688,17 @@ export function Toolbar({
           <button
             onPointerDown={() => {
               if (mode !== "edit") return;
+              if (selectedCubeSlotInfo != null) return;
               setCubeType("Y");
               setPaletteDragging(true);
             }}
             onClick={() => {
               if (mode === "build") {
                 cycleBlock("Y");
+                return;
+              }
+              if (selectedCubeSlotInfo != null && selectedCubeSlotInfo.validTypes.has("Y")) {
+                cycleSelectedType(1, { kind: "cube", type: "Y" });
                 return;
               }
               setCubeType("Y");
@@ -698,12 +732,17 @@ export function Toolbar({
               key={v}
               onPointerDown={() => {
                 if (mode !== "edit") return;
+                if (selectedPipeInfo != null) return;
                 setPipeVariant(v);
                 setPaletteDragging(true);
               }}
               onClick={() => {
                 if (mode === "build") {
                   cyclePipe(v);
+                  return;
+                }
+                if (selectedPipeInfo != null && selectedPipeInfo.validVariants.has(v)) {
+                  cycleSelectedType(1, { kind: "pipe", variant: v });
                   return;
                 }
                 setPipeVariant(v);
@@ -772,7 +811,81 @@ export function Toolbar({
           />
         </>
       )}
+      <ResizeHandle toolbarRef={toolbarRef} userScale={userScale} setUserScale={setUserScale} />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Resize handle — drag to set the persisted toolbar scale.
+// ---------------------------------------------------------------------------
+// The toolbar is centered (translateX(-50%)) so horizontal drag changes the
+// width symmetrically: a 1px drag at the right edge grows the visible width
+// by 2px. We drive the new scale from the starting natural width so the
+// grabbed corner tracks the cursor.
+function ResizeHandle({
+  toolbarRef,
+  userScale,
+  setUserScale,
+}: {
+  toolbarRef: React.RefObject<HTMLDivElement | null>;
+  userScale: number;
+  setUserScale: (n: number) => void;
+}) {
+  const dragRef = useRef<{ startX: number; startScale: number; natural: number } | null>(null);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const node = toolbarRef.current;
+    if (!node) return;
+    const natural = node.offsetWidth;
+    if (natural === 0) return;
+    dragRef.current = { startX: e.clientX, startScale: userScale, natural };
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const delta = (e.clientX - d.startX) * 2;
+    const next = d.startScale + delta / d.natural;
+    const clamped = Math.min(TOOLBAR_USER_SCALE_MAX, Math.max(TOOLBAR_USER_SCALE_MIN, next));
+    setUserScale(clamped);
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+  };
+
+  const onDoubleClick = () => setUserScale(1);
+
+  return (
+    <div
+      role="separator"
+      aria-label="Resize toolbar"
+      title="Drag to resize toolbar (double-click to reset)"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onDoubleClick={onDoubleClick}
+      style={{
+        position: "absolute",
+        right: 0,
+        bottom: 0,
+        width: 14,
+        height: 14,
+        cursor: "nwse-resize",
+        touchAction: "none",
+        // Diagonal grip lines.
+        backgroundImage:
+          "linear-gradient(135deg, transparent 0 6px, #999 6px 7px, transparent 7px 10px, #999 10px 11px, transparent 11px)",
+        borderBottomRightRadius: 8,
+      }}
+    />
   );
 }
 

@@ -21,6 +21,16 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
     const hints: Array<readonly [string, string]> = [
       ["Click block", "Delete"],
       [`Release ${bindingToLabel(b.holdToDelete)}`, "Exit delete"],
+    ];
+    return <HintBar hints={hints} trailing={<CustomizeLink onClick={onCustomize} />} />;
+  }
+
+  // Placing-paste mode: minimal hint set — commit, cancel, undo.
+  if (armedTool === "paste") {
+    const hints: Array<readonly [string, string]> = [
+      ["Click", "Paste here"],
+      [bindingToLabel(b.paste), "Paste here"],
+      [bindingToLabel(b.clearSelection), "Cancel"],
       [bindingToLabel(b.undo), "Undo"],
     ];
     return <HintBar hints={hints} trailing={<CustomizeLink onClick={onCustomize} />} />;
@@ -41,10 +51,10 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
       [bindingToLabel(b.flipColors), "Flip colors"],
       [`${bindingToLabel(b.rotateCcw)}/${bindingToLabel(b.rotateCw)}`, "Rotate CCW/CW (Z)"],
       [`Hold ${bindingToLabel(b.holdToDelete)}`, "Click-to-delete"],
-      [bindingToLabel(b.undo), "Undo"],
-      [bindingToLabel(b.redo), "Redo"],
       [bindingToLabel(b.deleteSelection), "Delete selected"],
       [bindingToLabel(b.clearSelection), "Clear selection"],
+      [bindingToLabel(b.copy), "Copy selection"],
+      [bindingToLabel(b.paste), "Paste"],
     );
     if (hasSelection) {
       hints.push(["↑/↓", "Nudge z ±3"]);
@@ -62,12 +72,14 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
     hints.push(
       ["Click", placeLabel],
       ["Drag", dragRotates ? "Rotate" : "Pan"],
-      ...(isIso ? [] : [["Shift+Drag", dragRotates ? "Pan" : "Rotate"] as const]),
+      ...(isIso
+        ? []
+        : dragRotates
+          ? [["Shift+Drag", "Pan"] as const]
+          : [[`${altKey}Drag`, "Rotate"] as const]),
       ["Scroll", "Zoom"],
       [`Hold ${bindingToLabel(b.holdToDelete)}`, "Click-to-delete"],
       [bindingToLabel(b.clearSelection), "Disarm (→ pointer)"],
-      [bindingToLabel(b.undo), "Undo"],
-      [bindingToLabel(b.redo), "Redo"],
     );
     if (isIso) {
       hints.push([

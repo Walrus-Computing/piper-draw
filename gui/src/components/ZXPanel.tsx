@@ -239,7 +239,12 @@ function ZXSvg({ result }: { result: ZXResult }) {
   );
 }
 
-export function ZXPanel() {
+export function ZXPanel({
+  controlsRef,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  controlsRef: React.RefObject<any>;
+}) {
   const open = useBlockStore((s) => s.zxPanelOpen);
   const flowsOpen = useBlockStore((s) => s.flowsPanelOpen);
   const blocks = useBlockStore((s) => s.blocks);
@@ -390,7 +395,7 @@ export function ZXPanel() {
       </header>
 
       <div style={{ padding: "10px 12px", overflowY: "auto", flex: 1 }}>
-        <PortsTable />
+        <PortsTable controlsRef={controlsRef} />
 
         <hr style={{ margin: "12px 0", border: "none", borderTop: "1px solid #eee" }} />
 

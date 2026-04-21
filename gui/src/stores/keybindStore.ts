@@ -30,7 +30,9 @@ export type EditAction =
   | "stepForward"
   | "stepBack"
   | "cyclePrev"
-  | "cycleNext";
+  | "cycleNext"
+  | "copy"
+  | "paste";
 
 export type ActionForMode = {
   build: BuildAction;
@@ -56,6 +58,7 @@ export const ACTIONS: { [M in Mode]: readonly ActionForMode[M][] } = {
     "selectAll", "deleteSelection", "clearSelection", "flipColors", "holdToDelete",
     "rotateCcw", "rotateCw",
     "undo", "redo", "stepForward", "stepBack", "cyclePrev", "cycleNext",
+    "copy", "paste",
   ],
 };
 
@@ -87,6 +90,8 @@ export const ACTION_LABELS: { [M in Mode]: Record<ActionForMode[M], string> } = 
     stepBack: "Step back (iso)",
     cyclePrev: "Previous block / pipe",
     cycleNext: "Next block / pipe",
+    copy: "Copy selection",
+    paste: "Paste",
   },
 };
 
@@ -118,6 +123,8 @@ export const DEFAULT_BINDINGS: { [M in Mode]: Record<ActionForMode[M], KeyBindin
     stepBack: { key: "arrowdown" },
     cyclePrev: { key: "arrowleft" },
     cycleNext: { key: "arrowright" },
+    copy: { key: "c", ctrl: true },
+    paste: { key: "v", ctrl: true },
   },
 };
 
@@ -261,7 +268,7 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: "piper-draw-keybinds",
-      version: 11,
+      version: 12,
       migrate: () => ({ bindings: cloneDefaults() }),
       merge: (persisted, current) => {
         const p = persisted as Partial<KeybindState>;

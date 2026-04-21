@@ -86,11 +86,11 @@ export const PLACEABLE_ORDER: ReadonlyArray<Placeable> = [
  * pointer tool is armed (no placeable selected).
  */
 export function currentPlaceableIndex(
-  armedTool: "pointer" | "cube" | "pipe" | "port",
+  armedTool: "pointer" | "cube" | "pipe" | "port" | "paste",
   cubeType: BlockType,
   pipeVariant: PipeVariant | null,
 ): number {
-  if (armedTool === "pointer") return -1;
+  if (armedTool === "pointer" || armedTool === "paste") return -1;
   if (armedTool === "port") return 0;
   if (armedTool === "pipe") {
     if (!pipeVariant) return -1;

@@ -1,4 +1,4 @@
-import { useRef, useLayoutEffect, useMemo, useEffect } from "react";
+import { useRef, useLayoutEffect, useMemo, useEffect, useState } from "react";
 import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
@@ -106,16 +106,15 @@ function TypedInstances({
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const blocksRef = useRef(blocks);
-  blocksRef.current = blocks;
-  const capacityRef = useRef(MIN_CAPACITY);
+  useEffect(() => {
+    blocksRef.current = blocks;
+  });
+  const [capacity, setCapacity] = useState(MIN_CAPACITY);
 
   // Double capacity when needed; never shrink (avoids thrashing remounts)
-  if (blocks.length > capacityRef.current) {
-    while (capacityRef.current < blocks.length) {
-      capacityRef.current *= 2;
-    }
-  }
-  const maxCount = capacityRef.current;
+  let maxCount = capacity;
+  while (maxCount < blocks.length) maxCount *= 2;
+  if (maxCount !== capacity) setCapacity(maxCount);
 
   const pipe = isPipeType(cubeType);
   const geometry = getCachedGeometry(cubeType, hiddenFaces);
@@ -232,6 +231,10 @@ function TypedInstances({
     ) {
       // Read the actual block type from the instance, not the group prop
       store.setHoveredGridPos(b[e.instanceId].pos, b[e.instanceId].type);
+    } else if (store.mode === "edit" && armed === "paste") {
+      // Paste mode: track the hovered block's cube-slot so PasteGhost keeps
+      // following the cursor even when it's over scene geometry.
+      store.setHoveredGridPos(b[e.instanceId].pos);
     } else if (store.mode === "edit" && armed === "port") {
       // Port-conversion tool: no ghost preview on existing blocks — the click
       // either removes the cube or does nothing (and sets a warning).
@@ -322,6 +325,11 @@ function TypedInstances({
     const armed = store.armedTool;
     if (armed === "pointer") {
       store.selectBlock(b[e.instanceId].pos, e.nativeEvent.shiftKey);
+      return;
+    }
+    if (armed === "paste") {
+      // Paste mode: click commits the clipboard at the hovered cell.
+      store.commitPaste();
       return;
     }
     {
