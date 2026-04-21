@@ -612,6 +612,7 @@ function CircuitSection({
           Download .qasm (pyzx)
         </button>
       </div>
+      <VerificationBadge circuit={circuit} />
       <CircuitDiagram circuit={circuit} />
       <pre
         style={{
@@ -629,6 +630,56 @@ function CircuitSection({
       >
         {circuit.qasm}
       </pre>
+    </div>
+  );
+}
+
+function VerificationBadge({ circuit }: { circuit: ZXCircuit }) {
+  // Semantic-equivalence check between the extracted+optimized circuit and
+  // the pre-simplification ZX graph. Shown inline under the circuit header.
+  let text: string;
+  let bg: string;
+  let border: string;
+  let color: string;
+  let title: string | undefined;
+  if (circuit.verified === true) {
+    text = "✓ Verified equivalent to original ZX graph";
+    bg = "#e7f7ec";
+    border = "#b5e0c1";
+    color = "#166534";
+    title =
+      "pyzx.compare_tensors confirmed the optimized circuit represents " +
+      "the same linear map as the input graph.";
+  } else if (circuit.verified === false) {
+    text = "✗ Verification failed — circuit differs from original graph";
+    bg = "#fbeaea";
+    border = "#f4c2c2";
+    color = "#b00";
+    title =
+      "pyzx.compare_tensors found the optimized circuit is NOT equivalent " +
+      "to the input graph. This indicates a bug in extraction or optimization.";
+  } else {
+    text = circuit.verification_error
+      ? `Verification skipped: ${circuit.verification_error}`
+      : "Verification skipped";
+    bg = "#f6f6f6";
+    border = "#ddd";
+    color = "#666";
+  }
+  return (
+    <div
+      title={title}
+      style={{
+        marginBottom: 6,
+        padding: "4px 8px",
+        borderRadius: 4,
+        background: bg,
+        border: `1px solid ${border}`,
+        color,
+        fontSize: 11,
+      }}
+    >
+      {text}
     </div>
   );
 }

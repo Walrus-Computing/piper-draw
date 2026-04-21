@@ -12,6 +12,11 @@ from tqec.utils.exceptions import TQECError
 
 app = FastAPI()
 
+# Cap on the circuit size we'll run `pyzx.compare_tensors` against for the
+# extracted-circuit ≡ original-graph check. Tensor contraction is exponential
+# in qubit count, so beyond ~6 qubits the check becomes prohibitively slow.
+VERIFY_QUBIT_LIMIT = 6
+
 
 def _port_key(tqec_pos: tuple[int, int, int]) -> str:
     """Key used to match a port position to a caller-supplied label."""
@@ -117,6 +122,11 @@ class ZXCircuit(BaseModel):
     gate_count: int
     qasm: str
     gates: list[ZXGate]
+    # Semantic-equality check of the extracted+optimized circuit against the
+    # pre-simplification ZX graph. `None` means the check was skipped (too many
+    # qubits, or the check errored — see `verification_error`).
+    verified: bool | None = None
+    verification_error: str | None = None
 
 
 class ZXResponse(BaseModel):
@@ -411,6 +421,10 @@ async def zx(req: ZXRequest) -> ZXResponse:
     if output_vs:
         pzx.g.set_outputs(tuple(output_vs))
 
+    # Snapshot the pre-simplification graph so we can compare it to the
+    # extracted+optimized circuit for semantic equivalence.
+    original_g = pzx.g.copy() if req.extract else None
+
     if req.simplify:
         pyzx.simplify.full_reduce(pzx.g)
         # normalize() places inputs/outputs at sensible (qubit, row) — required
@@ -419,6 +433,12 @@ async def zx(req: ZXRequest) -> ZXResponse:
 
     circuit_info: ZXCircuit | None = None
     circuit_error: str | None = None
+    # By default the displayed ZX is pzx.g with the existing label mapping; when
+    # extraction succeeds we swap in the graph derived from the optimized circuit
+    # so the diagram matches the gate list.
+    display_graph = pzx.g
+    display_label_map = port_label_by_vertex
+    use_circuit_layout = req.simplify
     if req.extract:
         if not req.simplify:
             circuit_error = "Circuit extraction requires simplification (full_reduce)."
@@ -437,22 +457,66 @@ async def zx(req: ZXRequest) -> ZXResponse:
                 c = pyzx.optimize.basic_optimization(c.to_basic_gates())
                 # Already in basic gates, but to_basic_gates is idempotent.
                 basic = c.to_basic_gates()
+
+                # Rebuild the displayed ZX from the optimized circuit so the
+                # rendered diagram matches the gate list below.
+                c_graph = c.to_graph()
+
+                # Carry port labels over to the circuit graph's boundaries by
+                # qubit index: circuit qubit i was originally input_vs[i] /
+                # output_vs[i] (pyzx preserves the set_inputs/set_outputs order).
+                extract_label_map: dict[int, str] = {}
+                c_inputs = list(c_graph.inputs())
+                c_outputs = list(c_graph.outputs())
+                for qi, v in enumerate(c_inputs):
+                    if qi < len(input_vs):
+                        lbl = port_label_by_vertex.get(input_vs[qi])
+                        if lbl:
+                            extract_label_map[int(v)] = lbl
+                for qi, v in enumerate(c_outputs):
+                    if qi < len(output_vs):
+                        lbl = port_label_by_vertex.get(output_vs[qi])
+                        if lbl:
+                            extract_label_map[int(v)] = lbl
+
+                # Verify: does the extracted+optimized circuit represent the
+                # same linear map as the pre-simplification graph? Cap at
+                # VERIFY_QUBIT_LIMIT because compare_tensors is exponential.
+                verified: bool | None = None
+                verification_error: str | None = None
+                if c.qubits <= VERIFY_QUBIT_LIMIT and original_g is not None:
+                    try:
+                        verified = bool(pyzx.compare_tensors(original_g, c_graph))
+                    except Exception as ve:
+                        verification_error = f"compare_tensors failed: {ve}"
+                elif c.qubits > VERIFY_QUBIT_LIMIT:
+                    verification_error = (
+                        f"Skipped: {c.qubits} qubits exceeds tensor-comparison "
+                        f"limit of {VERIFY_QUBIT_LIMIT}"
+                    )
+
                 circuit_info = ZXCircuit(
                     qubits=c.qubits,
                     gate_count=len(basic.gates),
                     qasm=c.to_qasm(),
                     gates=[_serialize_gate(g) for g in basic.gates],
+                    verified=verified,
+                    verification_error=verification_error,
                 )
+                display_graph = c_graph
+                display_label_map = extract_label_map
+                use_circuit_layout = True
             except Exception as e:  # pyzx raises various errors; surface them all
                 circuit_error = f"extract_circuit failed: {e}"
 
-    g = pzx.g
+    g = display_graph
     vertices: list[ZXVertex] = []
     for v in g.vertices():
-        if req.simplify:
-            # After full_reduce + normalize the tqec positions no longer map
-            # to surviving vertices; pyzx's (qubit, row) is the meaningful
-            # layout. Project row→x, qubit→-z so time flows horizontally.
+        if use_circuit_layout:
+            # After full_reduce+normalize (or on the extracted circuit graph)
+            # the tqec positions no longer map to surviving vertices; pyzx's
+            # (qubit, row) is the meaningful layout. Project row→x, qubit→-z
+            # so time flows horizontally.
             q = g.qubit(v)
             r = g.row(v)
             pos_list = [float(r), 0.0, -float(q)] if q != -1 and r != -1 else None
@@ -467,7 +531,7 @@ async def zx(req: ZXRequest) -> ZXResponse:
                 kind=_ZX_VERTEX_KIND.get(pyzx.VertexType(g.type(v)), str(g.type(v))),
                 phase=str(g.phase(v)),
                 pos=pos_list,
-                label=port_label_by_vertex.get(int(v)),
+                label=display_label_map.get(int(v)),
             )
         )
 

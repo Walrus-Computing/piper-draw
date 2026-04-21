@@ -545,6 +545,96 @@ class TestZXEndpoint:
         # A well-optimized CNOT collapses to a single CX / CNOT gate.
         assert names in (["CNOT"], ["CX"]), f"expected single CX, got {names}"
 
+    def test_extract_cnot_verified_and_displayed_as_circuit(self):
+        # After extract+basic_optimization on the CNOT template:
+        #   - the displayed ZX graph should be c.to_graph() (the optimized
+        #     circuit's graph), not the pre-extract simplified graph;
+        #   - `verified` should be True (compare_tensors(original, c.to_graph())).
+        import tqec.gallery
+
+        bg = tqec.gallery.cnot()
+        blocks: list[BlockInput] = []
+        for cube in bg.cubes:
+            if cube.is_port:
+                continue
+            blocks.append(
+                BlockInput(
+                    pos=list(_tqec_to_piper_pos(cube.position.as_tuple())),
+                    type=str(cube.kind),
+                )
+            )
+        for pipe in bg.pipes:
+            up = _tqec_to_piper_pos(pipe.u.position.as_tuple())
+            vp = _tqec_to_piper_pos(pipe.v.position.as_tuple())
+            blocks.append(
+                BlockInput(
+                    pos=[(a + b) // 2 for a, b in zip(up, vp)],
+                    type=str(pipe.kind),
+                )
+            )
+        port_labels = [
+            PortLabelInput(
+                pos=list(_tqec_to_piper_pos(c.position.as_tuple())),
+                label=c.label,
+            )
+            for c in bg.cubes
+            if c.is_port
+        ]
+        ports_sorted = sorted(
+            (c for c in bg.cubes if c.is_port), key=lambda c: c.position.z
+        )
+        port_io = {
+            c.label: ("in" if i < 2 else "out") for i, c in enumerate(ports_sorted)
+        }
+
+        result = self._run(
+            ZXRequest(
+                blocks=blocks,
+                port_labels=port_labels,
+                port_io=port_io,
+                simplify=True,
+                extract=True,
+            )
+        )
+        assert result["ok"] is True
+        assert result["circuit"] is not None
+        # Verification should succeed: 2 qubits is well within VERIFY_QUBIT_LIMIT.
+        assert result["circuit"]["verified"] is True, result["circuit"]
+        assert result["circuit"]["verification_error"] is None
+
+        # The displayed graph is the one derived from the optimized circuit,
+        # which for a single CNOT is 6 vertices (2 input boundaries, 2 spiders,
+        # 2 output boundaries). If we were still displaying pzx.g after
+        # full_reduce+normalize we'd see a different (typically larger) vertex
+        # count for the CNOT template.
+        assert len(result["vertices"]) == 6
+        kinds = sorted(v["kind"] for v in result["vertices"])
+        assert kinds == ["BOUNDARY", "BOUNDARY", "BOUNDARY", "BOUNDARY", "X", "Z"]
+
+    def test_extract_preserves_port_labels_on_circuit_graph(self):
+        # When we swap the displayed graph to the extracted circuit, port
+        # labels should still attach to the correct input/output boundaries
+        # (mapped by qubit index, not by original vertex id).
+        result = self._run(
+            ZXRequest(
+                blocks=[
+                    BlockInput(pos=[0, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[-2, 0, 0], type="OXZ"),
+                    BlockInput(pos=[1, 0, 0], type="OXZ"),
+                ],
+                port_labels=[
+                    PortLabelInput(pos=[-3, 0, 0], label="a"),
+                    PortLabelInput(pos=[3, 0, 0], label="b"),
+                ],
+                port_io={"a": "in", "b": "out"},
+                simplify=True,
+                extract=True,
+            )
+        )
+        assert result["ok"] is True
+        labels = {v["label"] for v in result["vertices"] if v["label"]}
+        assert labels == {"a", "b"}
+
     def test_extract_without_outputs_errors(self):
         result = self._run(
             ZXRequest(

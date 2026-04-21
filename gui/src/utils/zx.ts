@@ -29,6 +29,11 @@ export interface ZXCircuit {
   gate_count: number;
   qasm: string;
   gates: ZXGate[];
+  // Semantic-equality check of the extracted+optimized circuit against the
+  // pre-simplification ZX graph. `null` means skipped (too many qubits, or
+  // the check errored — see `verification_error`).
+  verified: boolean | null;
+  verification_error: string | null;
 }
 
 export interface ZXResult {
