@@ -383,10 +383,10 @@ export function FlowsPanel({
                 <option value="out">out</option>
               </select>
               <span
-                title={`(${pos.x}, ${pos.y}, ${pos.z})`}
+                title={`(${pos.x / 3}, ${pos.y / 3}, ${pos.z / 3})`}
                 style={{ color: "#aaa", fontFamily: "monospace", fontSize: 10 }}
               >
-                {pos.x},{pos.y},{pos.z}
+                {pos.x / 3},{pos.y / 3},{pos.z / 3}
               </span>
             </div>
           ))}
