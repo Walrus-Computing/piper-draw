@@ -64,16 +64,17 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
   const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
     const store = useBlockStore.getState();
-    if (store.mode !== "place") return;
+    if (store.mode !== "edit" || store.xHeld) return;
+    if (store.armedTool === "pointer") return;
 
     // The port tool targets existing cubes, not ports — clicking a port is a no-op,
     // so don't render a misleading placement preview.
-    if (store.placePort) {
+    if (store.armedTool === "port") {
       store.setHoveredGridPos(null);
       return;
     }
 
-    if (store.pipeVariant) {
+    if (store.armedTool === "pipe" && store.pipeVariant) {
       // Pipe placement adjacent to a port: use the hovered face normal to compute
       // which adjacent pipe slot to target, mirroring BlockInstances' face logic.
       if (!e.face) {
@@ -121,10 +122,11 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
     e.stopPropagation();
     if (e.delta > 2) return;
     const store = useBlockStore.getState();
-    if (store.mode !== "place") return;
+    if (store.mode !== "edit" || store.xHeld) return;
+    if (store.armedTool === "pointer") return;
     // Port tool: clicking a port is a no-op (it's already a port).
-    if (store.placePort) return;
-    if (store.pipeVariant) {
+    if (store.armedTool === "port") return;
+    if (store.armedTool === "pipe" && store.pipeVariant) {
       if (!e.face) return;
       const resolved = resolvePipeTypeFromFace(pos, PORT_SENTINEL_TYPE, e.face.normal, store.pipeVariant);
       if (!resolved) return;
@@ -196,7 +198,7 @@ function PortSelectionHighlight({ threePos }: { threePos: [number, number, numbe
 }
 
 /**
- * Non-interactive ghost cube (for delete/build modes).
+ * Non-interactive ghost cube (for delete tool / Keyboard Build mode).
  */
 function StaticGhost({ threePos }: { threePos: [number, number, number] }) {
   return (
@@ -219,7 +221,7 @@ function StaticGhost({ threePos }: { threePos: [number, number, number] }) {
  * Renders white semi-transparent ghost cubes ("ports") at open pipe endpoints.
  * - Place mode: hovering shows placement preview; clicking places the block.
  * - Select mode: clicking adds the port to `selectedPortPositions` (shift-click = additive).
- * - Delete/build mode: static ghost, no interaction.
+ * - Delete tool / Keyboard Build mode: static ghost, no interaction.
  */
 export function OpenPipeGhosts() {
   const blocks = useBlockStore((s) => s.blocks);
@@ -227,12 +229,14 @@ export function OpenPipeGhosts() {
   const buildCursor = useBlockStore((s) => s.buildCursor);
   const selectedPortPositions = useBlockStore((s) => s.selectedPortPositions);
   const portPositions = useBlockStore((s) => s.portPositions);
+  const armedTool = useBlockStore((s) => s.armedTool);
+  const xHeld = useBlockStore((s) => s.xHeld);
 
   const pipeEndpoints = useMemo(() => {
     const result: Array<{ key: string; pos: Position3D; threePos: [number, number, number] }> = [];
 
     // Ghost cubes at open pipe endpoints (positions with no block).
-    // In build mode, skip the cursor position — BuildCursor renders it with a pulse.
+    // In Keyboard Build mode, skip the cursor position — BuildCursor renders it with a pulse.
     const cursorKey = buildCursor ? posKey(buildCursor) : null;
     for (const pos of getAllPortPositions(blocks, portPositions)) {
       const key = posKey(pos);
@@ -254,15 +258,20 @@ export function OpenPipeGhosts() {
     pos: Position3D,
     threePos: [number, number, number],
   ) => {
-    if (mode === "place") return <InteractiveGhost key={key} pos={pos} threePos={threePos} />;
-    if (mode === "select") return <SelectablePortGhost key={key} pos={pos} threePos={threePos} />;
+    if (mode === "edit" && !xHeld && armedTool !== "pointer") {
+      return <InteractiveGhost key={key} pos={pos} threePos={threePos} />;
+    }
+    if (mode === "edit" && !xHeld && armedTool === "pointer") {
+      return <SelectablePortGhost key={key} pos={pos} threePos={threePos} />;
+    }
     return <StaticGhost key={key} threePos={threePos} />;
   };
 
+  const showSelection = mode === "edit" && armedTool === "pointer" && !xHeld;
   return (
     <>
       {pipeEndpoints.map(({ key, pos, threePos }) => renderGhost(key, pos, threePos))}
-      {mode === "select" &&
+      {showSelection &&
         pipeEndpoints
           .filter(({ key }) => selectedPortPositions.has(key))
           .map(({ key, threePos }) => (

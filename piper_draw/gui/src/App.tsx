@@ -15,7 +15,7 @@ import { BlockInstances } from "./components/BlockInstances";
 import { GridPlane } from "./components/GridPlane";
 import { GhostBlock } from "./components/GhostBlock";
 import { AxisLabels } from "./components/AxisLabels";
-import { FpsDisplay, FpsSampler } from "./components/FpsCounter";
+import { FpsSampler } from "./components/FpsCounter";
 import { OrientationGizmo } from "./components/OrientationGizmo";
 import { Toolbar } from "./components/Toolbar";
 import { ValidationToast } from "./components/ValidationToast";
@@ -30,10 +30,7 @@ import { FlowsPanel } from "./components/FlowsPanel";
 import { PortLabels3D } from "./components/PortLabels3D";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
 import { BuildModeHints } from "./components/BuildModeHints";
-import { SelectModeHints } from "./components/SelectModeHints";
-import { PlaceModeHints } from "./components/PlaceModeHints";
-import { DeleteModeHints } from "./components/DeleteModeHints";
-import { BuildModeToggles } from "./components/BuildModeToggles";
+import { EditModeHints } from "./components/EditModeHints";
 import { KeybindEditor } from "./components/KeybindEditor";
 import { HelpPanel } from "./components/HelpPanel";
 import { useBlockStore } from "./stores/blockStore";
@@ -44,7 +41,8 @@ import {
   type KeyBinding,
   type Mode,
 } from "./stores/keybindStore";
-import { wasdToBuildDirection, tqecToThree, type Block, type ViewMode } from "./types";
+import { useValidationStore } from "./stores/validationStore";
+import { wasdToBuildDirection, tqecToThree, posKey, type Block, type ViewMode } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
 import { downloadPng } from "./utils/photoExport";
@@ -510,13 +508,13 @@ export default function App() {
           case "cycleBlock": store.cycleBlock(); return;
           case "cyclePipe": store.cyclePipe(); return;
           case "deleteAtCursor": store.deleteAtBuildCursor(); return;
-          case "exitBuild": store.setMode("place"); return;
+          case "exitBuild": store.setMode("edit"); return;
         }
         return;
       }
 
       const action = actionForKey<string>(
-        bindings[mode] as Record<string, KeyBinding>,
+        bindings.edit as Record<string, KeyBinding>,
         key,
         ctrl,
         shift,
@@ -536,10 +534,17 @@ export default function App() {
           }
           return;
         case "clearSelection":
-          if (store.selectedKeys.size > 0) {
+          // Escape: disarm tool first (type → pointer → clear selection).
+          if (store.armedTool !== "pointer") {
+            e.preventDefault();
+            store.setArmedTool("pointer");
+          } else if (store.selectedKeys.size > 0) {
             e.preventDefault();
             store.clearSelection();
           }
+          return;
+        case "holdToDelete":
+          // No-op on keydown; held-state is tracked by the dedicated listener below.
           return;
         case "undo":
           e.preventDefault();
@@ -550,15 +555,15 @@ export default function App() {
           store.redo();
           return;
         case "stepForward":
-          // Skip slice-step in select mode when there's a selection — SelectModePointer
+          // Skip slice-step when the pointer tool has a selection — SelectModePointer
           // handles ↑/↓ as a Z-nudge of the selection.
-          if (store.viewMode.kind === "iso" && !(mode === "select" && store.selectedKeys.size > 0)) {
+          if (store.viewMode.kind === "iso" && !(store.armedTool === "pointer" && store.selectedKeys.size > 0)) {
             e.preventDefault();
             store.stepSlice(3);
           }
           return;
         case "stepBack":
-          if (store.viewMode.kind === "iso" && !(mode === "select" && store.selectedKeys.size > 0)) {
+          if (store.viewMode.kind === "iso" && !(store.armedTool === "pointer" && store.selectedKeys.size > 0)) {
             e.preventDefault();
             store.stepSlice(-3);
           }
@@ -569,10 +574,109 @@ export default function App() {
             store.flipSelected();
           }
           return;
+        case "rotateCcw":
+        case "rotateCw": {
+          if (store.selectedKeys.size === 0) return;
+          e.preventDefault();
+          const hovered = store.hoveredGridPos;
+          const pivotOverride = hovered && store.selectedKeys.has(posKey(hovered)) ? hovered : null;
+          const result = store.rotateSelected(action === "rotateCw" ? "cw" : "ccw", pivotOverride);
+          if (!result.ok) {
+            useValidationStore.getState().reportEphemeralError(`Rotation aborted: ${result.reason}`);
+          }
+          return;
+        }
+        case "cyclePrev":
+        case "cycleNext": {
+          e.preventDefault();
+          const dir = action === "cyclePrev" ? -1 : 1;
+          // With a single selection in edit mode + pointer, cycle the selected
+          // item through its valid toolbar options instead of swapping the
+          // armed type (which would lift the selection).
+          const single =
+            store.mode === "edit" &&
+            store.armedTool === "pointer" &&
+            ((store.selectedKeys.size === 1 && store.selectedPortPositions.size === 0)
+              || (store.selectedKeys.size === 0 && store.selectedPortPositions.size === 1));
+          if (single) store.cycleSelectedType(dir);
+          else store.cycleArmedType(dir);
+          return;
+        }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Drag-from-palette: on toolbar button pointerdown, paletteDragging is set
+  // true. The cursor-over-canvas pointermove already updates hoveredGridPos
+  // (via GridPlane). On pointerup, place at that position if valid — using
+  // the same dispatch as GridPlane.handleClick (addPortAt vs addBlock).
+  // Also clear the flag on cancel/blur so a hijacked gesture (e.g. native
+  // drag, alt-tab) can't leave the next click stuck placing blocks.
+  useEffect(() => {
+    const onUp = () => {
+      const s = useBlockStore.getState();
+      if (!s.paletteDragging) return;
+      s.setPaletteDragging(false);
+      const pos = s.hoveredGridPos;
+      if (!pos || s.hoveredInvalid) return;
+      if (s.armedTool === "port") s.addPortAt(pos);
+      else if (s.armedTool === "cube" || s.armedTool === "pipe") s.addBlock(pos);
+    };
+    const onCancel = () => {
+      const s = useBlockStore.getState();
+      if (s.paletteDragging) s.setPaletteDragging(false);
+    };
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("dragend", onCancel);
+    window.addEventListener("blur", onCancel);
+    return () => {
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("dragend", onCancel);
+      window.removeEventListener("blur", onCancel);
+    };
+  }, []);
+
+  // Hold-to-delete modifier (default X): while held in Drag / Drop mode, clicks
+  // delete the hovered block regardless of the currently armed tool. The
+  // BlockInstances/GhostBlock components read store.xHeld to switch to a
+  // red-preview cursor.
+  useEffect(() => {
+    const matches = (e: KeyboardEvent) => {
+      const binding = useKeybindStore.getState().bindings.edit.holdToDelete;
+      if (!binding) return false;
+      return (
+        e.key.toLowerCase() === binding.key &&
+        !!binding.ctrl === (e.ctrlKey || e.metaKey) &&
+        !!binding.shift === e.shiftKey &&
+        !!binding.alt === e.altKey
+      );
+    };
+    const onDown = (e: KeyboardEvent) => {
+      if (!matches(e)) return;
+      const store = useBlockStore.getState();
+      if (store.mode !== "edit") return;
+      if (store.xHeld) return;
+      store.setXHeld(true);
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (!matches(e)) return;
+      if (useBlockStore.getState().xHeld) useBlockStore.getState().setXHeld(false);
+    };
+    const onBlur = () => {
+      if (useBlockStore.getState().xHeld) useBlockStore.getState().setXHeld(false);
+    };
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+      window.removeEventListener("blur", onBlur);
+    };
   }, []);
 
   useEffect(() => {
@@ -676,6 +780,8 @@ export default function App() {
         }}
         controlsRef={controlsRef}
         toolbarRef={toolbarRef}
+        fpsRef={fpsRef}
+        onOpenKeybindEditor={setKeybindEditorMode}
       />
       <ValidationToast toolbarRef={toolbarRef} controlsRef={controlsRef} />
       <button
@@ -685,8 +791,8 @@ export default function App() {
         title="About piper-draw"
         style={{
           position: "fixed",
-          bottom: 16,
-          left: 16,
+          bottom: 20,
+          left: 20,
           zIndex: 1,
           width: 32,
           height: 32,
@@ -707,29 +813,10 @@ export default function App() {
       </button>
       {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
       <FlowsPanel />
-      <div
-        onPointerDown={(e) => e.stopPropagation()}
-        style={{
-          position: "fixed",
-          top: 10,
-          right: 16,
-          zIndex: 1,
-          background: "rgba(255,255,255,0.9)",
-          padding: "6px 12px",
-          borderRadius: "8px",
-          border: "1px solid #ddd",
-          boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
-        }}
-      >
-        <FpsDisplay spanRef={fpsRef} />
-      </div>
-      <SelectModeHints onCustomize={() => setKeybindEditorMode("select")} />
+      <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />
       <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />
-      <PlaceModeHints onCustomize={() => setKeybindEditorMode("place")} />
-      <DeleteModeHints onCustomize={() => setKeybindEditorMode("delete")} />
-      <BuildModeToggles />
       {keybindEditorMode && (
-        <KeybindEditor mode={keybindEditorMode} onClose={() => setKeybindEditorMode(null)} />
+        <KeybindEditor initialMode={keybindEditorMode} onClose={() => setKeybindEditorMode(null)} />
       )}
       <PlacementWarning toolbarRef={toolbarRef} />
       <Canvas

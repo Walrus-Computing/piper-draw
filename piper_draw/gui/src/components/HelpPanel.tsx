@@ -87,10 +87,16 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
 
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Modes</h4>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
-          <li><b>Place</b> — pick a block or pipe, then click a grid cell to add it.</li>
-          <li><b>Select</b> — click or drag to select blocks; Shift-click to add/remove.</li>
-          <li><b>Delete</b> — click a block to remove it.</li>
-          <li><b>Build</b> — move a cursor with the keyboard to extend from the last block.</li>
+          <li>
+            <b>Drag / Drop</b> — arm a tool in the toolbar to place cubes,
+            pipes, or ports, or use the pointer to click/drag-select blocks
+            (Shift-click to add/remove). Hold the delete modifier to
+            click-to-delete.
+          </li>
+          <li>
+            <b>Keyboard Build</b> — move a cursor with the keyboard to extend
+            from the last block.
+          </li>
         </ul>
 
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Tips</h4>

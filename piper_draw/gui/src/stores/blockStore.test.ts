@@ -10,15 +10,19 @@ function reset() {
     hiddenFaces: new Map(),
     history: [],
     future: [],
-    mode: "place",
+    mode: "edit",
     cubeType: "XZZ",
     pipeVariant: null,
-    placePort: false,
+    armedTool: "cube",
+    xHeld: false,
     portWarning: null,
     hoveredGridPos: null,
     hoveredBlockType: null,
     hoveredInvalid: false,
     selectedKeys: new Set(),
+    selectedPortPositions: new Set(),
+    portPositions: new Set(),
+    selectionPivot: null,
     undeterminedCubes: new Map(),
     freeBuild: false,
   });
@@ -420,29 +424,27 @@ describe("blockStore", () => {
   });
 
   describe("setPlacePort", () => {
-    it("clears pipeVariant when turned on", () => {
-      useBlockStore.setState({ pipeVariant: "ZX" });
+    it("arms the port tool when turned on", () => {
       useBlockStore.getState().setPlacePort(true);
-      expect(useBlockStore.getState().placePort).toBe(true);
-      expect(useBlockStore.getState().pipeVariant).toBeNull();
+      expect(useBlockStore.getState().armedTool).toBe("port");
     });
 
-    it("is cleared by setCubeType", () => {
+    it("is superseded by setCubeType", () => {
       useBlockStore.getState().setPlacePort(true);
       useBlockStore.getState().setCubeType("ZXZ");
-      expect(useBlockStore.getState().placePort).toBe(false);
+      expect(useBlockStore.getState().armedTool).toBe("cube");
     });
 
-    it("is cleared by setPipeVariant", () => {
+    it("is superseded by setPipeVariant", () => {
       useBlockStore.getState().setPlacePort(true);
       useBlockStore.getState().setPipeVariant("ZX");
-      expect(useBlockStore.getState().placePort).toBe(false);
+      expect(useBlockStore.getState().armedTool).toBe("pipe");
     });
 
-    it("is cleared when leaving place mode", () => {
+    it("disarms back to pointer when turned off", () => {
       useBlockStore.getState().setPlacePort(true);
-      useBlockStore.getState().setMode("delete");
-      expect(useBlockStore.getState().placePort).toBe(false);
+      useBlockStore.getState().setPlacePort(false);
+      expect(useBlockStore.getState().armedTool).toBe("pointer");
     });
   });
 
@@ -528,20 +530,187 @@ describe("blockStore", () => {
     });
   });
 
-  describe("setMode clears selection", () => {
-    it("clears selection when switching to place mode", () => {
+  describe("rotateSelected", () => {
+    it("rotates a single cube in place and updates its type (CCW)", () => {
+      useBlockStore.setState({ cubeType: "XZZ" });
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
-      useBlockStore.setState({ mode: "select" });
+      useBlockStore.getState().selectAll();
+      const result = useBlockStore.getState().rotateSelected("ccw");
+      expect(result).toEqual({ ok: true });
+      expect(useBlockStore.getState().blocks.size).toBe(1);
+      const b = useBlockStore.getState().blocks.get("0,0,0");
+      expect(b?.type).toBe("ZXZ");
+    });
+
+    it("rotates a line of cube → pipe → cube together around their bbox center", () => {
+      useBlockStore.setState({ cubeType: "ZZX", freeBuild: true });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      const result = useBlockStore.getState().rotateSelected("ccw");
+      expect(result).toEqual({ ok: true });
+      const blocks = useBlockStore.getState().blocks;
+      // bbox center (1.5, 0, 0) → snaps to (3, 0, 0). Rotating CCW around (3,0,0):
+      //   (0,0,0) → (3,-3,0); (3,0,0) → (3,0,0); (1,0,0) → (3,-2,0).
+      expect(blocks.has("3,-3,0")).toBe(true);
+      expect(blocks.has("3,0,0")).toBe(true);
+      expect(blocks.has("3,-2,0")).toBe(true);
+      // The pipe is now Y-axis at (3,-2,0).
+      expect(blocks.get("3,-2,0")?.type).toBe("ZOX");
+    });
+
+    it("CCW then CW returns to original state", () => {
+      useBlockStore.setState({ cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().rotateSelected("ccw");
+      useBlockStore.getState().rotateSelected("cw");
+      const blocks = useBlockStore.getState().blocks;
+      expect(blocks.size).toBe(2);
+      expect(blocks.get("0,0,0")?.type).toBe("XZZ");
+      expect(blocks.get("3,0,0")?.type).toBe("XZZ");
+    });
+
+    it("four CCW rotations is identity (even with off-center bbox, thanks to pivot caching)", () => {
+      // Pivot is cached after the first rotation, so subsequent rotations use
+      // the same pivot. This means 4×CCW returns to identity even when the
+      // initial bbox center is not cube-grid-aligned.
+      useBlockStore.setState({ cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 3, z: 0 });
+      useBlockStore.getState().selectAll();
+      for (let i = 0; i < 4; i++) useBlockStore.getState().rotateSelected("ccw");
+      const blocks = useBlockStore.getState().blocks;
+      expect(blocks.size).toBe(2);
+      expect(blocks.get("0,0,0")?.type).toBe("XZZ");
+      expect(blocks.get("3,3,0")?.type).toBe("XZZ");
+    });
+
+    it("clears cached pivot when selection changes", () => {
+      useBlockStore.setState({ cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 3, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().rotateSelected("ccw");
+      expect(useBlockStore.getState().selectionPivot).not.toBeNull();
+      useBlockStore.getState().clearSelection();
+      expect(useBlockStore.getState().selectionPivot).toBeNull();
+    });
+
+    it("aborts on collision with a non-selected block and leaves state intact", () => {
+      useBlockStore.setState({ cubeType: "XZZ" });
+      // Selected block rotates from (3,0,0) to (0,3,0) around (0,0,0)…
+      // …but we'll put a non-selected block at (0,3,0) to block it.
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 0, y: 3, z: 0 });
+      // Select just the first two cubes (selection bbox (0..3, 0, 0), center (1.5,0)
+      // → snap (3,0,0); rotating (0,0,0) around (3,0,0) CCW → (3,-3,0).
+      // That's empty so no collision. Try a different setup.
+      const s = useBlockStore.getState();
+      s.selectBlock({ x: 0, y: 0, z: 0 }, false);
+      s.selectBlock({ x: 3, y: 0, z: 0 }, true);
+      // Manually populate a collision: rotated (3,0,0) around (3,0,0) stays (3,0,0) -> fine.
+      // rotated (0,0,0) around (3,0,0) CCW → (3,-3,0). Add a blocker there.
+      s.clearSelection();
+      s.addBlock({ x: 3, y: -3, z: 0 });
+      s.selectBlock({ x: 0, y: 0, z: 0 }, false);
+      s.selectBlock({ x: 3, y: 0, z: 0 }, true);
+      const blocksBefore = new Map(useBlockStore.getState().blocks);
+      const result = useBlockStore.getState().rotateSelected("ccw");
+      expect(result.ok).toBe(false);
+      // State unchanged
+      const blocksAfter = useBlockStore.getState().blocks;
+      expect(blocksAfter.size).toBe(blocksBefore.size);
+      for (const [k, v] of blocksBefore) expect(blocksAfter.get(k)).toEqual(v);
+    });
+
+    it("rotates a Y block and keeps its type", () => {
+      useBlockStore.setState({ cubeType: "Y" });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      const result = useBlockStore.getState().rotateSelected("ccw");
+      expect(result).toEqual({ ok: true });
+      const blocks = useBlockStore.getState().blocks;
+      // Single-block selection uses its own pos as pivot → stays in place.
+      expect(blocks.get("3,0,0")?.type).toBe("Y");
+    });
+
+    it("undo after rotate restores positions and types", () => {
+      useBlockStore.setState({ cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().rotateSelected("ccw");
+      useBlockStore.getState().undo();
+      const blocks = useBlockStore.getState().blocks;
+      expect(blocks.size).toBe(2);
+      expect(blocks.get("0,0,0")?.type).toBe("XZZ");
+      expect(blocks.get("3,0,0")?.type).toBe("XZZ");
+    });
+
+    it("redo after undo re-applies the rotation", () => {
+      useBlockStore.setState({ cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().rotateSelected("ccw");
+      const afterRotate = new Map(useBlockStore.getState().blocks);
+      useBlockStore.getState().undo();
+      useBlockStore.getState().redo();
+      const blocks = useBlockStore.getState().blocks;
+      expect(blocks.size).toBe(afterRotate.size);
+      for (const [k, v] of afterRotate) expect(blocks.get(k)).toEqual(v);
+    });
+
+    it("pivot override keeps the override block in place", () => {
+      useBlockStore.setState({ cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      // Use (0,0,0) as override pivot; (3,0,0) should rotate to (0,3,0).
+      const result = useBlockStore.getState().rotateSelected("ccw", { x: 0, y: 0, z: 0 });
+      expect(result).toEqual({ ok: true });
+      const blocks = useBlockStore.getState().blocks;
+      expect(blocks.has("0,0,0")).toBe(true);
+      expect(blocks.has("0,3,0")).toBe(true);
+    });
+
+    it("selection follows rotated blocks", () => {
+      useBlockStore.setState({ cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().rotateSelected("ccw");
+      // Single cube pivots on itself — new key is the same.
+      expect(useBlockStore.getState().selectedKeys.has("0,0,0")).toBe(true);
+    });
+
+    it("is a no-op when nothing is selected", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      const histBefore = useBlockStore.getState().history.length;
+      const result = useBlockStore.getState().rotateSelected("ccw");
+      expect(result).toEqual({ ok: true });
+      expect(useBlockStore.getState().history.length).toBe(histBefore);
+    });
+  });
+
+  describe("setMode clears selection", () => {
+    it("clears selection when switching from edit to build", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
-      useBlockStore.getState().setMode("place");
+      expect(useBlockStore.getState().selectedKeys.size).toBe(1);
+      useBlockStore.getState().setMode("build");
       expect(useBlockStore.getState().selectedKeys.size).toBe(0);
     });
 
-    it("clears selection when switching to delete mode", () => {
+    it("clears selection when arming a placement tool from pointer", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
-      useBlockStore.setState({ mode: "select" });
       useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
-      useBlockStore.getState().setMode("delete");
+      expect(useBlockStore.getState().selectedKeys.size).toBe(1);
+      useBlockStore.getState().setCubeType("XZZ");
       expect(useBlockStore.getState().selectedKeys.size).toBe(0);
     });
   });
@@ -672,6 +841,68 @@ describe("blockStore", () => {
     });
   });
 
+  describe("insertBlocks", () => {
+    it("offsets incoming blocks past the existing scene on +X and selects them", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      const incoming = new Map([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "ZXZ" as const }],
+        ["3,0,0", { pos: { x: 3, y: 0, z: 0 }, type: "ZXZ" as const }],
+      ]);
+      useBlockStore.getState().insertBlocks(incoming);
+      const s = useBlockStore.getState();
+      // Existing block still present, new blocks appear past x=0 with a +3 gap
+      // (existingMaxX=0, incomingMinX=0, delta = ceil((0+3-0)/3)*3 = 3)
+      expect(s.blocks.has("0,0,0")).toBe(true);
+      expect(s.blocks.get("0,0,0")?.type).toBe("XZZ");
+      expect(s.blocks.get("3,0,0")?.type).toBe("ZXZ");
+      expect(s.blocks.get("6,0,0")?.type).toBe("ZXZ");
+      expect(s.selectedKeys.has("3,0,0")).toBe(true);
+      expect(s.selectedKeys.has("6,0,0")).toBe(true);
+      expect(s.selectedKeys.has("0,0,0")).toBe(false);
+    });
+
+    it("loads at parsed positions when the scene is empty", () => {
+      const incoming = new Map([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "ZXZ" as const }],
+        ["3,0,0", { pos: { x: 3, y: 0, z: 0 }, type: "ZXZ" as const }],
+      ]);
+      useBlockStore.getState().insertBlocks(incoming);
+      const s = useBlockStore.getState();
+      expect(s.blocks.size).toBe(2);
+      expect(s.blocks.get("0,0,0")?.type).toBe("ZXZ");
+      expect(s.selectedKeys.has("0,0,0")).toBe(true);
+      expect(s.selectedKeys.has("3,0,0")).toBe(true);
+    });
+
+    it("switches to edit/pointer so the selection is immediately usable", () => {
+      useBlockStore.setState({ mode: "build", armedTool: "cube" });
+      const incoming = new Map([["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "ZXZ" as const }]]);
+      useBlockStore.getState().insertBlocks(incoming);
+      const s = useBlockStore.getState();
+      expect(s.mode).toBe("edit");
+      expect(s.armedTool).toBe("pointer");
+    });
+
+    it("can be undone to restore the pre-insert scene", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      const incoming = new Map([["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "ZXZ" as const }]]);
+      useBlockStore.getState().insertBlocks(incoming);
+      expect(useBlockStore.getState().blocks.size).toBe(2);
+      useBlockStore.getState().undo();
+      const s = useBlockStore.getState();
+      expect(s.blocks.size).toBe(1);
+      expect(s.blocks.has("0,0,0")).toBe(true);
+      expect(s.blocks.get("0,0,0")?.type).toBe("XZZ");
+    });
+
+    it("is a no-op when incoming is empty", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      const histBefore = useBlockStore.getState().history.length;
+      useBlockStore.getState().insertBlocks(new Map());
+      expect(useBlockStore.getState().history.length).toBe(histBefore);
+    });
+  });
+
   describe("moveSelection", () => {
     function selectAllCurrent() {
       const s = useBlockStore.getState();
@@ -786,6 +1017,109 @@ describe("blockStore", () => {
       expect(ok).toBe(true);
       expect(useBlockStore.getState().blocks.has("0,0,3")).toBe(true);
       expect(useBlockStore.getState().selectedKeys.has("0,0,3")).toBe(true);
+    });
+  });
+
+  describe("cycleArmedType", () => {
+    it("walks the full PLACEABLE_ORDER (Port → cubes → Y → pipes → wrap)", () => {
+      const s = useBlockStore.getState();
+      // Start at Port
+      s.setPlacePort(true);
+      expect(useBlockStore.getState().armedTool).toBe("port");
+
+      // Right through all 6 cubes
+      const cubes = ["XZZ", "ZXZ", "ZXX", "XXZ", "ZZX", "XZX"];
+      for (const ct of cubes) {
+        useBlockStore.getState().cycleArmedType(1);
+        const st = useBlockStore.getState();
+        expect(st.armedTool).toBe("cube");
+        expect(st.cubeType).toBe(ct);
+      }
+
+      // → Y
+      useBlockStore.getState().cycleArmedType(1);
+      let st = useBlockStore.getState();
+      expect(st.armedTool).toBe("cube");
+      expect(st.cubeType).toBe("Y");
+
+      // → 4 pipes
+      const pipes = ["ZX", "XZ", "ZXH", "XZH"] as const;
+      for (const v of pipes) {
+        useBlockStore.getState().cycleArmedType(1);
+        st = useBlockStore.getState();
+        expect(st.armedTool).toBe("pipe");
+        expect(st.pipeVariant).toBe(v);
+      }
+
+      // → wrap back to Port
+      useBlockStore.getState().cycleArmedType(1);
+      expect(useBlockStore.getState().armedTool).toBe("port");
+    });
+
+    it("ArrowLeft from Port wraps to last pipe (XZH)", () => {
+      useBlockStore.getState().setPlacePort(true);
+      useBlockStore.getState().cycleArmedType(-1);
+      const st = useBlockStore.getState();
+      expect(st.armedTool).toBe("pipe");
+      expect(st.pipeVariant).toBe("XZH");
+    });
+
+    it("from pointer, ArrowRight arms Port and ArrowLeft arms last pipe", () => {
+      useBlockStore.getState().setArmedTool("pointer");
+      useBlockStore.getState().cycleArmedType(1);
+      expect(useBlockStore.getState().armedTool).toBe("port");
+
+      useBlockStore.getState().setArmedTool("pointer");
+      useBlockStore.getState().cycleArmedType(-1);
+      const st = useBlockStore.getState();
+      expect(st.armedTool).toBe("pipe");
+      expect(st.pipeVariant).toBe("XZH");
+    });
+
+    it("does nothing in Keyboard Build mode", () => {
+      useBlockStore.setState({ mode: "build", armedTool: "cube", cubeType: "XZZ", pipeVariant: null });
+      useBlockStore.getState().cycleArmedType(1);
+      const st = useBlockStore.getState();
+      expect(st.armedTool).toBe("cube");
+      expect(st.cubeType).toBe("XZZ");
+    });
+  });
+
+  describe("buildMove from an empty origin", () => {
+    it("leaves the origin slot empty (no cube placed at the start position)", () => {
+      useBlockStore.setState({
+        mode: "build",
+        buildCursor: { x: 0, y: 0, z: 0 },
+        buildHistory: [],
+      });
+      const ok = useBlockStore.getState().buildMove({ tqecAxis: 0, sign: 1 });
+      expect(ok).toBe(true);
+      const s = useBlockStore.getState();
+      // Pipe placed between origin and dest; neither endpoint holds a cube.
+      expect(s.blocks.has("1,0,0")).toBe(true);
+      expect(s.blocks.has("0,0,0")).toBe(false);
+      expect(s.blocks.has("3,0,0")).toBe(false);
+      // Cursor advances to the destination slot.
+      expect(s.buildCursor).toEqual({ x: 3, y: 0, z: 0 });
+    });
+
+    it("promotes the origin port to a cube once a second pipe attaches", () => {
+      useBlockStore.setState({
+        mode: "build",
+        buildCursor: { x: 0, y: 0, z: 0 },
+        buildHistory: [],
+      });
+      // First step: +X. Origin stays a port.
+      useBlockStore.getState().buildMove({ tqecAxis: 0, sign: 1 });
+      expect(useBlockStore.getState().blocks.has("0,0,0")).toBe(false);
+
+      // Move cursor back to the origin port and build along +Y — now the
+      // origin has two attached pipes and should auto-promote to a cube.
+      useBlockStore.setState({ buildCursor: { x: 0, y: 0, z: 0 } });
+      useBlockStore.getState().buildMove({ tqecAxis: 1, sign: 1 });
+      const origin = useBlockStore.getState().blocks.get("0,0,0");
+      expect(origin).toBeDefined();
+      expect(origin!.type).not.toMatch(/O/); // cube, not pipe
     });
   });
 });

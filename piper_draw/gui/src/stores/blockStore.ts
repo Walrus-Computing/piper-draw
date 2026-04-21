@@ -31,13 +31,18 @@ import {
   CUBE_TYPES,
   PIPE_VARIANTS,
   VARIANT_AXIS_MAP,
+  PIPE_TYPE_TO_VARIANT,
   toggleHadamard,
   swapPipeVariant,
   traversedPipeKey,
   flipBlockType,
+  PLACEABLE_ORDER,
+  currentPlaceableIndex,
 } from "../types";
+import { rotateBlockAroundZ } from "../utils/blockRotation";
 
-export type Mode = "place" | "delete" | "select" | "build";
+export type Mode = "edit" | "build";
+export type ArmedTool = "pointer" | "cube" | "pipe" | "port";
 
 const MAX_HISTORY = 100;
 
@@ -103,7 +108,13 @@ type UndoCommand =
   | { kind: "add-port"; key: string }
   | { kind: "remove-port"; key: string }
   | { kind: "bulk-replace"; entries: Array<{ key: string; oldBlock: Block; newBlock: Block }>;
-      undeterminedChanges: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> };
+      undeterminedChanges: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> }
+  | { kind: "rotate-selection";
+      entries: Array<{ oldKey: string; oldBlock: Block; newKey: string; newBlock: Block }>;
+      prevSelectedKeys: string[]; nextSelectedKeys: string[] }
+  | { kind: "edit-type-cycle"; key: string; pos: Position3D;
+      oldBlock: Block | null; newBlock: Block | null;
+      oldPortMarker: boolean; newPortMarker: boolean };
 
 interface BlockStore {
   blocks: Map<string, Block>;
@@ -112,13 +123,27 @@ interface BlockStore {
   history: UndoCommand[];
   future: UndoCommand[];
   mode: Mode;
+  /**
+   * The currently armed tool in Drag / Drop mode. "pointer" behaves like the old
+   * select mode (click selects, drag moves/marquees). A type tool ("cube" /
+   * "pipe" / "port") behaves like the old place mode and uses the matching
+   * `cubeType` / `pipeVariant` / port intent.
+   */
+  armedTool: ArmedTool;
+  /**
+   * True while the delete-modifier key (default X) is held. Short-circuits
+   * hover/click handling to preview and perform single-click deletion in
+   * Drag / Drop mode, regardless of the currently armed tool.
+   */
+  xHeld: boolean;
   cubeType: BlockType;
   pipeVariant: PipeVariant | null;
   /**
-   * When true, place-mode clicks on a cube convert it to a port (remove the cube).
-   * Mutually exclusive with `pipeVariant`; setting either tool clears the other.
+   * True between pointerdown on a placeable toolbar button and the
+   * subsequent window-level pointerup. While true, the pointerup handler
+   * places a block at the current hoveredGridPos (drag-from-palette gesture).
    */
-  placePort: boolean;
+  paletteDragging: boolean;
   /**
    * Transient warning message (e.g. "can't convert cube with ≥2 pipes").
    * Cleared automatically on any mode/tool change or after a few seconds.
@@ -139,6 +164,10 @@ interface BlockStore {
    * markers until a cube is placed there or they're promoted.
    */
   portPositions: Set<string>;
+  /** Pivot used by rotateSelected, cached across subsequent rotations of the same
+   * selection so that 4×CCW returns to identity even when the selection bbox is
+   * not cube-grid-aligned. Cleared whenever the selection itself changes. */
+  selectionPivot: Position3D | null;
 
   /**
    * Per-port metadata (label + input/output direction) used by the Stabilizer
@@ -156,7 +185,7 @@ interface BlockStore {
   dragDelta: Position3D | null;
   dragValid: boolean;
 
-  // Build mode state
+  // Keyboard Build mode state
   buildCursor: Position3D | null;
   buildHistory: BuildStep[];
   undeterminedCubes: Map<string, UndeterminedCubeInfo>;
@@ -166,9 +195,21 @@ interface BlockStore {
   lastBuildAxis: number | null;
 
   setMode: (mode: Mode) => void;
+  setArmedTool: (tool: ArmedTool) => void;
+  setXHeld: (held: boolean) => void;
   setCubeType: (cubeType: BlockType) => void;
   setPipeVariant: (variant: PipeVariant) => void;
   setPlacePort: (on: boolean) => void;
+  /** Cycle the armed placeable by ±1 within PLACEABLE_ORDER (Drag / Drop mode only). */
+  cycleArmedType: (dir: -1 | 1) => void;
+  /**
+   * In edit mode with a single cube/port/pipe selected and the pointer tool armed,
+   * cycle the selected item through the toolbar options that remain valid at its
+   * position. Selection is preserved (the selected-indicator follows the new type).
+   * No-op if selection is empty, multi-select, or the only valid option is current.
+   */
+  cycleSelectedType: (dir: -1 | 1) => void;
+  setPaletteDragging: (on: boolean) => void;
   convertBlockToPort: (pos: Position3D) => void;
   clearPortWarning: () => void;
   addPortAt: (pos: Position3D) => void;
@@ -179,6 +220,12 @@ interface BlockStore {
   undo: () => void;
   redo: () => void;
   loadBlocks: (blocks: Map<string, Block>) => void;
+  /**
+   * Merge `blocks` into the current scene, auto-offset along +X so there's no
+   * overlap, and leave every inserted block selected so the user can drag the
+   * group into its final position. Switches to edit/pointer. Undo-safe.
+   */
+  insertBlocks: (blocks: Map<string, Block>) => void;
   hydrateBlocks: (blocks: Map<string, Block>) => void;
   clearAll: () => void;
   canUndo: () => boolean;
@@ -187,6 +234,7 @@ interface BlockStore {
   clearSelection: () => void;
   deleteSelected: () => void;
   flipSelected: () => void;
+  rotateSelected: (direction: "cw" | "ccw", pivotOverride?: Position3D | null) => { ok: true } | { ok: false; reason: string };
   selectAll: () => void;
   selectBlocks: (keys: string[], additive: boolean) => void;
   togglePortSelection: (pos: Position3D, additive: boolean) => void;
@@ -200,7 +248,7 @@ interface BlockStore {
   setDragState: (s: { isDragging: boolean; delta: Position3D | null; valid: boolean }) => void;
   moveSelection: (delta: Position3D) => boolean;
 
-  // Build mode actions
+  // Keyboard Build mode actions
   buildMove: (direction: BuildDirection) => boolean;
   undoBuildStep: () => void;
   cycleBlock: (target?: CubeType | "Y" | null) => void;
@@ -365,10 +413,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   hiddenFaces: new Map(),
   history: [],
   future: [],
-  mode: "place",
+  mode: "edit",
+  armedTool: "cube",
+  xHeld: false,
   cubeType: "XZZ",
   pipeVariant: null,
-  placePort: false,
+  paletteDragging: false,
   portWarning: null,
   hoveredGridPos: null,
   hoveredBlockType: null,
@@ -380,12 +430,13 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   portPositions: new Set(),
   portMeta: new Map(),
   flowsPanelOpen: false,
+  selectionPivot: null,
 
   isDraggingSelection: false,
   dragDelta: null,
   dragValid: true,
 
-  // Build mode state
+  // Keyboard Build mode state
   buildCursor: null,
   buildHistory: [],
   undeterminedCubes: new Map(),
@@ -420,7 +471,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   setMode: (mode) => {
     const prev = get();
 
-    // Leaving build mode: keep undetermined cubes as-is (only committed when building away)
+    // Leaving Keyboard Build mode: keep undetermined cubes as-is (only committed when building away)
     if (prev.mode === "build" && mode !== "build") {
       set({
         mode,
@@ -434,11 +485,13 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         hoveredInvalidReason: null,
         selectedKeys: new Set<string>(),
         selectedPortPositions: new Set<string>(),
+        xHeld: false,
+        selectionPivot: null,
       });
       return;
     }
 
-    // Entering build mode: place cursor on last-placed cube or origin
+    // Entering Keyboard Build mode: place cursor on last-placed cube or origin
     if (mode === "build") {
       let cursorPos: Position3D = { x: 0, y: 0, z: 0 };
 
@@ -475,6 +528,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         hoveredInvalidReason: null,
         selectedKeys: new Set<string>(),
         selectedPortPositions: new Set<string>(),
+        xHeld: false,
+        selectionPivot: null,
       });
       return;
     }
@@ -488,13 +543,231 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       isDraggingSelection: false,
       dragDelta: null,
       dragValid: true,
-      ...(mode !== "place" ? { placePort: false, portWarning: null } : {}),
-      ...(mode !== "select" ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>() } : {}),
+      xHeld: false,
+      selectionPivot: null,
     });
   },
-  setCubeType: (cubeType) => set({ cubeType, pipeVariant: null, placePort: false, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
-  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], placePort: false, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
-  setPlacePort: (on) => set({ placePort: on, pipeVariant: on ? null : get().pipeVariant, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
+  setArmedTool: (tool) => set({
+    armedTool: tool,
+    portWarning: null,
+    hoveredGridPos: null,
+    hoveredBlockType: null,
+    hoveredInvalid: false,
+    hoveredInvalidReason: null,
+    hoveredReplace: false,
+    ...(tool !== "pipe" ? { pipeVariant: null } : {}),
+    ...(tool !== "pointer" ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null } : {}),
+  }),
+  setXHeld: (held) => set({ xHeld: held, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
+  setCubeType: (cubeType) => set({ cubeType, armedTool: "cube", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
+  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], armedTool: "pipe", portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
+  setPlacePort: (on) => set({ armedTool: on ? "port" : "pointer", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, ...(on ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null } : {}) }),
+  cycleArmedType: (dir) => {
+    const s = get();
+    if (s.mode !== "edit") return;
+    const cur = currentPlaceableIndex(s.armedTool, s.cubeType, s.pipeVariant);
+    const N = PLACEABLE_ORDER.length;
+    const next = cur === -1
+      ? (dir === 1 ? 0 : N - 1)
+      : (((cur + dir) % N) + N) % N;
+    const target = PLACEABLE_ORDER[next];
+    if (target.kind === "port") s.setPlacePort(true);
+    else if (target.kind === "cube") s.setCubeType(target.cubeType);
+    else s.setPipeVariant(target.variant);
+  },
+  cycleSelectedType: (dir) => {
+    const state = get();
+    if (state.mode !== "edit" || state.armedTool !== "pointer") return;
+
+    // Single-pipe branch — cycle pipe variants among those that keep neighbour
+    // cubes valid, matching the set the toolbar highlights for a selected pipe.
+    if (state.selectedKeys.size === 1 && state.selectedPortPositions.size === 0) {
+      const pipeKey = state.selectedKeys.values().next().value as string;
+      const pipeBlock = state.blocks.get(pipeKey);
+      if (pipeBlock && isPipeType(pipeBlock.type)) {
+        set((s) => {
+          const oldType = pipeBlock.type as PipeType;
+          const base = oldType.replace("H", "");
+          const openAxis = base.indexOf("O") as 0 | 1 | 2;
+          const pipeCoords: [number, number, number] = [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z];
+          const currentVariant = PIPE_TYPE_TO_VARIANT[oldType];
+
+          const validVariants: PipeVariant[] = [];
+          for (const v of PIPE_VARIANTS) {
+            const candidate = VARIANT_AXIS_MAP[v][openAxis];
+            const tmp = new Map(s.blocks);
+            tmp.set(pipeKey, { pos: pipeBlock.pos, type: candidate });
+            let ok = true;
+            for (const offset of [-1, 2]) {
+              const nc: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
+              nc[openAxis] += offset;
+              const nKey = posKey({ x: nc[0], y: nc[1], z: nc[2] });
+              const neighbor = tmp.get(nKey);
+              if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
+              const opts = determineCubeOptions(neighbor.pos, tmp);
+              const currentType = neighbor.type as CubeType;
+              if (opts.determined) {
+                if (opts.type !== currentType) { ok = false; break; }
+              } else if (!opts.options.includes(currentType)) {
+                ok = false; break;
+              }
+            }
+            if (ok) validVariants.push(v);
+          }
+
+          const cycle: PipeVariant[] = [];
+          for (const v of PIPE_VARIANTS) {
+            if (v === currentVariant || validVariants.includes(v)) cycle.push(v);
+          }
+          if (cycle.length <= 1) return s;
+
+          const curIdx = cycle.indexOf(currentVariant);
+          if (curIdx === -1) return s;
+          const nextIdx = (((curIdx + dir) % cycle.length) + cycle.length) % cycle.length;
+          const nextVariant = cycle[nextIdx];
+          if (nextVariant === currentVariant) return s;
+
+          const newType = VARIANT_AXIS_MAP[nextVariant][openAxis];
+          let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
+          ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, pipeKey, pipeBlock));
+          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, pipeKey, { pos: pipeBlock.pos, type: newType }));
+
+          const cmd: UndoCommand = { kind: "pipe-cycle", pipeKey, oldType, newType };
+          return {
+            blocks,
+            hiddenFaces,
+            history: [...s.history, cmd].slice(-MAX_HISTORY),
+            future: [],
+          };
+        });
+        return;
+      }
+    }
+
+    // Cube-slot branch — single selected cube/Y OR single selected port. Cycle
+    // through the toolbar's enabled set (port slot if pipeCount<2, cube types
+    // valid per determineCubeOptions, plus Y if all attached pipes are Z-open).
+    const onePort = state.selectedKeys.size === 0 && state.selectedPortPositions.size === 1;
+    const oneCube = state.selectedKeys.size === 1 && state.selectedPortPositions.size === 0
+      && (() => {
+        const k = state.selectedKeys.values().next().value as string;
+        const b = state.blocks.get(k);
+        return !!b && !isPipeType(b.type);
+      })();
+    if (!onePort && !oneCube) return;
+
+    set((s) => {
+      let key: string;
+      let pos: Position3D;
+      let currentKind: "PORT" | CubeType | "Y";
+      let existingBlock: Block | null;
+      if (oneCube) {
+        key = s.selectedKeys.values().next().value as string;
+        const b = s.blocks.get(key);
+        if (!b || isPipeType(b.type)) return s;
+        existingBlock = b;
+        pos = b.pos;
+        currentKind = b.type as CubeType | "Y";
+      } else {
+        key = s.selectedPortPositions.values().next().value as string;
+        const [x, y, z] = key.split(",").map(Number);
+        pos = { x, y, z };
+        existingBlock = null;
+        currentKind = "PORT";
+      }
+
+      const coords: [number, number, number] = [pos.x, pos.y, pos.z];
+      let pipeCount = 0;
+      let yValid = true;
+      for (let axis = 0; axis < 3; axis++) {
+        for (const offset of [1, -2]) {
+          const nc: [number, number, number] = [coords[0], coords[1], coords[2]];
+          nc[axis] += offset;
+          const n = s.blocks.get(posKey({ x: nc[0], y: nc[1], z: nc[2] }));
+          if (n && isPipeType(n.type)) {
+            const openAxis = n.type.replace("H", "").indexOf("O");
+            if (openAxis === axis) {
+              pipeCount++;
+              if (openAxis !== 2) yValid = false;
+            }
+          }
+        }
+      }
+      const result = determineCubeOptions(pos, s.blocks);
+      const cubeOpts = new Set<CubeType | "Y">(result.determined ? [result.type] : result.options);
+      if (yValid) cubeOpts.add("Y");
+      const portAllowed = pipeCount < 2;
+
+      type Opt = { kind: "port" } | { kind: "cube"; type: CubeType | "Y" };
+      const cycle: Opt[] = [];
+      if (portAllowed || currentKind === "PORT") cycle.push({ kind: "port" });
+      for (const ct of CUBE_TYPES) {
+        if (cubeOpts.has(ct) || ct === currentKind) cycle.push({ kind: "cube", type: ct });
+      }
+      if (cubeOpts.has("Y") || currentKind === "Y") cycle.push({ kind: "cube", type: "Y" });
+      if (cycle.length <= 1) return s;
+
+      const curIdx = cycle.findIndex((o) =>
+        currentKind === "PORT" ? o.kind === "port" : (o.kind === "cube" && o.type === currentKind)
+      );
+      if (curIdx === -1) return s;
+      const nextIdx = (((curIdx + dir) % cycle.length) + cycle.length) % cycle.length;
+      const target = cycle[nextIdx];
+
+      let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
+      const oldPortMarker = s.portPositions.has(key);
+      let newBlock: Block | null;
+      let newPortMarker: boolean;
+
+      if (target.kind === "port") {
+        if (existingBlock) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, key, existingBlock));
+        }
+        newBlock = null;
+        // Leave an explicit port marker so the user's intent persists even if
+        // adjacent pipes are later removed (mirrors convertBlockToPort).
+        newPortMarker = true;
+      } else {
+        if (existingBlock) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, key, existingBlock));
+        }
+        newBlock = { pos, type: target.type };
+        ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, key, newBlock));
+        // Placing a cube clears any explicit port marker at this position
+        // (mirrors addBlock's behaviour when a cube lands on a user-placed port).
+        newPortMarker = false;
+      }
+
+      const newPorts = new Set(s.portPositions);
+      if (newPortMarker) newPorts.add(key); else newPorts.delete(key);
+
+      const newSelectedKeys = new Set(s.selectedKeys);
+      const newSelectedPorts = new Set(s.selectedPortPositions);
+      if (newBlock) {
+        newSelectedKeys.add(key);
+        newSelectedPorts.delete(key);
+      } else {
+        newSelectedKeys.delete(key);
+        newSelectedPorts.add(key);
+      }
+
+      const cmd: UndoCommand = {
+        kind: "edit-type-cycle", key, pos,
+        oldBlock: existingBlock, newBlock,
+        oldPortMarker, newPortMarker,
+      };
+      return {
+        blocks,
+        hiddenFaces,
+        portPositions: newPorts,
+        selectedKeys: newSelectedKeys,
+        selectedPortPositions: newSelectedPorts,
+        history: [...s.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+      };
+    });
+  },
+  setPaletteDragging: (on) => set((state) => (state.paletteDragging === on ? state : { paletteDragging: on })),
   clearPortWarning: () => set((state) => (state.portWarning == null ? state : { portWarning: null })),
   addPortAt: (pos) =>
     set((state) => {
@@ -821,6 +1094,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           future: [cmd, ...state.future].slice(0, MAX_HISTORY),
           hoveredGridPos: null,
           selectedKeys: new Set(cmd.entries.map((e) => e.oldKey)),
+          selectionPivot: null,
           undeterminedCubes: newUndetermined,
         };
       }
@@ -1011,6 +1285,26 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         };
       }
 
+      if (cmd.kind === "edit-type-cycle") {
+        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        if (cmd.newBlock) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cmd.key, cmd.newBlock));
+        }
+        if (cmd.oldBlock) {
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.key, cmd.oldBlock));
+        }
+        const newPorts = new Set(state.portPositions);
+        if (cmd.oldPortMarker) newPorts.add(cmd.key); else newPorts.delete(cmd.key);
+        return {
+          blocks,
+          hiddenFaces,
+          portPositions: newPorts,
+          history: newHistory,
+          future: [cmd, ...state.future].slice(0, MAX_HISTORY),
+          hoveredGridPos: null,
+        };
+      }
+
       if (cmd.kind === "add-port") {
         const newPorts = new Set(state.portPositions);
         newPorts.delete(cmd.key);
@@ -1049,6 +1343,28 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           future: [cmd, ...state.future].slice(0, MAX_HISTORY),
           hoveredGridPos: null,
           undeterminedCubes: newUndetermined,
+        };
+      }
+
+      if (cmd.kind === "rotate-selection") {
+        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        for (const entry of cmd.entries) {
+          const cur = blocks.get(entry.newKey);
+          if (cur) {
+            ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, entry.newKey, cur));
+          }
+        }
+        for (const entry of cmd.entries) {
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, entry.oldKey, entry.oldBlock));
+        }
+        return {
+          blocks,
+          hiddenFaces,
+          history: newHistory,
+          future: [cmd, ...state.future].slice(0, MAX_HISTORY),
+          hoveredGridPos: null,
+          selectedKeys: new Set(cmd.prevSelectedKeys),
+          selectionPivot: null,
         };
       }
 
@@ -1105,6 +1421,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           future: newFuture,
           hoveredGridPos: null,
           selectedKeys: new Set<string>(),
+          selectionPivot: null,
         };
       }
 
@@ -1144,6 +1461,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           future: newFuture,
           hoveredGridPos: null,
           selectedKeys: new Set(cmd.entries.map((e) => e.newKey)),
+          selectionPivot: null,
           undeterminedCubes: newUndetermined,
         };
       }
@@ -1308,6 +1626,26 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         };
       }
 
+      if (cmd.kind === "edit-type-cycle") {
+        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        if (cmd.oldBlock) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cmd.key, cmd.oldBlock));
+        }
+        if (cmd.newBlock) {
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.key, cmd.newBlock));
+        }
+        const newPorts = new Set(state.portPositions);
+        if (cmd.newPortMarker) newPorts.add(cmd.key); else newPorts.delete(cmd.key);
+        return {
+          blocks,
+          hiddenFaces,
+          portPositions: newPorts,
+          history: [...state.history, cmd],
+          future: newFuture,
+          hoveredGridPos: null,
+        };
+      }
+
       if (cmd.kind === "add-port") {
         const newPorts = new Set(state.portPositions);
         newPorts.add(cmd.key);
@@ -1346,6 +1684,28 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           future: newFuture,
           hoveredGridPos: null,
           undeterminedCubes: newUndetermined,
+        };
+      }
+
+      if (cmd.kind === "rotate-selection") {
+        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        for (const entry of cmd.entries) {
+          const cur = blocks.get(entry.oldKey);
+          if (cur) {
+            ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, entry.oldKey, cur));
+          }
+        }
+        for (const entry of cmd.entries) {
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, entry.newKey, entry.newBlock));
+        }
+        return {
+          blocks,
+          hiddenFaces,
+          history: [...state.history, cmd],
+          future: newFuture,
+          hoveredGridPos: null,
+          selectedKeys: new Set(cmd.nextSelectedKeys),
+          selectionPivot: null,
         };
       }
 
@@ -1392,6 +1752,61 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       };
     }),
 
+  insertBlocks: (incoming) =>
+    set((state) => {
+      if (incoming.size === 0) return state;
+
+      // Offset along +X so incoming sits past the existing scene's right edge,
+      // with a one-cube gap. Delta components must be multiples of 3 to keep
+      // cubes on block-slots and pipes on pipe-slots (grid period = 3).
+      let delta: Position3D = { x: 0, y: 0, z: 0 };
+      if (state.blocks.size > 0) {
+        let existingMaxX = -Infinity;
+        for (const b of state.blocks.values()) {
+          if (b.pos.x > existingMaxX) existingMaxX = b.pos.x;
+        }
+        let incomingMinX = Infinity;
+        for (const b of incoming.values()) {
+          if (b.pos.x < incomingMinX) incomingMinX = b.pos.x;
+        }
+        const raw = existingMaxX + 3 - incomingMinX;
+        delta = { x: Math.ceil(raw / 3) * 3, y: 0, z: 0 };
+      }
+
+      const mergedBlocks = new Map(state.blocks);
+      const entries: Array<{ key: string; block: Block }> = [];
+      for (const b of incoming.values()) {
+        const newPos: Position3D = {
+          x: b.pos.x + delta.x,
+          y: b.pos.y + delta.y,
+          z: b.pos.z + delta.z,
+        };
+        if (!isValidPos(newPos, b.type)) continue;
+        const newKey = posKey(newPos);
+        if (mergedBlocks.has(newKey)) continue;
+        const newBlock: Block = { pos: newPos, type: b.type };
+        mergedBlocks.set(newKey, newBlock);
+        entries.push({ key: newKey, block: newBlock });
+      }
+      if (entries.length === 0) return state;
+
+      const { spatialIndex, hiddenFaces, undeterminedCubes } = computeDerivedFromBlocks(mergedBlocks);
+      const cmd: UndoCommand = { kind: "bulk-add", entries };
+      return {
+        blocks: mergedBlocks,
+        spatialIndex,
+        hiddenFaces,
+        undeterminedCubes,
+        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+        hoveredGridPos: null,
+        selectedKeys: new Set(entries.map((e) => e.key)),
+        selectedPortPositions: new Set<string>(),
+        mode: "edit",
+        armedTool: "pointer",
+      };
+    }),
+
   hydrateBlocks: (incoming) =>
     set((state) => {
       if (incoming.size === 0) return state;
@@ -1404,6 +1819,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         selectedKeys: new Set<string>(),
         selectedPortPositions: new Set<string>(),
         portPositions: new Set<string>(),
+        selectionPivot: null,
         undeterminedCubes: new Map(),
       };
     }),
@@ -1427,6 +1843,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         selectedKeys: new Set<string>(),
         selectedPortPositions: new Set<string>(),
         portPositions: new Set<string>(),
+        selectionPivot: null,
         undeterminedCubes: new Map(),
       };
     }),
@@ -1447,13 +1864,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       return {
         selectedKeys: next,
         selectedPortPositions: additive ? state.selectedPortPositions : new Set<string>(),
+        selectionPivot: null,
       };
     }),
 
   clearSelection: () =>
     set((state) => {
       if (state.selectedKeys.size === 0 && state.selectedPortPositions.size === 0) return state;
-      return { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>() };
+      return { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null };
     }),
 
   togglePortSelection: (pos, additive) =>
@@ -1469,6 +1887,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       return {
         selectedPortPositions: next,
         selectedKeys: additive ? state.selectedKeys : new Set<string>(),
+        selectionPivot: null,
       };
     }),
 
@@ -1516,6 +1935,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         future: [],
         selectedKeys: new Set<string>(),
         selectedPortPositions: new Set<string>(),
+        selectionPivot: null,
         hoveredGridPos: null,
         undeterminedCubes: newUndetermined,
       };
@@ -1587,10 +2007,127 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       };
     }),
 
+  rotateSelected: (direction, pivotOverride) => {
+    const state = get();
+    if (state.selectedKeys.size === 0) return { ok: true };
+
+    // Determine pivot. Priority:
+    //   1. Explicit override (user hovered a selected block while pressing R).
+    //   2. Cached selectionPivot from a prior rotation of the same selection —
+    //      this is what makes 4×CCW return to identity even when the selection
+    //      bbox isn't cube-grid-aligned (bbox swaps X/Y spans on rotation, so
+    //      recomputing each time would drift).
+    //   3. Single-block selection: that block's position.
+    //   4. Multi-block selection: bbox XY center, snapped to the cube grid.
+    let pivot: Position3D;
+    if (pivotOverride) {
+      pivot = {
+        x: Math.round(pivotOverride.x / 3) * 3,
+        y: Math.round(pivotOverride.y / 3) * 3,
+        z: pivotOverride.z,
+      };
+    } else if (state.selectionPivot) {
+      pivot = state.selectionPivot;
+    } else if (state.selectedKeys.size === 1) {
+      const onlyKey = state.selectedKeys.values().next().value as string;
+      const onlyBlock = state.blocks.get(onlyKey);
+      if (!onlyBlock) return { ok: true };
+      pivot = {
+        x: Math.round(onlyBlock.pos.x / 3) * 3,
+        y: Math.round(onlyBlock.pos.y / 3) * 3,
+        z: onlyBlock.pos.z,
+      };
+    } else {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      let zSample = 0;
+      for (const key of state.selectedKeys) {
+        const block = state.blocks.get(key);
+        if (!block) continue;
+        if (block.pos.x < minX) minX = block.pos.x;
+        if (block.pos.y < minY) minY = block.pos.y;
+        if (block.pos.x > maxX) maxX = block.pos.x;
+        if (block.pos.y > maxY) maxY = block.pos.y;
+        zSample = block.pos.z;
+      }
+      pivot = {
+        x: Math.round(((minX + maxX) / 2) / 3) * 3,
+        y: Math.round(((minY + maxY) / 2) / 3) * 3,
+        z: zSample,
+      };
+    }
+
+    // Build entries; validate grid and collisions before mutating.
+    const entries: Array<{ oldKey: string; oldBlock: Block; newKey: string; newBlock: Block }> = [];
+    const newKeys = new Set<string>();
+    try {
+      for (const oldKey of state.selectedKeys) {
+        const oldBlock = state.blocks.get(oldKey);
+        if (!oldBlock) continue;
+        const newBlock = rotateBlockAroundZ(oldBlock, pivot, direction);
+        if (!isValidPos(newBlock.pos, newBlock.type)) {
+          return { ok: false, reason: "Rotation produced an invalid grid position" };
+        }
+        const newKey = posKey(newBlock.pos);
+        if (newKeys.has(newKey)) {
+          return { ok: false, reason: "Rotation produced overlapping positions" };
+        }
+        newKeys.add(newKey);
+        entries.push({ oldKey, oldBlock, newKey, newBlock });
+      }
+    } catch (e) {
+      return { ok: false, reason: e instanceof Error ? e.message : "Rotation failed" };
+    }
+
+    // Collision: any new key not in the old selection that already has a block
+    for (const newKey of newKeys) {
+      if (state.selectedKeys.has(newKey)) continue;
+      if (state.blocks.has(newKey)) {
+        return { ok: false, reason: "Rotation would overlap an existing block" };
+      }
+    }
+
+    set((s) => {
+      let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
+      // Remove all old blocks first so collisions on mixed remove/add don't trip
+      for (const entry of entries) {
+        const existing = blocks.get(entry.oldKey);
+        if (existing) {
+          ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, entry.oldKey, existing));
+        }
+      }
+      for (const entry of entries) {
+        ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, entry.newKey, entry.newBlock));
+      }
+      // Rotation invalidates undetermined build-mode state for rotated cubes.
+      const newUndetermined = new Map(s.undeterminedCubes);
+      for (const entry of entries) newUndetermined.delete(entry.oldKey);
+
+      const prevSelectedKeys = Array.from(s.selectedKeys);
+      const nextSelectedKeys = entries.map((e) => e.newKey);
+      const cmd: UndoCommand = {
+        kind: "rotate-selection",
+        entries,
+        prevSelectedKeys,
+        nextSelectedKeys,
+      };
+      return {
+        blocks,
+        hiddenFaces,
+        history: [...s.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+        selectedKeys: new Set(nextSelectedKeys),
+        selectionPivot: pivot,
+        hoveredGridPos: null,
+        undeterminedCubes: newUndetermined,
+      };
+    });
+    return { ok: true };
+  },
+
   selectAll: () =>
     set((state) => {
       if (state.blocks.size === 0) return state;
-      return { selectedKeys: new Set(state.blocks.keys()) };
+      return { selectedKeys: new Set(state.blocks.keys()), selectionPivot: null };
     }),
 
   selectBlocks: (keys, additive) =>
@@ -1599,7 +2136,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       for (const key of keys) {
         if (state.blocks.has(key)) next.add(key);
       }
-      return { selectedKeys: next };
+      return { selectedKeys: next, selectionPivot: null };
     }),
 
   setDragState: ({ isDragging, delta, valid }) =>
@@ -1695,7 +2232,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   },
 
   // ---------------------------------------------------------------------------
-  // Build mode actions
+  // Keyboard Build mode actions
   // ---------------------------------------------------------------------------
 
   buildMove: (direction) => {
@@ -1921,14 +2458,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     set((s) => {
       let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
       const newUndetermined = new Map(s.undeterminedCubes);
-      let originCubeEntry: BuildStep["originCube"];
 
-      // Place origin cube on empty canvas (always determined — no ghost)
-      if (isEmptyOrigin) {
-        const originBlock: Block = { pos: cursor, type: srcType };
-        ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, srcKey, originBlock));
-        originCubeEntry = { key: srcKey, block: originBlock };
-      }
+      // Intentionally do NOT place a cube at an empty origin. The slot stays a
+      // port (explicit or implicit at the pipe endpoint). syncPortsAndPromote
+      // below will promote it to a canonical cube only if the new pipe pushes
+      // its attachment count to ≥2.
 
       if (!state.freeBuild) {
         // Apply source determination (commit undetermined source to chosen type)
@@ -1952,17 +2486,6 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       // Place pipe
       const pipeBlock: Block = { pos: pipePos, type: pipeType };
       ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, pipeKey, pipeBlock));
-
-      // Check if origin cube should be undetermined (placed before the pipe was known)
-      let originUndetermined: UndeterminedCubeInfo | undefined;
-      if (isEmptyOrigin && !state.freeBuild) {
-        const originOptions = determineCubeOptions(cursor, blocks);
-        if (!originOptions.determined && originOptions.options.length > 1) {
-          const idx = Math.max(0, originOptions.options.indexOf(srcType));
-          originUndetermined = { options: [...originOptions.options], currentIndex: idx };
-          newUndetermined.set(srcKey, originUndetermined);
-        }
-      }
 
       // Apply dest type change if existing cube needs re-typing
       if (destTypeChange) {
@@ -2012,10 +2535,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         destCursorPos: destPos,
         pipe: { key: pipeKey, block: pipeBlock },
         cube: cubeAdded,
-        originCube: originCubeEntry,
         sourceDetermination,
         sourceRetype,
-        originUndetermined,
         destUndetermined,
         destTypeChange,
         destDetermination,
@@ -2218,7 +2739,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       let placeType: CubeType | "Y" | null;
       if (target !== undefined) {
-        // Explicit target (e.g. toolbar click in build mode) must be a valid option.
+        // Explicit target (e.g. toolbar click in Keyboard Build mode) must be a valid option.
         if (!cycle.includes(target)) return state;
         placeType = target;
       } else {

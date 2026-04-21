@@ -17,7 +17,7 @@ function resetStores() {
     hiddenFaces: new Map(),
     history: [],
     future: [],
-    mode: "place",
+    mode: "edit",
     cubeType: "XZZ",
     pipeVariant: null,
     hoveredGridPos: null,
