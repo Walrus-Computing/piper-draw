@@ -4,16 +4,10 @@
 
 An open source web application for building pipe diagrams for topological error correction.
 
-## v0 Features
-Using a drag-and-drop interface, the user can combine 1 type of cube with 1 type of pipe to create a vertical stack.
-For now we follow the naming convention of cubes and pipes of TQEC. See [the terminology guide](https://tqec.github.io/tqec/user_guide/terminology.html).
+## About
+Piper-draw is a visual editor for TQEC block graphs. You assemble cubes and pipes with drag-and-drop, then export to Collada (`.dae`) or send the diagram to a FastAPI backend that runs [`tqec`](https://github.com/tqec/tqec) for validation and stabilizer-flow (correlation-surface) analysis.
 
-The user can then press the **Export to Collada (.dae)** button.
-This package contains a test that verifies the exported `.dae` file is correctly understood by the TQEC package.
-
-The **Verify (tqec)** button sends the current diagram to a FastAPI backend that builds a [`tqec.BlockGraph`](https://github.com/tqec/tqec) and reports per-cube validation errors.
-
-The **Flows (tqec)** button opens a side panel that computes stabilizer flows (correlation surfaces) for the current diagram, also via the [tqec](https://github.com/tqec/tqec) package.
+Cube and pipe naming follows the TQEC convention — see [the terminology guide](https://tqec.github.io/tqec/user_guide/terminology.html).
 
 ## Getting started
 
