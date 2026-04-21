@@ -16,6 +16,7 @@ def _port_key(tqec_pos: tuple[int, int, int]) -> str:
     """Key used to match a port position to a caller-supplied label."""
     return f"{tqec_pos[0]},{tqec_pos[1]},{tqec_pos[2]}"
 
+
 CUBE_TYPES = {"XZZ", "ZXZ", "ZXX", "XXZ", "ZZX", "XZX", "Y"}
 PIPE_TYPES = {
     "OZX",
@@ -174,11 +175,7 @@ def convert_blocks(
 
 
 def _build_port_label_map(port_labels: list[PortLabelInput]) -> dict[str, str]:
-    return {
-        _port_key(_piper_to_tqec_pos(p.pos)): p.label
-        for p in port_labels
-        if p.label
-    }
+    return {_port_key(_piper_to_tqec_pos(p.pos)): p.label for p in port_labels if p.label}
 
 
 @app.post("/api/validate")
