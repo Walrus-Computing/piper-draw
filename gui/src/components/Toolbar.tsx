@@ -510,7 +510,7 @@ export function Toolbar({
               cursor: historyLen === 0 ? "default" : "pointer",
             }}
           >
-            ↶
+            ↩
           </button>
           <button
             onClick={redo}
@@ -524,7 +524,7 @@ export function Toolbar({
               cursor: futureLen === 0 ? "default" : "pointer",
             }}
           >
-            ↷
+            ↪
           </button>
         </div>
         <AnalyzeMenu />
@@ -559,7 +559,7 @@ export function Toolbar({
               if (mode === "build") setMode("edit");
               setArmedTool("pointer");
             }}
-            title="Select and move blocks"
+            title="Select and move blocks — Ctrl+Shift+drag for marquee select"
             style={blockBtnStyle(mode === "edit" && armedTool === "pointer")}
           >
             Select
