@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Text } from "@react-three/drei";
+import { Billboard, Text } from "@react-three/drei";
 import { useBlockStore } from "../stores/blockStore";
 import { getAllPortPositions, posKey, tqecToThree } from "../types";
 
@@ -7,6 +7,17 @@ const IO_COLOR: Record<string, string> = {
   in: "#1a7f37",
   out: "#b00020",
 };
+
+// Port cubes are 1×1×1; leave a small margin so the label never clips the edges.
+const MAX_LABEL_EXTENT = 0.9;
+// Approximate glyph width / fontSize ratio for the default drei Text font.
+const CHAR_WIDTH_RATIO = 0.55;
+
+function computeFontSize(label: string): number {
+  const n = Math.max(1, label.length);
+  const widthLimited = MAX_LABEL_EXTENT / (n * CHAR_WIDTH_RATIO);
+  return Math.min(MAX_LABEL_EXTENT, widthLimited);
+}
 
 export function PortLabels3D() {
   const blocks = useBlockStore((s) => s.blocks);
@@ -25,24 +36,26 @@ export function PortLabels3D() {
 
   return (
     <>
-      {entries.map(({ key, meta, threePos }) =>
-        meta ? (
-          <Text
-            key={key}
-            position={threePos}
-            fontSize={0.3}
-            color={IO_COLOR[meta.io] ?? "#333"}
-            anchorX="center"
-            anchorY="middle"
-            outlineWidth={0.015}
-            outlineColor="#fff"
-            depthOffset={-1}
-            renderOrder={10}
-          >
-            {meta.label}
-          </Text>
-        ) : null,
-      )}
+      {entries.map(({ key, meta, threePos }) => {
+        if (!meta) return null;
+        const fontSize = computeFontSize(meta.label);
+        return (
+          <Billboard key={key} position={threePos}>
+            <Text
+              fontSize={fontSize}
+              color={IO_COLOR[meta.io] ?? "#333"}
+              anchorX="center"
+              anchorY="middle"
+              outlineWidth={fontSize * 0.05}
+              outlineColor="#fff"
+              depthOffset={-1}
+              renderOrder={10}
+            >
+              {meta.label}
+            </Text>
+          </Billboard>
+        );
+      })}
     </>
   );
 }
