@@ -998,7 +998,7 @@ export default function App() {
         <BlockInstances />
         {!photoRequest && !flowVizMode && <FoldOutCubeOverlay />}
         {!photoRequest && !flowVizMode && <InvalidBlockHighlights />}
-        {!photoRequest && !flowVizMode && <LocatePulseHighlight />}
+        {!photoRequest && <LocatePulseHighlight />}
         {!photoRequest && !flowVizMode && <SelectionHighlights />}
         {!photoRequest && !flowVizMode && <DragGhost />}
         {!photoRequest && !flowVizMode && <BuildCursor />}
