@@ -7,6 +7,7 @@ import path from 'path'
 export default defineConfig({
   plugins: [react()],
   build: {
+    chunkSizeWarningLimit: 1500,
     rollupOptions: {
       plugins: [
         license({
