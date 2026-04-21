@@ -9,8 +9,6 @@ export function NavControlsModifier({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   controlsRef: React.RefObject<any>;
 }) {
-  const mode = useBlockStore((s) => s.mode);
-  const armedTool = useBlockStore((s) => s.armedTool);
   const viewMode = useBlockStore((s) => s.viewMode);
   const navStyle = useKeybindStore((s) => s.navStyle);
 
@@ -22,11 +20,6 @@ export function NavControlsModifier({
     const apply = (alt: boolean) => {
       const controls = controlsRef.current;
       if (!controls || !controls.mouseButtons) return;
-      // Pointer tool takes left-drag for marquee/move; disable camera left-drag.
-      if (mode === "edit" && armedTool === "pointer") {
-        controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
-        return;
-      }
       if (navStyle === "rotate") {
         // Drag = rotate, Shift+Drag = pan (handled by OrbitControls' built-in swap).
         controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
@@ -62,7 +55,7 @@ export function NavControlsModifier({
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, [mode, armedTool, viewMode, navStyle, controlsRef]);
+  }, [viewMode, navStyle, controlsRef]);
 
   return null;
 }

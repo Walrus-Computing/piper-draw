@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { useKeybindStore } from "./keybindStore";
+import type { Flow } from "../utils/flows";
 import type {
   Position3D, Block, BlockType, CubeType, PipeVariant, PipeType, SpatialIndex, FaceMask,
   BuildDirection, UndeterminedCubeInfo, ViewMode, IsoAxis, PortMeta, PortIO,
@@ -7,6 +8,7 @@ import type {
 import {
   posKey,
   getAllPortPositions,
+  defaultPortIO,
   hasBlockOverlap,
   hasCubeColorConflict,
   hasPipeColorConflict,
@@ -90,7 +92,7 @@ export type BuildStep = {
 type UndoCommand =
   | { kind: "add"; key: string; block: Block }
   | { kind: "remove"; key: string; block: Block }
-  | { kind: "bulk-remove"; entries: Array<{ key: string; block: Block }> }
+  | { kind: "bulk-remove"; entries: Array<{ key: string; block: Block }>; portKeys?: string[] }
   | { kind: "bulk-add"; entries: Array<{ key: string; block: Block }> }
   | { kind: "bulk-move"; entries: Array<{ oldKey: string; oldBlock: Block; newKey: string; newBlock: Block }> }
   | { kind: "clear"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask>; savedUndetermined: Map<string, UndeterminedCubeInfo> }
@@ -184,6 +186,18 @@ interface BlockStore {
 
   /** Whether the right-docked Stabilizer Flows panel is visible. */
   flowsPanelOpen: boolean;
+
+  /** Whether the right-docked ZX-diagram panel is visible. */
+  zxPanelOpen: boolean;
+
+  /** Last-computed flows (with surface geometry), published by FlowsPanel. */
+  flows: Flow[];
+  /** Signature of the diagram when `flows` was last computed; used to detect stale data. */
+  flowsSignature: string | null;
+  /** Row selected in FlowsPanel (index into `flows`), shown in 3D when flowVizMode is on. */
+  selectedFlowIndex: number | null;
+  /** When on, dim blocks and render only the selected flow's correlation surfaces. */
+  flowVizMode: boolean;
 
   // Drag-selection state (live during a drag of the current selection)
   isDraggingSelection: boolean;
@@ -279,6 +293,13 @@ interface BlockStore {
   setPortIO: (pos: Position3D, io: PortIO) => void;
   setFlowsPanelOpen: (open: boolean) => void;
   toggleFlowsPanel: () => void;
+
+  /** Publish computed flows (with surface geometry) for the 3D overlay to read. */
+  setFlows: (flows: Flow[], signature: string) => void;
+  setSelectedFlowIndex: (index: number | null) => void;
+  setFlowVizMode: (on: boolean) => void;
+  setZXPanelOpen: (open: boolean) => void;
+  toggleZXPanel: () => void;
   setDragState: (s: { isDragging: boolean; delta: Position3D | null; valid: boolean }) => void;
   moveSelection: (delta: Position3D) => boolean;
 
@@ -550,6 +571,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   portPositions: new Set(),
   portMeta: new Map(),
   flowsPanelOpen: false,
+  zxPanelOpen: false,
+  flows: [],
+  flowsSignature: null,
+  selectedFlowIndex: null,
+  flowVizMode: false,
   selectionPivot: null,
   clipboard: null,
 
@@ -1189,9 +1215,15 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         for (const entry of cmd.entries) {
           ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, entry.key, entry.block));
         }
+        let portPositions = state.portPositions;
+        if (cmd.portKeys && cmd.portKeys.length > 0) {
+          portPositions = new Set(portPositions);
+          for (const k of cmd.portKeys) portPositions.add(k);
+        }
         return {
           blocks,
           hiddenFaces,
+          portPositions,
           history: newHistory,
           future: [cmd, ...state.future].slice(0, MAX_HISTORY),
           hoveredGridPos: null,
@@ -1556,13 +1588,20 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         for (const entry of cmd.entries) {
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, entry.key, entry.block));
         }
+        let portPositions = state.portPositions;
+        if (cmd.portKeys && cmd.portKeys.length > 0) {
+          portPositions = new Set(portPositions);
+          for (const k of cmd.portKeys) portPositions.delete(k);
+        }
         return {
           blocks,
           hiddenFaces,
+          portPositions,
           history: [...state.history, cmd],
           future: newFuture,
           hoveredGridPos: null,
           selectedKeys: new Set<string>(),
+          selectedPortPositions: new Set<string>(),
           selectionPivot: null,
         };
       }
@@ -2060,7 +2099,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
   deleteSelected: () =>
     set((state) => {
-      if (state.selectedKeys.size === 0) return state;
+      if (state.selectedKeys.size === 0 && state.selectedPortPositions.size === 0) return state;
       const entries: Array<{ key: string; block: Block }> = [];
       const seen = new Set<string>();
       let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
@@ -2085,13 +2124,22 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, ck, cb));
         }
       }
-      if (entries.length === 0) return state;
-      const cmd: UndoCommand = { kind: "bulk-remove", entries };
+      const portKeys: string[] = [];
+      let portPositions = state.portPositions;
+      for (const key of state.selectedPortPositions) {
+        if (!portPositions.has(key)) continue;
+        if (portKeys.length === 0) portPositions = new Set(portPositions);
+        (portPositions as Set<string>).delete(key);
+        portKeys.push(key);
+      }
+      if (entries.length === 0 && portKeys.length === 0) return state;
+      const cmd: UndoCommand = { kind: "bulk-remove", entries, ...(portKeys.length > 0 ? { portKeys } : {}) };
       const newUndetermined = new Map(state.undeterminedCubes);
       for (const { key } of entries) newUndetermined.delete(key);
       return {
         blocks,
         hiddenFaces,
+        portPositions,
         history: [...state.history, cmd].slice(-MAX_HISTORY),
         future: [],
         selectedKeys: new Set<string>(),
@@ -3208,7 +3256,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       };
 
       for (const pos of missing) {
-        next.set(posKey(pos), { label: allocLabel(), io: "in" });
+        next.set(posKey(pos), {
+          label: allocLabel(),
+          io: defaultPortIO(pos, state.blocks),
+        });
       }
       return { portMeta: next };
     }),
@@ -3252,6 +3303,24 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       return { portMeta: next };
     }),
 
-  setFlowsPanelOpen: (open) => set({ flowsPanelOpen: open }),
-  toggleFlowsPanel: () => set((s) => ({ flowsPanelOpen: !s.flowsPanelOpen })),
+  setFlowsPanelOpen: (open) =>
+    set(open ? { flowsPanelOpen: true } : { flowsPanelOpen: false, flowVizMode: false }),
+  toggleFlowsPanel: () =>
+    set((s) =>
+      s.flowsPanelOpen
+        ? { flowsPanelOpen: false, flowVizMode: false }
+        : { flowsPanelOpen: true },
+    ),
+
+  setFlows: (flows, signature) =>
+    set({
+      flows,
+      flowsSignature: signature,
+      selectedFlowIndex: flows.length > 0 ? 0 : null,
+    }),
+  setSelectedFlowIndex: (index) => set({ selectedFlowIndex: index }),
+  setFlowVizMode: (on) => set({ flowVizMode: on }),
+
+  setZXPanelOpen: (open) => set({ zxPanelOpen: open }),
+  toggleZXPanel: () => set((s) => ({ zxPanelOpen: !s.zxPanelOpen })),
 }));

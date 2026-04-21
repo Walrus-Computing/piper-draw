@@ -29,8 +29,10 @@ import { DragGhost } from "./components/DragGhost";
 import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { FlowsPanel } from "./components/FlowsPanel";
+import { ZXPanel } from "./components/ZXPanel";
 import { PortLabels3D } from "./components/PortLabels3D";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
+import { FlowSurfaceOverlay } from "./components/FlowSurfaceOverlay";
 import { BuildModeHints } from "./components/BuildModeHints";
 import { EditModeHints } from "./components/EditModeHints";
 import { KeybindEditor, type KeybindEditorTab } from "./components/KeybindEditor";
@@ -245,7 +247,7 @@ function ViewportCamera({ controlsRef }: { controlsRef: React.RefObject<any> }) 
           zoomToCursor
           maxDistance={50000}
           screenSpacePanning={false}
-          mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
+          mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: -1 as THREE.MOUSE }}
         />
       </>
     );
@@ -297,7 +299,7 @@ function IsoViewport({
         maxZoom={500}
         minZoom={2}
         screenSpacePanning
-        mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
+        mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: -1 as THREE.MOUSE }}
       />
     </>
   );
@@ -466,10 +468,14 @@ export default function App() {
   const controlsRef = useRef<any>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [keybindEditorMode, setKeybindEditorMode] = useState<KeybindEditorTab | null>(null);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(
+    () => typeof localStorage !== 'undefined' && !localStorage.getItem('piperDraw.seenIntro'),
+  );
   const threeStateRef = useRef<ThreeState | null>(null);
   const photoRequest = useBlockStore((s) => s.photoRequest);
   const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
+  const zxPanelOpen = useBlockStore((s) => s.zxPanelOpen);
+  const flowVizMode = useBlockStore((s) => s.flowVizMode);
   const showGrid = useBlockStore((s) => s.showGrid);
   const showHints = useBlockStore((s) => s.showHints);
 
@@ -680,7 +686,7 @@ export default function App() {
           store.selectAll();
           return;
         case "deleteSelection":
-          if (store.selectedKeys.size > 0) {
+          if (store.selectedKeys.size > 0 || store.selectedPortPositions.size > 0) {
             e.preventDefault();
             store.deleteSelected();
           }
@@ -955,8 +961,8 @@ export default function App() {
         title="About piper-draw"
         style={{
           position: "fixed",
-          bottom: 20,
-          left: 20,
+          bottom: 10,
+          left: 10,
           zIndex: 1,
           width: 32,
           height: 32,
@@ -975,8 +981,20 @@ export default function App() {
       >
         ?
       </button>
-      {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
-      <FlowsPanel controlsRef={controlsRef} />
+      {helpOpen && (
+        <HelpPanel
+          onClose={() => {
+            setHelpOpen(false);
+            try {
+              localStorage.setItem('piperDraw.seenIntro', '1');
+            } catch {
+              // ignore (e.g. private mode)
+            }
+          }}
+        />
+      )}
+      <FlowsPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
+      <ZXPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
       {showHints && <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />}
       {showHints && <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />}
       {keybindEditorMode && (
@@ -991,18 +1009,19 @@ export default function App() {
         <ambientLight intensity={1.4} />
         <directionalLight position={[10, 10, 10]} intensity={1.0} />
         <BlockInstances />
-        {!photoRequest && <FoldOutCubeOverlay />}
-        {!photoRequest && <InvalidBlockHighlights />}
+        {!photoRequest && !flowVizMode && <FoldOutCubeOverlay />}
+        {!photoRequest && !flowVizMode && <InvalidBlockHighlights />}
         {!photoRequest && <LocatePulseHighlight />}
-        {!photoRequest && <SelectionHighlights />}
-        {!photoRequest && <DragGhost />}
-        {!photoRequest && <BuildCursor />}
-        {!photoRequest && <OpenPipeGhosts />}
-      {!photoRequest && flowsPanelOpen && <PortLabels3D />}
+        {!photoRequest && !flowVizMode && <SelectionHighlights />}
+        {!photoRequest && !flowVizMode && <DragGhost />}
+        {!photoRequest && !flowVizMode && <BuildCursor />}
+        {!photoRequest && !flowVizMode && <OpenPipeGhosts />}
+      {!photoRequest && (flowsPanelOpen || zxPanelOpen || flowVizMode) && <PortLabels3D />}
+        {!photoRequest && <FlowSurfaceOverlay />}
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
-        {!photoRequest && <GhostBlock />}
-        {!photoRequest && <PasteGhost />}
+        {!photoRequest && !flowVizMode && <GhostBlock />}
+        {!photoRequest && !flowVizMode && <PasteGhost />}
         <AxisLabels />
         <FpsSampler targetRef={fpsRef} />
         {!photoRequest && showGrid && <CheckerboardGrid />}

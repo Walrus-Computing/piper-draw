@@ -141,43 +141,9 @@ export function parseDaeToBlocks(xmlString: string): Map<string, Block> {
     }
   }
 
-  // Detect pipe_length from pipe scales
-  let pipeLength: number | null = null;
-
-  // First pass: detect pipe_length
-  for (const instanceNode of childrenByLocalName(sketchUpNode, "node")) {
-    const matrixEl = firstChildByLocalName(instanceNode, "matrix");
-    const instNodeRef = firstChildByLocalName(instanceNode, "instance_node");
-    if (!matrixEl || !instNodeRef) continue;
-
-    const url = instNodeRef.getAttribute("url");
-    if (!url) continue;
-    const libNodeId = url.startsWith("#") ? url.slice(1) : url;
-    const libNode = libraryNodeIndex.get(libNodeId);
-    if (!libNode) continue;
-
-    const kindName = (libNode.getAttribute("name") ?? "").toUpperCase();
-    if (!kindName.includes("O")) continue; // not a pipe
-
-    const mat = parseMatrix4x4(matrixEl.textContent ?? "");
-    const sub = getRotationScaleSubmatrix(mat);
-    const scale = getScale(sub);
-
-    // Find the pipe direction and its scale
-    const dirIdx = pipeDirectionIndex(kindName);
-    if (dirIdx >= 0) {
-      const detectedLength = scale[dirIdx] * 2.0;
-      if (pipeLength === null) {
-        pipeLength = detectedLength;
-      }
-    }
-  }
-
-  if (pipeLength === null) pipeLength = 2.0;
-
   const blocks = new Map<string, Block>();
 
-  // Second pass: extract all blocks
+  // Extract all blocks
   for (const instanceNode of childrenByLocalName(sketchUpNode, "node")) {
     const matrixEl = firstChildByLocalName(instanceNode, "matrix");
     const instNodeRef = firstChildByLocalName(instanceNode, "instance_node");

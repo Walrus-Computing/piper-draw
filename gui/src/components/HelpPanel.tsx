@@ -85,6 +85,16 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
           .
         </p>
 
+        <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Tips</h4>
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          <li>Use <b>Undo</b>/<b>Redo</b> or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z.</li>
+          <li>
+            <b>Camera</b> — scroll to zoom, <kbd>Shift</kbd>/<kbd>Alt</kbd>+drag
+            to rotate, drag to pan. Use the <b>Iso ▾</b> menu in the toolbar
+            to snap to an axis-locked orthographic view.
+          </li>
+        </ul>
+
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Modes</h4>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
           <li>
@@ -99,13 +109,11 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
           </li>
         </ul>
 
-        <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Tips</h4>
+        <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Features</h4>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
-          <li>Use <b>Undo</b>/<b>Redo</b> or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z.</li>
           <li><b>Verify (tqec)</b> checks that the diagram is a valid TQEC structure via the <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a> package.</li>
           <li><b>Flows (tqec)</b> computes stabilizer flows (correlation surfaces) for the diagram via the <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a> package.</li>
           <li><b>Import</b>/<b>Export</b> round-trip through Collada (.dae) files.</li>
-          <li>Use the X / Y / Z view buttons or drag to rotate the camera.</li>
         </ul>
 
         <p style={{ margin: "14px 0 0", fontSize: 12, color: "#666" }}>

@@ -1,7 +1,6 @@
 import { useBlockStore } from "../stores/blockStore";
 import { bindingToLabel, useKeybindStore } from "../stores/keybindStore";
 import { HintBar, CustomizeLink } from "./HintBar";
-import { altKey } from "./keyLabels";
 
 export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
   const mode = useBlockStore((s) => s.mode);
@@ -10,11 +9,9 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
   const viewMode = useBlockStore((s) => s.viewMode);
   const hasSelection = useBlockStore((s) => s.selectedKeys.size > 0);
   const b = useKeybindStore((s) => s.bindings.edit);
-  const navStyle = useKeybindStore((s) => s.navStyle);
   if (mode !== "edit") return null;
 
   const isIso = viewMode.kind === "iso";
-  const dragRotates = !isIso && navStyle === "rotate";
 
   // X-held overrides the normal hint set — show the delete affordances.
   if (xHeld) {
@@ -41,15 +38,11 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
   if (armedTool === "pointer") {
     hints.push(
       ["Click", "Select"],
-      ["Drag", "Box select / Move selection"],
       ["Shift+Click", "Add/remove"],
-      ["Shift+Drag", "Add to selection"],
-      ...(isIso ? [] : [[`${altKey}Drag`, "Orbit"] as const]),
-      ["Right Drag", "Pan"],
-      ["Scroll", "Zoom"],
+      ["Ctrl+Shift+Drag", "Marquee select"],
       [bindingToLabel(b.selectAll), "Select all"],
       [bindingToLabel(b.flipColors), "Flip colors"],
-      [`${bindingToLabel(b.rotateCcw)}/${bindingToLabel(b.rotateCw)}`, "Rotate CCW/CW (Z)"],
+      [bindingToLabel(b.rotateCcw), "Rotate"],
       [`Hold ${bindingToLabel(b.holdToDelete)}`, "Click-to-delete"],
       [bindingToLabel(b.deleteSelection), "Delete selected"],
       [bindingToLabel(b.clearSelection), "Clear selection"],
@@ -57,7 +50,7 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
       [bindingToLabel(b.paste), "Paste"],
     );
     if (hasSelection) {
-      hints.push(["↑/↓", "Nudge z ±3"]);
+      hints.push(["↑/↓", "Nudge z ±1"]);
     } else if (isIso) {
       hints.push([
         `${bindingToLabel(b.stepForward)}/${bindingToLabel(b.stepBack)}`,
@@ -71,15 +64,7 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
           : "Place block";
     hints.push(
       ["Click", placeLabel],
-      ["Drag", dragRotates ? "Rotate" : "Pan"],
-      ...(isIso
-        ? []
-        : dragRotates
-          ? [["Shift+Drag", "Pan"] as const]
-          : [[`${altKey}Drag`, "Rotate"] as const]),
-      ["Scroll", "Zoom"],
       [`Hold ${bindingToLabel(b.holdToDelete)}`, "Click-to-delete"],
-      [bindingToLabel(b.clearSelection), "Disarm (→ pointer)"],
     );
     if (isIso) {
       hints.push([

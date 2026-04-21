@@ -1,8 +1,15 @@
 import type { Block, Position3D, PortMeta } from "../types";
 
+export interface SurfacePiece {
+  basis: "X" | "Z";
+  // 4 quad corners in Three.js world coords, flattened [x0,y0,z0,...,x3,y3,z3]
+  vertices: number[];
+}
+
 export interface Flow {
   inputs: Record<string, string>;
   outputs: Record<string, string>;
+  surfaces: SurfacePiece[];
 }
 
 export interface FlowsResult {
