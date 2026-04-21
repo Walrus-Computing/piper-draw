@@ -2,10 +2,10 @@ import { useRef, type ReactNode } from "react";
 import { useViewportFitScale } from "../hooks/useViewportFitScale";
 
 // Reserve horizontal space on both sides so the centered hint bar stays
-// clear of the "?" help button at bottom-left (left: 20, width: 32 ⇒ right
-// edge at 52). Margin is symmetric because the bar is centered; 64 px per
-// side = 52 for the button + 12 px gap.
-const HINT_BAR_VIEWPORT_MARGIN_PX = 128;
+// clear of the "?" help button at bottom-left (left: 10, width: 32 ⇒ right
+// edge at 42). Margin is symmetric because the bar is centered; 54 px per
+// side = 42 for the button + 12 px gap.
+const HINT_BAR_VIEWPORT_MARGIN_PX = 108;
 
 export function HintBar({
   hints,
@@ -21,7 +21,7 @@ export function HintBar({
       ref={ref}
       style={{
         position: "fixed",
-        bottom: 20,
+        bottom: 10,
         left: "50%",
         transform: `translateX(-50%) scale(${scale})`,
         transformOrigin: "bottom center",

@@ -7,6 +7,7 @@ import type {
 import {
   posKey,
   getAllPortPositions,
+  defaultPortIO,
   hasBlockOverlap,
   hasCubeColorConflict,
   hasPipeColorConflict,
@@ -185,6 +186,9 @@ interface BlockStore {
   /** Whether the right-docked Stabilizer Flows panel is visible. */
   flowsPanelOpen: boolean;
 
+  /** Whether the right-docked ZX-diagram panel is visible. */
+  zxPanelOpen: boolean;
+
   // Drag-selection state (live during a drag of the current selection)
   isDraggingSelection: boolean;
   dragDelta: Position3D | null;
@@ -279,6 +283,8 @@ interface BlockStore {
   setPortIO: (pos: Position3D, io: PortIO) => void;
   setFlowsPanelOpen: (open: boolean) => void;
   toggleFlowsPanel: () => void;
+  setZXPanelOpen: (open: boolean) => void;
+  toggleZXPanel: () => void;
   setDragState: (s: { isDragging: boolean; delta: Position3D | null; valid: boolean }) => void;
   moveSelection: (delta: Position3D) => boolean;
 
@@ -550,6 +556,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   portPositions: new Set(),
   portMeta: new Map(),
   flowsPanelOpen: false,
+  zxPanelOpen: false,
   selectionPivot: null,
   clipboard: null,
 
@@ -3208,7 +3215,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       };
 
       for (const pos of missing) {
-        next.set(posKey(pos), { label: allocLabel(), io: "in" });
+        next.set(posKey(pos), {
+          label: allocLabel(),
+          io: defaultPortIO(pos, state.blocks),
+        });
       }
       return { portMeta: next };
     }),
@@ -3254,4 +3264,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
   setFlowsPanelOpen: (open) => set({ flowsPanelOpen: open }),
   toggleFlowsPanel: () => set((s) => ({ flowsPanelOpen: !s.flowsPanelOpen })),
+
+  setZXPanelOpen: (open) => set({ zxPanelOpen: open }),
+  toggleZXPanel: () => set((s) => ({ zxPanelOpen: !s.zxPanelOpen })),
 }));

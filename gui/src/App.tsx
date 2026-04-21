@@ -29,6 +29,7 @@ import { DragGhost } from "./components/DragGhost";
 import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { FlowsPanel } from "./components/FlowsPanel";
+import { ZXPanel } from "./components/ZXPanel";
 import { PortLabels3D } from "./components/PortLabels3D";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
 import { BuildModeHints } from "./components/BuildModeHints";
@@ -470,6 +471,7 @@ export default function App() {
   const threeStateRef = useRef<ThreeState | null>(null);
   const photoRequest = useBlockStore((s) => s.photoRequest);
   const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
+  const zxPanelOpen = useBlockStore((s) => s.zxPanelOpen);
   const showGrid = useBlockStore((s) => s.showGrid);
   const showHints = useBlockStore((s) => s.showHints);
 
@@ -955,8 +957,8 @@ export default function App() {
         title="About piper-draw"
         style={{
           position: "fixed",
-          bottom: 20,
-          left: 20,
+          bottom: 10,
+          left: 10,
           zIndex: 1,
           width: 32,
           height: 32,
@@ -976,7 +978,8 @@ export default function App() {
         ?
       </button>
       {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
-      <FlowsPanel controlsRef={controlsRef} />
+      <FlowsPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
+      <ZXPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
       {showHints && <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />}
       {showHints && <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />}
       {keybindEditorMode && (
@@ -998,7 +1001,7 @@ export default function App() {
         {!photoRequest && <DragGhost />}
         {!photoRequest && <BuildCursor />}
         {!photoRequest && <OpenPipeGhosts />}
-      {!photoRequest && flowsPanelOpen && <PortLabels3D />}
+      {!photoRequest && (flowsPanelOpen || zxPanelOpen) && <PortLabels3D />}
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
         {!photoRequest && <GhostBlock />}

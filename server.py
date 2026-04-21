@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import pyzx
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -12,6 +13,11 @@ from tqec.computation.block_graph import BlockGraph
 from tqec.utils.exceptions import TQECError
 
 app = FastAPI()
+
+# Cap on the circuit size we'll run `pyzx.compare_tensors` against for the
+# extracted-circuit ≡ original-graph check. Tensor contraction is exponential
+# in qubit count, so beyond ~6 qubits the check becomes prohibitively slow.
+VERIFY_QUBIT_LIMIT = 6
 
 
 def _port_key(tqec_pos: tuple[int, int, int]) -> str:
@@ -78,6 +84,160 @@ class FlowsResponse(BaseModel):
     outputs: list[str]
     flows: list[Flow]
     error: str | None = None
+
+
+class ZXRequest(BaseModel):
+    blocks: list[BlockInput]
+    port_labels: list[PortLabelInput] = []
+    port_io: dict[str, str] = {}
+    simplify: bool = False
+    extract: bool = False
+
+
+class ZXVertex(BaseModel):
+    id: int
+    kind: str  # "Z" | "X" | "H" | "BOUNDARY"
+    phase: str
+    pos: list[float] | None
+    label: str | None = None
+
+
+class ZXEdge(BaseModel):
+    source: int
+    target: int
+    hadamard: bool
+
+
+class ZXGate(BaseModel):
+    name: str
+    # Qubit indices touched by the gate. For controlled gates, controls come
+    # first; the last entry is the target. (Frontend uses this ordering to
+    # decide which qubits get a control dot vs. the gate body.)
+    qubits: list[int]
+    controls: int = 0  # number of leading qubits that act as controls
+    phase: str | None = None
+    adjoint: bool = False
+
+
+class ZXCircuit(BaseModel):
+    qubits: int
+    gate_count: int
+    qasm: str
+    # Quipper-style .qc (via pyzx.Circuit.to_qc). Empty string if emission failed.
+    qc: str = ""
+    # Google qsim input format (custom emitter — see `_circuit_to_qsim`). Empty
+    # string if any gate in the circuit isn't representable in qsim.
+    qsim: str = ""
+    gates: list[ZXGate]
+    # Semantic-equality check of the extracted+optimized circuit against the
+    # pre-simplification ZX graph. `None` means the check was skipped (too many
+    # qubits, or the check errored — see `verification_error`).
+    verified: bool | None = None
+    verification_error: str | None = None
+
+
+class ZXResponse(BaseModel):
+    ok: bool
+    vertices: list[ZXVertex]
+    edges: list[ZXEdge]
+    qgraph: str
+    simplified: bool
+    circuit: ZXCircuit | None = None
+    circuit_error: str | None = None
+    error: str | None = None
+
+
+def _circuit_to_qsim(c) -> str:
+    """Emit a Google qsim input description of circuit `c`.
+
+    Format: https://github.com/quantumlib/qsim/blob/master/docs/input_format.md.
+    Covers the gate set produced by `pyzx.Circuit.to_basic_gates()`
+    (HAD/NOT/Z/S/T/ZPhase/XPhase/YPhase/CNOT/CZ/SWAP). Unknown gates raise
+    `ValueError` so callers can surface the failure instead of silently
+    emitting a semantically-different circuit.
+    """
+
+    def angle_rad(phase) -> float:
+        # pyzx phases are Fractions of π (e.g. Fraction(1, 4) == π/4).
+        return float(phase) * math.pi
+
+    lines: list[str] = [str(c.qubits)]
+    for t, g in enumerate(c.gates):
+        name = type(g).__name__
+        target = getattr(g, "target", None)
+        control = getattr(g, "control", None)
+        phase = getattr(g, "phase", None)
+        adjoint = bool(getattr(g, "adjoint", False))
+
+        if name == "HAD":
+            lines.append(f"{t} h {target}")
+        elif name == "NOT":
+            lines.append(f"{t} x {target}")
+        elif name == "Z":
+            lines.append(f"{t} z {target}")
+        elif name == "S":
+            if adjoint:
+                lines.append(f"{t} rz {target} {-math.pi / 2:.10g}")
+            else:
+                lines.append(f"{t} s {target}")
+        elif name == "T":
+            if adjoint:
+                lines.append(f"{t} rz {target} {-math.pi / 4:.10g}")
+            else:
+                lines.append(f"{t} t {target}")
+        elif name == "ZPhase":
+            lines.append(f"{t} rz {target} {angle_rad(phase):.10g}")
+        elif name == "XPhase":
+            lines.append(f"{t} rx {target} {angle_rad(phase):.10g}")
+        elif name == "YPhase":
+            lines.append(f"{t} ry {target} {angle_rad(phase):.10g}")
+        elif name in ("CNOT", "CX"):
+            lines.append(f"{t} cx {control} {target}")
+        elif name == "CZ":
+            lines.append(f"{t} cz {control} {target}")
+        elif name == "SWAP":
+            # pyzx stores SWAP endpoints on control / target.
+            q1 = control if control is not None else getattr(g, "ctrl1", None)
+            q2 = target if target is not None else getattr(g, "ctrl2", None)
+            lines.append(f"{t} swap {q1} {q2}")
+        else:
+            raise ValueError(f"Cannot emit gate '{name}' in qsim format")
+    return "\n".join(lines) + "\n"
+
+
+def _serialize_gate(g) -> ZXGate:
+    """Convert a pyzx Gate into a JSON-friendly ZXGate.
+
+    pyzx gates expose `target` and (optionally) `control`, `ctrl1`, `ctrl2`,
+    `phase`, `adjoint` as instance attributes. Anything else is gate-specific
+    and we don't render it.
+    """
+    qubits: list[int] = []
+    controls = 0
+    for attr in ("ctrl1", "ctrl2", "control"):
+        v = getattr(g, attr, None)
+        if v is not None:
+            qubits.append(int(v))
+            controls += 1
+    target = getattr(g, "target", None)
+    if target is not None:
+        qubits.append(int(target))
+    phase = getattr(g, "phase", None)
+    return ZXGate(
+        name=type(g).__name__,
+        qubits=qubits,
+        controls=controls,
+        phase=str(phase) if phase is not None else None,
+        adjoint=bool(getattr(g, "adjoint", False)),
+    )
+
+
+_ZX_VERTEX_KIND = {
+    pyzx.VertexType.BOUNDARY: "BOUNDARY",
+    pyzx.VertexType.Z: "Z",
+    pyzx.VertexType.X: "X",
+    pyzx.VertexType.H_BOX: "H",
+}
 
 
 def _piper_to_tqec_pos(pos: list[float]) -> tuple[int, int, int]:
@@ -279,6 +439,204 @@ async def flows(req: FlowsRequest) -> FlowsResponse:
     )
 
 
+@app.post("/api/zx")
+async def zx(req: ZXRequest) -> ZXResponse:
+    if not req.blocks:
+        return ZXResponse(
+            ok=False,
+            vertices=[],
+            edges=[],
+            qgraph="",
+            simplified=False,
+            error="Empty diagram",
+        )
+
+    try:
+        label_map = _build_port_label_map(req.port_labels)
+        graph_dict = convert_blocks(req.blocks, label_map)
+        graph = BlockGraph.from_dict(graph_dict)
+        graph.validate()
+        pzx = graph.to_zx_graph()
+    except (TQECError, ValueError, KeyError) as e:
+        return ZXResponse(
+            ok=False,
+            vertices=[],
+            edges=[],
+            qgraph="",
+            simplified=False,
+            error=f"Cannot compute ZX graph: {e}",
+        )
+
+    # Port labels are on BlockGraph cubes; resolve each to the pyzx vertex id
+    # via PositionedZX.p2v before any simplification rewrites vertex ids.
+    port_label_by_vertex: dict[int, str] = {}
+    input_vs: list[int] = []
+    output_vs: list[int] = []
+    for cube in graph.cubes:
+        if cube.is_port and cube.position in pzx.p2v:
+            v = int(pzx.p2v[cube.position])
+            port_label_by_vertex[v] = cube.label
+            io = req.port_io.get(cube.label, "in")
+            (output_vs if io == "out" else input_vs).append(v)
+
+    # Register boundary vertices as pyzx inputs/outputs (required by
+    # pyzx.extract_circuit, harmless otherwise).
+    if input_vs:
+        pzx.g.set_inputs(tuple(input_vs))
+    if output_vs:
+        pzx.g.set_outputs(tuple(output_vs))
+
+    # Snapshot the pre-simplification graph so we can compare it to the
+    # extracted+optimized circuit for semantic equivalence.
+    original_g = pzx.g.copy() if req.extract else None
+
+    if req.simplify:
+        pyzx.simplify.full_reduce(pzx.g)
+        # normalize() places inputs/outputs at sensible (qubit, row) — required
+        # before extract_circuit and nicer for display.
+        pzx.g.normalize()
+
+    circuit_info: ZXCircuit | None = None
+    circuit_error: str | None = None
+    # By default the displayed ZX is pzx.g with the existing label mapping; when
+    # extraction succeeds we swap in the graph derived from the optimized circuit
+    # so the diagram matches the gate list.
+    display_graph = pzx.g
+    display_label_map = port_label_by_vertex
+    use_circuit_layout = req.simplify
+    if req.extract:
+        if not req.simplify:
+            circuit_error = "Circuit extraction requires simplification (full_reduce)."
+        elif not output_vs:
+            circuit_error = (
+                "Circuit extraction requires at least one port marked as output. "
+                "Set a port's direction to 'out' in the Flows panel."
+            )
+        else:
+            try:
+                c = pyzx.extract_circuit(pzx.g.copy())
+                # Cancel the HH / XX / ZZ pairs and redundant phase gates
+                # that extract_circuit routinely inserts at qubit boundaries
+                # (e.g. the CNOT template produces a pair of leading Hs on
+                # the control line that compose to identity).
+                c = pyzx.optimize.basic_optimization(c.to_basic_gates())
+                # Already in basic gates, but to_basic_gates is idempotent.
+                basic = c.to_basic_gates()
+
+                # Rebuild the displayed ZX from the optimized circuit so the
+                # rendered diagram matches the gate list below.
+                c_graph = c.to_graph()
+
+                # Carry port labels over to the circuit graph's boundaries by
+                # qubit index: circuit qubit i was originally input_vs[i] /
+                # output_vs[i] (pyzx preserves the set_inputs/set_outputs order).
+                extract_label_map: dict[int, str] = {}
+                c_inputs = list(c_graph.inputs())
+                c_outputs = list(c_graph.outputs())
+                for qi, v in enumerate(c_inputs):
+                    if qi < len(input_vs):
+                        lbl = port_label_by_vertex.get(input_vs[qi])
+                        if lbl:
+                            extract_label_map[int(v)] = lbl
+                for qi, v in enumerate(c_outputs):
+                    if qi < len(output_vs):
+                        lbl = port_label_by_vertex.get(output_vs[qi])
+                        if lbl:
+                            extract_label_map[int(v)] = lbl
+
+                # Verify: does the extracted+optimized circuit represent the
+                # same linear map as the pre-simplification graph? Cap at
+                # VERIFY_QUBIT_LIMIT because compare_tensors is exponential.
+                verified: bool | None = None
+                verification_error: str | None = None
+                if c.qubits <= VERIFY_QUBIT_LIMIT and original_g is not None:
+                    try:
+                        verified = bool(pyzx.compare_tensors(original_g, c_graph))
+                    except Exception as ve:
+                        verification_error = f"compare_tensors failed: {ve}"
+                elif c.qubits > VERIFY_QUBIT_LIMIT:
+                    verification_error = (
+                        f"Skipped: {c.qubits} qubits exceeds tensor-comparison "
+                        f"limit of {VERIFY_QUBIT_LIMIT}"
+                    )
+
+                # pyzx.to_qc and our qsim emitter can both raise on edge-case
+                # gate sets; emit an empty string rather than aborting the
+                # whole response so the UI still shows qasm + the diagram.
+                try:
+                    qc_str = c.to_qc()
+                except Exception:
+                    qc_str = ""
+                try:
+                    qsim_str = _circuit_to_qsim(c)
+                except Exception:
+                    qsim_str = ""
+
+                circuit_info = ZXCircuit(
+                    qubits=c.qubits,
+                    gate_count=len(basic.gates),
+                    qasm=c.to_qasm(),
+                    qc=qc_str,
+                    qsim=qsim_str,
+                    gates=[_serialize_gate(g) for g in basic.gates],
+                    verified=verified,
+                    verification_error=verification_error,
+                )
+                display_graph = c_graph
+                display_label_map = extract_label_map
+                use_circuit_layout = True
+            except Exception as e:  # pyzx raises various errors; surface them all
+                circuit_error = f"extract_circuit failed: {e}"
+
+    g = display_graph
+    vertices: list[ZXVertex] = []
+    for v in g.vertices():
+        if use_circuit_layout:
+            # After full_reduce+normalize (or on the extracted circuit graph)
+            # the tqec positions no longer map to surviving vertices; pyzx's
+            # (qubit, row) is the meaningful layout. Project row→x, qubit→-z
+            # so time flows horizontally.
+            q = g.qubit(v)
+            r = g.row(v)
+            pos_list = [float(r), 0.0, -float(q)] if q != -1 and r != -1 else None
+        else:
+            pos = pzx.positions.get(v)
+            pos_list = [float(pos.x), float(pos.y), float(pos.z)] if pos is not None else None
+        vertices.append(
+            ZXVertex(
+                id=int(v),
+                kind=_ZX_VERTEX_KIND.get(pyzx.VertexType(g.type(v)), str(g.type(v))),
+                phase=str(g.phase(v)),
+                pos=pos_list,
+                label=display_label_map.get(int(v)),
+            )
+        )
+
+    edges: list[ZXEdge] = []
+    for e in g.edges():
+        u, w = e
+        edges.append(
+            ZXEdge(
+                source=int(u),
+                target=int(w),
+                hadamard=(g.edge_type(e) == pyzx.EdgeType.HADAMARD),
+            )
+        )
+
+    return ZXResponse(
+        ok=True,
+        vertices=vertices,
+        edges=edges,
+        qgraph=g.to_json(),
+        simplified=req.simplify,
+        circuit=circuit_info,
+        circuit_error=circuit_error,
+        error=None,
+    )
+
+
+# Serve the built frontend (if present) at the root. Mounted last so all
+# /api/* routes take precedence over the static catch-all.
 _DIST = Path(__file__).parent / "gui" / "dist"
 if _DIST.is_dir():
     app.mount("/", StaticFiles(directory=_DIST, html=True), name="static")

@@ -1,11 +1,25 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import * as THREE from "three";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBlockStore } from "../stores/blockStore";
-import { useLocateStore } from "../stores/locateStore";
 import { computeFlows, type FlowsResult } from "../utils/flows";
-import { getAllPortPositions, posKey, tqecToThree, type Position3D } from "../types";
+import { getAllPortPositions, type Position3D } from "../types";
 import { isInSpanGF2, pauliToSymplectic } from "../utils/stabilizerSpan";
-import { animateCamera } from "../utils/cameraAnim";
+import { useFloatingPanel } from "../hooks/useFloatingPanel";
+import { ResizeGrip } from "../hooks/ResizeGrip";
+import {
+  clampGeometryToSafe,
+  readPanelGeometry,
+  rectsOverlap,
+  type SafeMargins,
+} from "../hooks/floatingPanelGeometry";
+import { PortsTable } from "./PortsTable";
+
+const PANEL_MIN_WIDTH = 280;
+const PANEL_MIN_HEIGHT = 220;
+// Bottom inset large enough to clear the orientation gizmo (canvas-anchored
+// at ~80px from the corner with an ~80px viewport), the bottom hint bar
+// (bottom:20, ~30px tall), and the bottom-left "?" help button (32px + 20px
+// inset). 140px is the smallest value that comfortably clears all three.
+const PANEL_BOTTOM_SAFE = 140;
 
 type Pauli = "I" | "X" | "Y" | "Z";
 const PAULI_CYCLE: Pauli[] = ["I", "X", "Y", "Z"];
@@ -34,75 +48,6 @@ function signature(
   for (const [k, v] of portMeta) m.push(`${k}=${v.label}/${v.io}`);
   m.sort();
   return b.join("|") + "#" + m.join("|");
-}
-
-function PortLabelInput({
-  pos,
-  label,
-  onCommit,
-}: {
-  pos: Position3D;
-  label: string;
-  onCommit: (pos: Position3D, label: string) => void;
-}) {
-  const [draft, setDraft] = useState(label);
-  const [prevLabel, setPrevLabel] = useState(label);
-
-  // Re-sync when the store-side label changes from outside (e.g. a fresh
-  // auto-allocation after submit, or load-from-localStorage).
-  if (label !== prevLabel) {
-    setPrevLabel(label);
-    setDraft(label);
-  }
-
-  const commit = () => {
-    if (draft.trim() === label) {
-      setDraft(label);
-      return;
-    }
-    onCommit(pos, draft);
-  };
-
-  return (
-    <input
-      type="text"
-      value={draft}
-      placeholder="label"
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          (e.target as HTMLInputElement).blur();
-        } else if (e.key === "Escape") {
-          e.preventDefault();
-          setDraft(label);
-          (e.target as HTMLInputElement).blur();
-        }
-      }}
-      style={{
-        flex: 1,
-        fontSize: 12,
-        padding: "2px 6px",
-        border: "1px solid #ccc",
-        borderRadius: 4,
-        fontFamily: "monospace",
-      }}
-    />
-  );
-}
-
-function LocateIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" strokeWidth="1.2" />
-      <circle cx="8" cy="8" r="1" fill="currentColor" />
-      <line x1="8" y1="1" x2="8" y2="3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-      <line x1="8" y1="12.5" x2="8" y2="15" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-      <line x1="1" y1="8" x2="3.5" y2="8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-      <line x1="12.5" y1="8" x2="15" y2="8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-    </svg>
-  );
 }
 
 function PauliCell({ pauli }: { pauli: string }) {
@@ -165,18 +110,19 @@ function EditablePauliCell({
 
 export function FlowsPanel({
   controlsRef,
+  toolbarRef,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   controlsRef: React.RefObject<any>;
+  toolbarRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const open = useBlockStore((s) => s.flowsPanelOpen);
+  const zxOpen = useBlockStore((s) => s.zxPanelOpen);
   const blocks = useBlockStore((s) => s.blocks);
   const portMeta = useBlockStore((s) => s.portMeta);
   const portPositions = useBlockStore((s) => s.portPositions);
   const setFlowsPanelOpen = useBlockStore((s) => s.setFlowsPanelOpen);
   const ensurePortLabels = useBlockStore((s) => s.ensurePortLabels);
-  const setPortLabel = useBlockStore((s) => s.setPortLabel);
-  const setPortIO = useBlockStore((s) => s.setPortIO);
 
   const [result, setResult] = useState<FlowsResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -185,14 +131,62 @@ export function FlowsPanel({
   const [nextQueryId, setNextQueryId] = useState(1);
   const [helpOpen, setHelpOpen] = useState(false);
 
-  const portList = useMemo(() => {
-    const positions = getAllPortPositions(blocks, portPositions);
-    return positions.map((pos) => {
-      const key = posKey(pos);
-      const meta = portMeta.get(key);
-      return { pos, key, meta };
-    });
-  }, [blocks, portMeta, portPositions]);
+  const {
+    containerStyle,
+    dragHandleProps,
+    resizeGripProps,
+    geometry,
+    setGeometry,
+  } = useFloatingPanel({
+    id: "flows",
+    defaultGeometry: {
+      x: typeof window !== "undefined" ? window.innerWidth - 350 : 10,
+      y: 64,
+      width: 340,
+      height: typeof window !== "undefined" ? window.innerHeight - 74 : 600,
+    },
+    minWidth: PANEL_MIN_WIDTH,
+    minHeight: PANEL_MIN_HEIGHT,
+  });
+
+  // On every open transition, move out of the way of other UI:
+  //   1. anti-overlap with the ZX panel (snap to left edge if both clash)
+  //   2. clamp to a safe zone that excludes the top toolbar and the bottom
+  //      strip occupied by the orientation gizmo / hint bar / help button.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      let next = geometry;
+      if (zxOpen) {
+        const other = readPanelGeometry("zx");
+        if (other && rectsOverlap(next, other)) {
+          next = { ...next, x: 10, y: 64 };
+        }
+      }
+      const tbRect = toolbarRef.current?.getBoundingClientRect();
+      const safe: SafeMargins = {
+        top: tbRect ? Math.ceil(tbRect.bottom) + 8 : 60,
+        right: 10,
+        bottom: PANEL_BOTTOM_SAFE,
+        left: 10,
+      };
+      next = clampGeometryToSafe(next, safe, PANEL_MIN_WIDTH, PANEL_MIN_HEIGHT);
+      if (
+        next.x !== geometry.x ||
+        next.y !== geometry.y ||
+        next.width !== geometry.width ||
+        next.height !== geometry.height
+      ) {
+        setGeometry(next);
+      }
+    }
+    wasOpen.current = open;
+  }, [open, zxOpen, geometry, setGeometry, toolbarRef]);
+
+  const portCount = useMemo(
+    () => getAllPortPositions(blocks, portPositions).length,
+    [blocks, portPositions],
+  );
 
   const currentSig = useMemo(() => signature(blocks, portMeta), [blocks, portMeta]);
   const stale = result !== null && computedSig !== currentSig;
@@ -211,22 +205,6 @@ export function FlowsPanel({
     setQueries([]);
     setLoading(false);
   }, [ensurePortLabels]);
-
-  const handleLocate = useCallback(
-    (pos: Position3D) => {
-      const controls = controlsRef.current;
-      if (controls) {
-        const [tx, ty, tz] = tqecToThree(pos, "XZZ");
-        const camera = controls.object as THREE.PerspectiveCamera;
-        const endTarget = new THREE.Vector3(tx, ty, tz);
-        const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
-        const endPos = endTarget.clone().add(offset);
-        animateCamera(controls, endTarget, endPos, { duration: 400 });
-      }
-      useLocateStore.getState().setPulse(posKey(pos));
-    },
-    [controlsRef],
-  );
 
   const generatorSpan = useMemo(() => {
     if (!result || !result.ok) return null;
@@ -272,12 +250,15 @@ export function FlowsPanel({
 
   return (
     <div
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          setFlowsPanelOpen(false);
+        }
+      }}
       style={{
-        position: "fixed",
-        top: 64,
-        right: 12,
-        bottom: 12,
-        width: 340,
+        ...containerStyle,
         zIndex: 50,
         background: "#fff",
         borderRadius: 10,
@@ -288,10 +269,13 @@ export function FlowsPanel({
         fontSize: 12,
         color: "#222",
         overflow: "hidden",
+        outline: "none",
       }}
     >
       <header
+        {...dragHandleProps}
         style={{
+          ...dragHandleProps.style,
           padding: "10px 12px",
           borderBottom: "1px solid #eee",
           display: "flex",
@@ -331,7 +315,7 @@ export function FlowsPanel({
           </button>
           <button
             onClick={handleCompute}
-            disabled={loading || portList.length === 0}
+            disabled={loading || portCount === 0}
             style={{
               padding: "4px 10px",
               fontSize: 12,
@@ -339,7 +323,7 @@ export function FlowsPanel({
               border: "1px solid #4a9eff",
               background: loading ? "#eee" : "#4a9eff",
               color: loading ? "#888" : "#fff",
-              cursor: loading || portList.length === 0 ? "default" : "pointer",
+              cursor: loading || portCount === 0 ? "default" : "pointer",
             }}
           >
             {loading ? "Computing…" : "Compute"}
@@ -415,66 +399,7 @@ export function FlowsPanel({
       )}
 
       <div style={{ padding: "10px 12px", overflowY: "auto", flex: 1 }}>
-        <section>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>
-            Ports ({portList.length})
-          </div>
-          {portList.length === 0 && (
-            <div style={{ color: "#888" }}>
-              No open ports. Add open pipes or place port markers.
-            </div>
-          )}
-          {portList.map(({ pos, key, meta }) => (
-            <div
-              key={key}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                marginBottom: 4,
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => handleLocate(pos)}
-                aria-label="Locate port"
-                title="Locate port"
-                style={{
-                  background: "none",
-                  border: "none",
-                  padding: 2,
-                  cursor: "pointer",
-                  color: "#666",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <LocateIcon />
-              </button>
-              <PortLabelInput
-                pos={pos}
-                label={meta?.label ?? ""}
-                onCommit={setPortLabel}
-              />
-              <select
-                value={meta?.io ?? "in"}
-                onChange={(e) => setPortIO(pos, e.target.value as "in" | "out")}
-                style={{ fontSize: 12, padding: "2px 4px" }}
-              >
-                <option value="in">in</option>
-                <option value="out">out</option>
-              </select>
-              <span
-                title={`(${pos.x / 3}, ${pos.y / 3}, ${pos.z / 3})`}
-                style={{ color: "#aaa", fontFamily: "monospace", fontSize: 10 }}
-              >
-                {pos.x / 3},{pos.y / 3},{pos.z / 3}
-              </span>
-            </div>
-          ))}
-        </section>
+        <PortsTable controlsRef={controlsRef} />
 
         <hr style={{ margin: "12px 0", border: "none", borderTop: "1px solid #eee" }} />
 
@@ -736,6 +661,7 @@ export function FlowsPanel({
           </>
         )}
       </div>
+      <ResizeGrip {...resizeGripProps} />
     </div>
   );
 }
