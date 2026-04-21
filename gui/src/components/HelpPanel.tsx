@@ -89,7 +89,7 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
         <ul style={{ margin: 0, paddingLeft: 18 }}>
           <li>Use <b>Undo</b>/<b>Redo</b> or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z.</li>
           <li>
-            <b>Camera</b> — scroll to zoom, <kbd>Opt</kbd>/<kbd>Alt</kbd>+drag
+            <b>Camera</b> — scroll to zoom, <kbd>Shift</kbd>/<kbd>Alt</kbd>+drag
             to rotate, drag to pan. Use the <b>Iso ▾</b> menu in the toolbar
             to snap to an axis-locked orthographic view.
           </li>

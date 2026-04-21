@@ -42,7 +42,7 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
       ["Ctrl+Shift+Drag", "Marquee select"],
       [bindingToLabel(b.selectAll), "Select all"],
       [bindingToLabel(b.flipColors), "Flip colors"],
-      [`${bindingToLabel(b.rotateCcw)}/${bindingToLabel(b.rotateCw)}`, "Rotate CCW/CW (Z)"],
+      [bindingToLabel(b.rotateCcw), "Rotate"],
       [`Hold ${bindingToLabel(b.holdToDelete)}`, "Click-to-delete"],
       [bindingToLabel(b.deleteSelection), "Delete selected"],
       [bindingToLabel(b.clearSelection), "Clear selection"],
@@ -50,7 +50,7 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
       [bindingToLabel(b.paste), "Paste"],
     );
     if (hasSelection) {
-      hints.push(["↑/↓", "Nudge z ±3"]);
+      hints.push(["↑/↓", "Nudge z ±1"]);
     } else if (isIso) {
       hints.push([
         `${bindingToLabel(b.stepForward)}/${bindingToLabel(b.stepBack)}`,
@@ -65,7 +65,6 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
     hints.push(
       ["Click", placeLabel],
       [`Hold ${bindingToLabel(b.holdToDelete)}`, "Click-to-delete"],
-      [bindingToLabel(b.clearSelection), "Disarm (→ pointer)"],
     );
     if (isIso) {
       hints.push([
