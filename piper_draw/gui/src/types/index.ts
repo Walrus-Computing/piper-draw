@@ -104,6 +104,13 @@ export interface Block {
   type: BlockType;
 }
 
+export type PortIO = "in" | "out";
+
+export interface PortMeta {
+  label: string;
+  io: PortIO;
+}
+
 // ---------------------------------------------------------------------------
 // Color constants — single source of truth
 // ---------------------------------------------------------------------------
@@ -1197,6 +1204,46 @@ export function countAttachedPipes(
   blocks: Map<string, Block>,
 ): number {
   return getAttachedPipeKeys(cubePos, blocks).length;
+}
+
+/**
+ * Collect all port positions in the diagram: open pipe endpoints plus user-placed
+ * port markers. Positions already occupied by a block are excluded. Returned in
+ * deterministic sort order (by x, then y, then z).
+ */
+export function getAllPortPositions(
+  blocks: Map<string, Block>,
+  explicitPorts: Set<string>,
+): Position3D[] {
+  const seen = new Set<string>();
+  const result: Position3D[] = [];
+
+  const add = (pos: Position3D) => {
+    const key = posKey(pos);
+    if (blocks.has(key) || seen.has(key)) return;
+    seen.add(key);
+    result.push(pos);
+  };
+
+  for (const block of blocks.values()) {
+    if (!isPipeType(block.type)) continue;
+    const base = block.type.replace("H", "");
+    const openAxis = base.indexOf("O");
+    const coords: [number, number, number] = [block.pos.x, block.pos.y, block.pos.z];
+    for (const offset of [-1, 2]) {
+      const n: [number, number, number] = [coords[0], coords[1], coords[2]];
+      n[openAxis] += offset;
+      add({ x: n[0], y: n[1], z: n[2] });
+    }
+  }
+
+  for (const key of explicitPorts) {
+    const parts = key.split(",").map(Number);
+    add({ x: parts[0], y: parts[1], z: parts[2] });
+  }
+
+  result.sort((a, b) => a.x - b.x || a.y - b.y || a.z - b.z);
+  return result;
 }
 
 /**

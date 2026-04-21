@@ -2,10 +2,11 @@ import { create } from "zustand";
 import { useKeybindStore } from "./keybindStore";
 import type {
   Position3D, Block, BlockType, CubeType, PipeVariant, PipeType, SpatialIndex, FaceMask,
-  BuildDirection, UndeterminedCubeInfo, ViewMode, IsoAxis,
+  BuildDirection, UndeterminedCubeInfo, ViewMode, IsoAxis, PortMeta, PortIO,
 } from "../types";
 import {
   posKey,
+  getAllPortPositions,
   hasBlockOverlap,
   hasCubeColorConflict,
   hasPipeColorConflict,
@@ -168,6 +169,17 @@ interface BlockStore {
    * not cube-grid-aligned. Cleared whenever the selection itself changes. */
   selectionPivot: Position3D | null;
 
+  /**
+   * Per-port metadata (label + input/output direction) used by the Stabilizer
+   * Flows panel. Keyed by posKey. Entries are allocated lazily via
+   * `ensurePortLabels` and survive across diagram edits (so a renamed port
+   * keeps its name even if the user temporarily removes the connecting pipe).
+   */
+  portMeta: Map<string, PortMeta>;
+
+  /** Whether the right-docked Stabilizer Flows panel is visible. */
+  flowsPanelOpen: boolean;
+
   // Drag-selection state (live during a drag of the current selection)
   isDraggingSelection: boolean;
   dragDelta: Position3D | null;
@@ -227,6 +239,12 @@ interface BlockStore {
   selectBlocks: (keys: string[], additive: boolean) => void;
   togglePortSelection: (pos: Position3D, additive: boolean) => void;
   clearPortSelection: () => void;
+  /** Allocate fresh `P1`, `P2`, ... labels for any port position missing an entry. Idempotent. */
+  ensurePortLabels: () => void;
+  setPortLabel: (pos: Position3D, label: string) => void;
+  setPortIO: (pos: Position3D, io: PortIO) => void;
+  setFlowsPanelOpen: (open: boolean) => void;
+  toggleFlowsPanel: () => void;
   setDragState: (s: { isDragging: boolean; delta: Position3D | null; valid: boolean }) => void;
   moveSelection: (delta: Position3D) => boolean;
 
@@ -410,6 +428,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   selectedKeys: new Set(),
   selectedPortPositions: new Set(),
   portPositions: new Set(),
+  portMeta: new Map(),
+  flowsPanelOpen: false,
   selectionPivot: null,
 
   isDraggingSelection: false,
@@ -3005,4 +3025,75 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     }),
 
   clearCameraSnap: () => set({ cameraSnapTarget: null }),
+
+  ensurePortLabels: () =>
+    set((state) => {
+      const positions = getAllPortPositions(state.blocks, state.portPositions);
+      const currentKeys = new Set(state.portMeta.keys());
+      const newKeys = new Set(positions.map(posKey));
+
+      const missing = positions.filter((p) => !currentKeys.has(posKey(p)));
+      const stale = [...currentKeys].filter((k) => !newKeys.has(k));
+      if (missing.length === 0 && stale.length === 0) return state;
+
+      const next = new Map(state.portMeta);
+      for (const k of stale) next.delete(k);
+
+      const used = new Set<string>();
+      for (const meta of next.values()) used.add(meta.label);
+      let nextId = 1;
+      const allocLabel = (): string => {
+        while (used.has(`P${nextId}`)) nextId++;
+        const l = `P${nextId}`;
+        used.add(l);
+        return l;
+      };
+
+      for (const pos of missing) {
+        next.set(posKey(pos), { label: allocLabel(), io: "in" });
+      }
+      return { portMeta: next };
+    }),
+
+  setPortLabel: (pos, label) =>
+    set((state) => {
+      const key = posKey(pos);
+      const existing = state.portMeta.get(key);
+      if (!existing) return state;
+      const trimmed = label.trim();
+      if (trimmed === existing.label) return state;
+
+      // Blank input → drop the entry and reallocate a fresh P{n} via the
+      // same allocator used for new ports.
+      const next = new Map(state.portMeta);
+      if (!trimmed) {
+        next.delete(key);
+        const used = new Set<string>();
+        for (const m of next.values()) used.add(m.label);
+        let n = 1;
+        while (used.has(`P${n}`)) n++;
+        next.set(key, { ...existing, label: `P${n}` });
+        return { portMeta: next };
+      }
+
+      // Reject duplicates (TQEC requires unique port labels).
+      for (const [k, m] of state.portMeta) {
+        if (k !== key && m.label === trimmed) return state;
+      }
+      next.set(key, { ...existing, label: trimmed });
+      return { portMeta: next };
+    }),
+
+  setPortIO: (pos, io) =>
+    set((state) => {
+      const key = posKey(pos);
+      const existing = state.portMeta.get(key);
+      if (!existing || existing.io === io) return state;
+      const next = new Map(state.portMeta);
+      next.set(key, { ...existing, io });
+      return { portMeta: next };
+    }),
+
+  setFlowsPanelOpen: (open) => set({ flowsPanelOpen: open }),
+  toggleFlowsPanel: () => set((s) => ({ flowsPanelOpen: !s.flowsPanelOpen })),
 }));

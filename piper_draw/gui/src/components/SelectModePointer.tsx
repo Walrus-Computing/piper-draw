@@ -4,6 +4,7 @@ import { useBlockStore } from "../stores/blockStore";
 import { getBlockKeysInScreenRect } from "../utils/projection";
 import { pointerGroundPoint } from "../utils/groundPlane";
 import { isMoveValid } from "../utils/dragValidate";
+import { isEditableTarget } from "../utils/editableFocus";
 import { blockThreeSize, tqecToThree, yBlockZOffset } from "../types";
 import type { Block, Position3D } from "../types";
 
@@ -404,6 +405,7 @@ export function SelectModePointer({
 
   const onKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return;
       const state = dragRef.current;
       if (e.key === "Escape" && state != null) {
         e.preventDefault();
