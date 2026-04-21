@@ -92,7 +92,7 @@ export type BuildStep = {
 type UndoCommand =
   | { kind: "add"; key: string; block: Block }
   | { kind: "remove"; key: string; block: Block }
-  | { kind: "bulk-remove"; entries: Array<{ key: string; block: Block }> }
+  | { kind: "bulk-remove"; entries: Array<{ key: string; block: Block }>; portKeys?: string[] }
   | { kind: "bulk-add"; entries: Array<{ key: string; block: Block }> }
   | { kind: "bulk-move"; entries: Array<{ oldKey: string; oldBlock: Block; newKey: string; newBlock: Block }> }
   | { kind: "clear"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask>; savedUndetermined: Map<string, UndeterminedCubeInfo> }
@@ -1215,9 +1215,15 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         for (const entry of cmd.entries) {
           ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, entry.key, entry.block));
         }
+        let portPositions = state.portPositions;
+        if (cmd.portKeys && cmd.portKeys.length > 0) {
+          portPositions = new Set(portPositions);
+          for (const k of cmd.portKeys) portPositions.add(k);
+        }
         return {
           blocks,
           hiddenFaces,
+          portPositions,
           history: newHistory,
           future: [cmd, ...state.future].slice(0, MAX_HISTORY),
           hoveredGridPos: null,
@@ -1582,13 +1588,20 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         for (const entry of cmd.entries) {
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, entry.key, entry.block));
         }
+        let portPositions = state.portPositions;
+        if (cmd.portKeys && cmd.portKeys.length > 0) {
+          portPositions = new Set(portPositions);
+          for (const k of cmd.portKeys) portPositions.delete(k);
+        }
         return {
           blocks,
           hiddenFaces,
+          portPositions,
           history: [...state.history, cmd],
           future: newFuture,
           hoveredGridPos: null,
           selectedKeys: new Set<string>(),
+          selectedPortPositions: new Set<string>(),
           selectionPivot: null,
         };
       }
@@ -2086,7 +2099,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
   deleteSelected: () =>
     set((state) => {
-      if (state.selectedKeys.size === 0) return state;
+      if (state.selectedKeys.size === 0 && state.selectedPortPositions.size === 0) return state;
       const entries: Array<{ key: string; block: Block }> = [];
       const seen = new Set<string>();
       let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
@@ -2111,13 +2124,22 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, ck, cb));
         }
       }
-      if (entries.length === 0) return state;
-      const cmd: UndoCommand = { kind: "bulk-remove", entries };
+      const portKeys: string[] = [];
+      let portPositions = state.portPositions;
+      for (const key of state.selectedPortPositions) {
+        if (!portPositions.has(key)) continue;
+        if (portKeys.length === 0) portPositions = new Set(portPositions);
+        (portPositions as Set<string>).delete(key);
+        portKeys.push(key);
+      }
+      if (entries.length === 0 && portKeys.length === 0) return state;
+      const cmd: UndoCommand = { kind: "bulk-remove", entries, ...(portKeys.length > 0 ? { portKeys } : {}) };
       const newUndetermined = new Map(state.undeterminedCubes);
       for (const { key } of entries) newUndetermined.delete(key);
       return {
         blocks,
         hiddenFaces,
+        portPositions,
         history: [...state.history, cmd].slice(-MAX_HISTORY),
         future: [],
         selectedKeys: new Set<string>(),
