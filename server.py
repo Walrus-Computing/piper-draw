@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pyzx
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from tqec.computation.block_graph import BlockGraph
 from tqec.utils.exceptions import TQECError
@@ -633,3 +635,10 @@ async def zx(req: ZXRequest) -> ZXResponse:
         circuit_error=circuit_error,
         error=None,
     )
+
+
+# Serve the built frontend (if present) at the root. Mounted last so all
+# /api/* routes take precedence over the static catch-all.
+_DIST = Path(__file__).parent / "gui" / "dist"
+if _DIST.is_dir():
+    app.mount("/", StaticFiles(directory=_DIST, html=True), name="static")

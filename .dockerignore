@@ -1,0 +1,14 @@
+**/__pycache__
+**/.venv
+**/node_modules
+**/dist
+.git
+.github
+tests
+.pytest_cache
+.ruff_cache
+.gstack
+.vscode
+.context
+.claude
+*.md
