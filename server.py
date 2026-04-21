@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from tqec.computation.block_graph import BlockGraph
 from tqec.utils.exceptions import TQECError
@@ -275,3 +277,8 @@ async def flows(req: FlowsRequest) -> FlowsResponse:
         outputs=outputs,
         flows=flows_out,
     )
+
+
+_DIST = Path(__file__).parent / "gui" / "dist"
+if _DIST.is_dir():
+    app.mount("/", StaticFiles(directory=_DIST, html=True), name="static")
