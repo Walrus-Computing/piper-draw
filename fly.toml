@@ -1,0 +1,21 @@
+# Fly.io config for piper-draw.
+# Change `app` to a unique name (Fly will reject duplicates) and `primary_region`
+# to the three-letter code closest to you (e.g. ams, fra, iad, sjc).
+# See: https://fly.io/docs/reference/regions/
+
+app = "piper-draw"
+primary_region = "ams"
+
+[build]
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
