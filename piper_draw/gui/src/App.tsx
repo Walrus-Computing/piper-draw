@@ -20,6 +20,7 @@ import { OrientationGizmo } from "./components/OrientationGizmo";
 import { Toolbar } from "./components/Toolbar";
 import { ValidationToast } from "./components/ValidationToast";
 import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
+import { LocatePulseHighlight } from "./components/LocatePulseHighlight";
 import { SelectionHighlights } from "./components/SelectionHighlights";
 import { BuildCursor } from "./components/BuildCursor";
 import { SelectModePointer, type ThreeState } from "./components/SelectModePointer";
@@ -812,7 +813,7 @@ export default function App() {
         ?
       </button>
       {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
-      <FlowsPanel />
+      <FlowsPanel controlsRef={controlsRef} />
       <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />
       <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />
       {keybindEditorMode && (
@@ -829,6 +830,7 @@ export default function App() {
         <BlockInstances />
         {!photoRequest && <FoldOutCubeOverlay />}
         {!photoRequest && <InvalidBlockHighlights />}
+        {!photoRequest && <LocatePulseHighlight />}
         {!photoRequest && <SelectionHighlights />}
         {!photoRequest && <DragGhost />}
         {!photoRequest && <BuildCursor />}

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
+import { useLocateStore } from "../stores/locateStore";
 import { computeFlows, type FlowsResult } from "../utils/flows";
-import { getAllPortPositions, posKey, type Position3D } from "../types";
+import { getAllPortPositions, posKey, tqecToThree, type Position3D } from "../types";
 import { isInSpanGF2, pauliToSymplectic } from "../utils/stabilizerSpan";
+import { animateCamera } from "../utils/cameraAnim";
 
 type Pauli = "I" | "X" | "Y" | "Z";
 const PAULI_CYCLE: Pauli[] = ["I", "X", "Y", "Z"];
@@ -87,6 +90,19 @@ function PortLabelInput({
   );
 }
 
+function LocateIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <circle cx="8" cy="8" r="1" fill="currentColor" />
+      <line x1="8" y1="1" x2="8" y2="3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <line x1="8" y1="12.5" x2="8" y2="15" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <line x1="1" y1="8" x2="3.5" y2="8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <line x1="12.5" y1="8" x2="15" y2="8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function PauliCell({ pauli }: { pauli: string }) {
   const color = PAULI_COLOR[pauli] ?? "#ccc";
   const isI = pauli === "I";
@@ -145,7 +161,12 @@ function EditablePauliCell({
   );
 }
 
-export function FlowsPanel() {
+export function FlowsPanel({
+  controlsRef,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  controlsRef: React.RefObject<any>;
+}) {
   const open = useBlockStore((s) => s.flowsPanelOpen);
   const blocks = useBlockStore((s) => s.blocks);
   const portMeta = useBlockStore((s) => s.portMeta);
@@ -187,6 +208,22 @@ export function FlowsPanel() {
     setQueries([]);
     setLoading(false);
   }, [ensurePortLabels]);
+
+  const handleLocate = useCallback(
+    (pos: Position3D) => {
+      const controls = controlsRef.current;
+      if (controls) {
+        const [tx, ty, tz] = tqecToThree(pos, "XZZ");
+        const camera = controls.object as THREE.PerspectiveCamera;
+        const endTarget = new THREE.Vector3(tx, ty, tz);
+        const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+        const endPos = endTarget.clone().add(offset);
+        animateCamera(controls, endTarget, endPos, { duration: 400 });
+      }
+      useLocateStore.getState().setPulse(posKey(pos));
+    },
+    [controlsRef],
+  );
 
   const generatorSpan = useMemo(() => {
     if (!result || !result.ok) return null;
@@ -313,6 +350,25 @@ export function FlowsPanel() {
                 marginBottom: 4,
               }}
             >
+              <button
+                type="button"
+                onClick={() => handleLocate(pos)}
+                aria-label="Locate port"
+                title="Locate port"
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 2,
+                  cursor: "pointer",
+                  color: "#666",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <LocateIcon />
+              </button>
               <PortLabelInput
                 pos={pos}
                 label={meta?.label ?? ""}
