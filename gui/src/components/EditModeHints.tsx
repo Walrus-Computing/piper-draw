@@ -39,6 +39,7 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
     hints.push(
       ["Click", "Select"],
       ["Shift+Click", "Add/remove"],
+      ["Ctrl+Shift+Drag", "Marquee select"],
       [bindingToLabel(b.selectAll), "Select all"],
       [bindingToLabel(b.flipColors), "Flip colors"],
       [`${bindingToLabel(b.rotateCcw)}/${bindingToLabel(b.rotateCw)}`, "Rotate CCW/CW (Z)"],
