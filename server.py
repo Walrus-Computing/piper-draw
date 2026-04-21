@@ -601,9 +601,7 @@ async def zx(req: ZXRequest) -> ZXResponse:
             pos_list = [float(r), 0.0, -float(q)] if q != -1 and r != -1 else None
         else:
             pos = pzx.positions.get(v)
-            pos_list = (
-                [float(pos.x), float(pos.y), float(pos.z)] if pos is not None else None
-            )
+            pos_list = [float(pos.x), float(pos.y), float(pos.z)] if pos is not None else None
         vertices.append(
             ZXVertex(
                 id=int(v),

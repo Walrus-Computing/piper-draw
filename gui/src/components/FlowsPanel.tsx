@@ -3,14 +3,14 @@ import { useBlockStore } from "../stores/blockStore";
 import { computeFlows, type FlowsResult } from "../utils/flows";
 import { getAllPortPositions, type Position3D } from "../types";
 import { isInSpanGF2, pauliToSymplectic } from "../utils/stabilizerSpan";
+import { useFloatingPanel } from "../hooks/useFloatingPanel";
+import { ResizeGrip } from "../hooks/ResizeGrip";
 import {
-  ResizeGrip,
   clampGeometryToSafe,
   readPanelGeometry,
   rectsOverlap,
-  useFloatingPanel,
   type SafeMargins,
-} from "../hooks/useFloatingPanel";
+} from "../hooks/floatingPanelGeometry";
 import { PortsTable } from "./PortsTable";
 
 const PANEL_MIN_WIDTH = 280;

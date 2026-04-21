@@ -517,12 +517,8 @@ class TestZXEndpoint:
             for c in bg.cubes
             if c.is_port
         ]
-        ports_sorted = sorted(
-            (c for c in bg.cubes if c.is_port), key=lambda c: c.position.z
-        )
-        port_io = {
-            c.label: ("in" if i < 2 else "out") for i, c in enumerate(ports_sorted)
-        }
+        ports_sorted = sorted((c for c in bg.cubes if c.is_port), key=lambda c: c.position.z)
+        port_io = {c.label: ("in" if i < 2 else "out") for i, c in enumerate(ports_sorted)}
 
         result = self._run(
             ZXRequest(
@@ -581,7 +577,17 @@ class TestZXEndpoint:
             assert parts[0].isdigit(), f"expected time index in {ln!r}"
             # Gate name should be one of the ones the emitter handles.
             assert parts[1] in {
-                "h", "x", "z", "s", "t", "rx", "ry", "rz", "cx", "cz", "swap",
+                "h",
+                "x",
+                "z",
+                "s",
+                "t",
+                "rx",
+                "ry",
+                "rz",
+                "cx",
+                "cz",
+                "swap",
             }, f"unexpected qsim gate: {parts[1]!r} in {ln!r}"
 
     def test_extract_cnot_verified_and_displayed_as_circuit(self):
@@ -619,12 +625,8 @@ class TestZXEndpoint:
             for c in bg.cubes
             if c.is_port
         ]
-        ports_sorted = sorted(
-            (c for c in bg.cubes if c.is_port), key=lambda c: c.position.z
-        )
-        port_io = {
-            c.label: ("in" if i < 2 else "out") for i, c in enumerate(ports_sorted)
-        }
+        ports_sorted = sorted((c for c in bg.cubes if c.is_port), key=lambda c: c.position.z)
+        port_io = {c.label: ("in" if i < 2 else "out") for i, c in enumerate(ports_sorted)}
 
         result = self._run(
             ZXRequest(

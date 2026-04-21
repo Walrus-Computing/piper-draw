@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBlockStore } from "../stores/blockStore";
+import { useFloatingPanel } from "../hooks/useFloatingPanel";
+import { ResizeGrip } from "../hooks/ResizeGrip";
 import {
-  ResizeGrip,
   clampGeometryToSafe,
   readPanelGeometry,
   rectsOverlap,
-  useFloatingPanel,
   type SafeMargins,
-} from "../hooks/useFloatingPanel";
+} from "../hooks/floatingPanelGeometry";
 import { PortsTable } from "./PortsTable";
 
 const PANEL_MIN_WIDTH = 280;
