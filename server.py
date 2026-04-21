@@ -430,8 +430,12 @@ async def zx(req: ZXRequest) -> ZXResponse:
         else:
             try:
                 c = pyzx.extract_circuit(pzx.g.copy())
-                # Decompose to basic gates so the renderer only has to handle
-                # a small alphabet (HAD, NOT, Z, S, T, CNOT, CZ, ZPhase, …).
+                # Cancel the HH / XX / ZZ pairs and redundant phase gates
+                # that extract_circuit routinely inserts at qubit boundaries
+                # (e.g. the CNOT template produces a pair of leading Hs on
+                # the control line that compose to identity).
+                c = pyzx.optimize.basic_optimization(c.to_basic_gates())
+                # Already in basic gates, but to_basic_gates is idempotent.
                 basic = c.to_basic_gates()
                 circuit_info = ZXCircuit(
                     qubits=c.qubits,

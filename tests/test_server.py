@@ -482,6 +482,69 @@ class TestZXEndpoint:
         assert result["circuit"] is None
         assert "requires simplification" in (result["circuit_error"] or "")
 
+    def test_extract_cnot_template_is_single_cx(self):
+        # Regression for pyzx.extract_circuit producing a leading HH pair on
+        # the control line of tqec.gallery.cnot(). After basic_optimization,
+        # the whole circuit should collapse to a single CNOT and contain no
+        # consecutive H gates on the same qubit.
+        import tqec.gallery
+
+        bg = tqec.gallery.cnot()
+        blocks: list[BlockInput] = []
+        for cube in bg.cubes:
+            if cube.is_port:
+                continue
+            blocks.append(
+                BlockInput(
+                    pos=list(_tqec_to_piper_pos(cube.position.as_tuple())),
+                    type=str(cube.kind),
+                )
+            )
+        for pipe in bg.pipes:
+            up = _tqec_to_piper_pos(pipe.u.position.as_tuple())
+            vp = _tqec_to_piper_pos(pipe.v.position.as_tuple())
+            blocks.append(
+                BlockInput(
+                    pos=[(a + b) // 2 for a, b in zip(up, vp)],
+                    type=str(pipe.kind),
+                )
+            )
+        port_labels = [
+            PortLabelInput(
+                pos=list(_tqec_to_piper_pos(c.position.as_tuple())),
+                label=c.label,
+            )
+            for c in bg.cubes
+            if c.is_port
+        ]
+        ports_sorted = sorted(
+            (c for c in bg.cubes if c.is_port), key=lambda c: c.position.z
+        )
+        port_io = {
+            c.label: ("in" if i < 2 else "out") for i, c in enumerate(ports_sorted)
+        }
+
+        result = self._run(
+            ZXRequest(
+                blocks=blocks,
+                port_labels=port_labels,
+                port_io=port_io,
+                simplify=True,
+                extract=True,
+            )
+        )
+        assert result["ok"] is True, result
+        assert result["circuit_error"] is None, result["circuit_error"]
+        gates = result["circuit"]["gates"]
+        names = [g["name"] for g in gates]
+        # Core assertion: no redundant HH pair on the same qubit.
+        for i in range(len(gates) - 1):
+            same_qubit = gates[i]["qubits"] == gates[i + 1]["qubits"]
+            both_h = names[i] == "HAD" and names[i + 1] == "HAD"
+            assert not (same_qubit and both_h), f"consecutive Hs remain: {names}"
+        # A well-optimized CNOT collapses to a single CX / CNOT gate.
+        assert names in (["CNOT"], ["CX"]), f"expected single CX, got {names}"
+
     def test_extract_without_outputs_errors(self):
         result = self._run(
             ZXRequest(
