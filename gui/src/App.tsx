@@ -481,7 +481,6 @@ export default function App() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (isEditableTarget(e.target)) return;
       const key = e.key.toLowerCase();
       const ctrl = e.ctrlKey || e.metaKey;
       const shift = e.shiftKey;
@@ -489,6 +488,22 @@ export default function App() {
       const store = useBlockStore.getState();
       const bindings = useKeybindStore.getState().bindings;
       const mode = store.mode;
+
+      if (isEditableTarget(e.target)) {
+        // Build-mode shortcuts (W/A/S/D/Q/Cmd+Z/...) must still fire when focus
+        // is on the coordinate inputs, otherwise typing a coord and hitting an
+        // undo shortcut silently inserts the character instead of undoing.
+        // Escape is excluded so it stays a per-input cancel (clearing the draft)
+        // rather than exiting build mode.
+        if (mode !== "build" || key === "escape") return;
+        const editAction = actionForKey(bindings.edit, key, ctrl, shift, alt);
+        const matches =
+          !!actionForKey(bindings.build, key, ctrl, shift, alt) ||
+          editAction === "undo" ||
+          editAction === "redo";
+        if (!matches) return;
+        (e.target as HTMLElement).blur();
+      }
 
       // Global shortcuts (work in both modes). Run before mode-specific bindings.
       // Ctrl/Cmd-modified globals: copy, paste, export.
@@ -640,7 +655,14 @@ export default function App() {
 
       if (mode === "build") {
         const action = actionForKey(bindings.build, key, ctrl, shift, alt);
-        if (!action) return;
+        if (!action) {
+          // Also honor the edit-mode undo/redo bindings (Cmd+Z / Cmd+Shift+Z)
+          // while in build mode — users expect Cmd+Z to undo anywhere.
+          const editAction = actionForKey(bindings.edit, key, ctrl, shift, alt);
+          if (editAction === "undo") { e.preventDefault(); store.undo(); return; }
+          if (editAction === "redo") { e.preventDefault(); store.redo(); return; }
+          return;
+        }
         e.preventDefault();
         switch (action) {
           case "moveForward":
