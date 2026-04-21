@@ -32,6 +32,7 @@ import { FlowsPanel } from "./components/FlowsPanel";
 import { ZXPanel } from "./components/ZXPanel";
 import { PortLabels3D } from "./components/PortLabels3D";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
+import { FlowSurfaceOverlay } from "./components/FlowSurfaceOverlay";
 import { BuildModeHints } from "./components/BuildModeHints";
 import { EditModeHints } from "./components/EditModeHints";
 import { KeybindEditor, type KeybindEditorTab } from "./components/KeybindEditor";
@@ -472,6 +473,7 @@ export default function App() {
   const photoRequest = useBlockStore((s) => s.photoRequest);
   const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
   const zxPanelOpen = useBlockStore((s) => s.zxPanelOpen);
+  const flowVizMode = useBlockStore((s) => s.flowVizMode);
   const showGrid = useBlockStore((s) => s.showGrid);
   const showHints = useBlockStore((s) => s.showHints);
 
@@ -994,18 +996,19 @@ export default function App() {
         <ambientLight intensity={1.4} />
         <directionalLight position={[10, 10, 10]} intensity={1.0} />
         <BlockInstances />
-        {!photoRequest && <FoldOutCubeOverlay />}
-        {!photoRequest && <InvalidBlockHighlights />}
+        {!photoRequest && !flowVizMode && <FoldOutCubeOverlay />}
+        {!photoRequest && !flowVizMode && <InvalidBlockHighlights />}
         {!photoRequest && <LocatePulseHighlight />}
-        {!photoRequest && <SelectionHighlights />}
-        {!photoRequest && <DragGhost />}
-        {!photoRequest && <BuildCursor />}
-        {!photoRequest && <OpenPipeGhosts />}
-      {!photoRequest && (flowsPanelOpen || zxPanelOpen) && <PortLabels3D />}
+        {!photoRequest && !flowVizMode && <SelectionHighlights />}
+        {!photoRequest && !flowVizMode && <DragGhost />}
+        {!photoRequest && !flowVizMode && <BuildCursor />}
+        {!photoRequest && !flowVizMode && <OpenPipeGhosts />}
+      {!photoRequest && (flowsPanelOpen || zxPanelOpen || flowVizMode) && <PortLabels3D />}
+        {!photoRequest && <FlowSurfaceOverlay />}
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
-        {!photoRequest && <GhostBlock />}
-        {!photoRequest && <PasteGhost />}
+        {!photoRequest && !flowVizMode && <GhostBlock />}
+        {!photoRequest && !flowVizMode && <PasteGhost />}
         <AxisLabels />
         <FpsSampler targetRef={fpsRef} />
         {!photoRequest && showGrid && <CheckerboardGrid />}

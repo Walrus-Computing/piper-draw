@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { useKeybindStore } from "./keybindStore";
+import type { Flow } from "../utils/flows";
 import type {
   Position3D, Block, BlockType, CubeType, PipeVariant, PipeType, SpatialIndex, FaceMask,
   BuildDirection, UndeterminedCubeInfo, ViewMode, IsoAxis, PortMeta, PortIO,
@@ -189,6 +190,15 @@ interface BlockStore {
   /** Whether the right-docked ZX-diagram panel is visible. */
   zxPanelOpen: boolean;
 
+  /** Last-computed flows (with surface geometry), published by FlowsPanel. */
+  flows: Flow[];
+  /** Signature of the diagram when `flows` was last computed; used to detect stale data. */
+  flowsSignature: string | null;
+  /** Row selected in FlowsPanel (index into `flows`), shown in 3D when flowVizMode is on. */
+  selectedFlowIndex: number | null;
+  /** When on, dim blocks and render only the selected flow's correlation surfaces. */
+  flowVizMode: boolean;
+
   // Drag-selection state (live during a drag of the current selection)
   isDraggingSelection: boolean;
   dragDelta: Position3D | null;
@@ -283,6 +293,11 @@ interface BlockStore {
   setPortIO: (pos: Position3D, io: PortIO) => void;
   setFlowsPanelOpen: (open: boolean) => void;
   toggleFlowsPanel: () => void;
+
+  /** Publish computed flows (with surface geometry) for the 3D overlay to read. */
+  setFlows: (flows: Flow[], signature: string) => void;
+  setSelectedFlowIndex: (index: number | null) => void;
+  setFlowVizMode: (on: boolean) => void;
   setZXPanelOpen: (open: boolean) => void;
   toggleZXPanel: () => void;
   setDragState: (s: { isDragging: boolean; delta: Position3D | null; valid: boolean }) => void;
@@ -557,6 +572,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   portMeta: new Map(),
   flowsPanelOpen: false,
   zxPanelOpen: false,
+  flows: [],
+  flowsSignature: null,
+  selectedFlowIndex: null,
+  flowVizMode: false,
   selectionPivot: null,
   clipboard: null,
 
@@ -3264,6 +3283,15 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
   setFlowsPanelOpen: (open) => set({ flowsPanelOpen: open }),
   toggleFlowsPanel: () => set((s) => ({ flowsPanelOpen: !s.flowsPanelOpen })),
+
+  setFlows: (flows, signature) =>
+    set({
+      flows,
+      flowsSignature: signature,
+      selectedFlowIndex: flows.length > 0 ? 0 : null,
+    }),
+  setSelectedFlowIndex: (index) => set({ selectedFlowIndex: index }),
+  setFlowVizMode: (on) => set({ flowVizMode: on }),
 
   setZXPanelOpen: (open) => set({ zxPanelOpen: open }),
   toggleZXPanel: () => set((s) => ({ zxPanelOpen: !s.zxPanelOpen })),

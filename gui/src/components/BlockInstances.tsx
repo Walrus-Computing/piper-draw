@@ -389,6 +389,7 @@ export function BlockInstances() {
   const blocks = useBlockStore((s) => s.blocks);
   const hiddenFaces = useBlockStore((s) => s.hiddenFaces);
   const viewMode = useBlockStore((s) => s.viewMode);
+  const flowVizMode = useBlockStore((s) => s.flowVizMode);
 
   const grouped = useMemo(() => {
     type Group = {
@@ -400,7 +401,9 @@ export function BlockInstances() {
     const map = new Map<string, Group>();
     for (const block of blocks.values()) {
       const hf = hiddenFaces.get(posKey(block.pos)) ?? 0;
-      const dimmed = viewMode.kind === "iso" && !posInActiveSlice(viewMode, block.pos);
+      const dimmed =
+        flowVizMode ||
+        (viewMode.kind === "iso" && !posInActiveSlice(viewMode, block.pos));
       const key = `${block.type}:${hf}:${dimmed ? 1 : 0}`;
       const existing = map.get(key);
       if (existing) {
@@ -415,7 +418,7 @@ export function BlockInstances() {
       }
     }
     return map;
-  }, [blocks, hiddenFaces, viewMode]);
+  }, [blocks, hiddenFaces, viewMode, flowVizMode]);
 
   return (
     <>
