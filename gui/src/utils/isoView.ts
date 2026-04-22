@@ -19,7 +19,7 @@ export function isoCameraThree(viewMode: IsoMode): THREE.Vector3 {
   return isoTargetThree(viewMode).add(isoCameraOffset(viewMode.axis));
 }
 
-function isoCameraOffset(axis: IsoAxis): THREE.Vector3 {
+export function isoCameraOffset(axis: IsoAxis): THREE.Vector3 {
   if (axis === "x") return new THREE.Vector3(ISO_DISTANCE, 0, 0);
   if (axis === "y") return new THREE.Vector3(0, 0, ISO_DISTANCE);
   return new THREE.Vector3(0, ISO_DISTANCE, 0);

@@ -2466,6 +2466,21 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           }
         : {};
 
+    // Slice auto-advance in iso mode: if the build cursor crosses the depth
+    // axis, move the visible slice with it so the freshly built cell stays
+    // on-screen. Independent of cameraFollowsBuild — without this, building
+    // along the depth axis is invisible.
+    const sliceUpdate: { viewMode?: ViewMode; lastIsoSlice?: { x: number; y: number; z: number } } = (() => {
+      if (state.viewMode.kind !== "iso") return {};
+      const axis = state.viewMode.axis;
+      const destDepth = axis === "x" ? destPos.x : axis === "y" ? destPos.y : destPos.z;
+      if (destDepth === state.viewMode.slice) return {};
+      return {
+        viewMode: { ...state.viewMode, slice: destDepth },
+        lastIsoSlice: { ...state.lastIsoSlice, [axis]: destDepth },
+      };
+    })();
+
     const reject = (reason?: string) => {
       if (reason) set({ hoveredInvalidReason: reason });
       return false;
@@ -2481,6 +2496,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       set({
         buildCursor: destPos,
         ...snapUpdate,
+        ...sliceUpdate,
         hoveredInvalidReason: null,
       });
       return true;
@@ -2760,6 +2776,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         undeterminedCubes: newUndetermined,
         portPositions: nextPortPositions,
         ...snapUpdate,
+        ...sliceUpdate,
         history: [...s.history, { kind: "build-step" as const, step }].slice(-MAX_HISTORY),
         future: [],
         hoveredInvalidReason: null,
@@ -2861,6 +2878,20 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         newUndetermined.delete(step.originCube.key);
       }
 
+      // Iso: mirror buildMove's slice auto-advance so undo moves the visible
+      // slice back with the cursor (otherwise the reverted cursor is off-slab).
+      const sliceUpdate: { viewMode?: ViewMode; lastIsoSlice?: { x: number; y: number; z: number } } = (() => {
+        if (s.viewMode.kind !== "iso") return {};
+        const axis = s.viewMode.axis;
+        const p = step.prevCursorPos;
+        const destDepth = axis === "x" ? p.x : axis === "y" ? p.y : p.z;
+        if (destDepth === s.viewMode.slice) return {};
+        return {
+          viewMode: { ...s.viewMode, slice: destDepth },
+          lastIsoSlice: { ...s.lastIsoSlice, [axis]: destDepth },
+        };
+      })();
+
       // Also pop from general undo history if the last command is a matching build-step
       const newHistory = [...s.history];
       if (newHistory.length > 0 && newHistory[newHistory.length - 1].kind === "build-step") {
@@ -2874,6 +2905,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           portPositions: nextPortPositions,
           cameraSnapTarget: { azimuth: null, targetPos: step.prevCursorPos },
           lastBuildAxis: null,
+          ...sliceUpdate,
           history: newHistory,
           future: [cmd, ...s.future].slice(0, MAX_HISTORY),
           hoveredGridPos: null,
@@ -2889,6 +2921,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         portPositions: nextPortPositions,
         cameraSnapTarget: { azimuth: null, targetPos: step.prevCursorPos },
         lastBuildAxis: null,
+        ...sliceUpdate,
         hoveredGridPos: null,
       };
     });
