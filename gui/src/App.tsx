@@ -771,15 +771,13 @@ export default function App() {
           store.redo();
           return;
         case "stepForward":
-          // Skip slice-step when the pointer tool has a selection — SelectModePointer
-          // handles ↑/↓ as a Z-nudge of the selection.
-          if (store.viewMode.kind === "iso" && !(store.armedTool === "pointer" && store.selectedKeys.size > 0)) {
+          if (store.viewMode.kind === "iso") {
             e.preventDefault();
             store.stepSlice(3);
           }
           return;
         case "stepBack":
-          if (store.viewMode.kind === "iso" && !(store.armedTool === "pointer" && store.selectedKeys.size > 0)) {
+          if (store.viewMode.kind === "iso") {
             e.preventDefault();
             store.stepSlice(-3);
           }
