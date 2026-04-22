@@ -23,9 +23,10 @@ import type { ThreeAxis } from "../utils/isoFoldOut";
  * the `Port` entry (a plain ghost cube — no per-face colours, so iso fold-out
  * variants reuse the same ghost preview).
  *
- * `isoZBlockType` (pipes only) overrides `blockType` in iso-z mode so that
- * the preview shows a horizontal pipe (lying in the xy plane) as seen from
- * above, matching how the pipe will actually be placed in that mode.
+ * `isoZBlockType` (pipes only) overrides `blockType` in iso-z mode. The default
+ * `blockType` is the Z-axis pipe which points into the screen in iso-z (invisible),
+ * so we substitute the Y-axis pipe — an in-plane pipe rendered vertically on
+ * screen, matching the vertical orientation shown in iso-x / iso-y.
  */
 const PREVIEW_TYPES: { key: string; blockType: BlockType | null; isoZBlockType?: BlockType }[] = [
   { key: "Port", blockType: null },
@@ -34,7 +35,7 @@ const PREVIEW_TYPES: { key: string; blockType: BlockType | null; isoZBlockType?:
   ...(["ZX", "XZ", "ZXH", "XZH"] as PipeVariant[]).map((v) => ({
     key: v,
     blockType: VARIANT_AXIS_MAP[v][2] as BlockType,
-    isoZBlockType: VARIANT_AXIS_MAP[v][0] as BlockType,
+    isoZBlockType: VARIANT_AXIS_MAP[v][1] as BlockType,
   })),
 ];
 
