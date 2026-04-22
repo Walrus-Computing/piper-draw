@@ -45,7 +45,7 @@ import {
   type KeyBinding,
 } from "./stores/keybindStore";
 import { useValidationStore } from "./stores/validationStore";
-import { wasdToBuildDirection, tqecToThree, posKey, blockTqecSize, type Block, type ViewMode } from "./types";
+import { wasdToBuildDirection, tqecToThree, posKey, blockTqecSize, type Block, type IsoAxis, type ViewMode } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
 import { downloadPng } from "./utils/photoExport";
@@ -55,6 +55,7 @@ import {
   ISO_INITIAL_ZOOM,
   isoBuildDirection,
   isoCameraThree,
+  isoCameraOffset,
   isoGridMeshTransform,
   isoTargetThree,
   isoUpThree,
@@ -264,16 +265,33 @@ function IsoViewport({
   controlsRef: React.RefObject<any>;
 }) {
   const cameraRef = useRef<THREE.OrthographicCamera>(null);
+  const prevAxisRef = useRef<IsoAxis | null>(null);
 
   // Position the orthographic camera + orbit target whenever the iso slice/axis changes.
+  // On axis change: full reset (centers view at origin in-plane).
+  // On slice-only change: preserve in-plane target (respects user pan and
+  // cursor-follow pans), only update the depth component.
   useEffect(() => {
     const cam = cameraRef.current;
     const ctrl = controlsRef.current;
     if (!cam) return;
-    const target = isoTargetThree(viewMode);
-    const pos = isoCameraThree(viewMode);
+    const axisChanged = prevAxisRef.current !== viewMode.axis;
+    prevAxisRef.current = viewMode.axis;
+
+    const isoTarget = isoTargetThree(viewMode);
+    let target: THREE.Vector3;
+    if (axisChanged || !ctrl) {
+      target = isoTarget;
+    } else {
+      // Keep in-plane (x/y/z components other than the depth axis); only the
+      // depth component comes from isoTargetThree.
+      target = ctrl.target.clone();
+      if (viewMode.axis === "x") target.x = isoTarget.x;
+      else if (viewMode.axis === "y") target.z = isoTarget.z;
+      else target.y = isoTarget.y;
+    }
     cam.up.copy(isoUpThree(viewMode.axis));
-    cam.position.copy(pos);
+    cam.position.copy(target.clone().add(isoCameraOffset(viewMode.axis)));
     cam.lookAt(target);
     cam.updateProjectionMatrix();
     if (ctrl) {
@@ -307,10 +325,9 @@ function IsoViewport({
 
 /**
  * Snaps the camera to the build direction target when cameraSnapTarget changes.
- * In perspective mode, animates camera + orbit target. In iso mode, the camera
- * is locked to the active slice — instead of moving the camera, advance the
- * slice when the cursor moves along the depth axis (the IsoViewport effect
- * then re-positions the ortho camera to follow).
+ * In perspective mode, animates camera + orbit target. In iso mode, pans the
+ * orbit target in-plane (the slice auto-advance is handled atomically in
+ * buildMove, so the camera just needs to follow the cursor's in-plane position).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> }) {
@@ -318,7 +335,6 @@ function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> })
   const lastBuildAxis = useBlockStore((s) => s.lastBuildAxis);
   const clearCameraSnap = useBlockStore((s) => s.clearCameraSnap);
   const viewMode = useBlockStore((s) => s.viewMode);
-  const stepSlice = useBlockStore((s) => s.stepSlice);
   const { camera } = useThree();
   const prevTarget = useRef<{ azimuth: number | null; targetPos: { x: number; y: number; z: number } } | null>(null);
   const prevBuildAxis = useRef<number | null>(null);
@@ -329,11 +345,19 @@ function CameraBuildSnap({ controlsRef }: { controlsRef: React.RefObject<any> })
     prevTarget.current = cameraSnapTarget;
 
     if (viewMode.kind === "iso") {
-      const target = cameraSnapTarget.targetPos;
-      const cursorDepth =
-        viewMode.axis === "x" ? target.x : viewMode.axis === "y" ? target.y : target.z;
-      const delta = cursorDepth - viewMode.slice;
-      if (delta !== 0) stepSlice(delta);
+      const controls = controlsRef.current;
+      const [tx, ty, tz] = tqecToThree(cameraSnapTarget.targetPos, "XZZ");
+      // Preserve the depth component from isoTargetThree — the camera stays on
+      // the active slice plane; only the in-plane target moves to follow cursor.
+      const isoTarget = isoTargetThree(viewMode);
+      const axis = viewMode.axis;
+      const endTarget = new THREE.Vector3(
+        axis === "x" ? isoTarget.x : tx,
+        axis === "z" ? isoTarget.y : ty,   // iso-z depth = Three y
+        axis === "y" ? isoTarget.z : tz,   // iso-y depth = Three z
+      );
+      const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+      animateCamera(controls, endTarget, endTarget.clone().add(offset));
       clearCameraSnap();
       return;
     }
@@ -747,15 +771,13 @@ export default function App() {
           store.redo();
           return;
         case "stepForward":
-          // Skip slice-step when the pointer tool has a selection — SelectModePointer
-          // handles ↑/↓ as a Z-nudge of the selection.
-          if (store.viewMode.kind === "iso" && !(store.armedTool === "pointer" && store.selectedKeys.size > 0)) {
+          if (store.viewMode.kind === "iso") {
             e.preventDefault();
             store.stepSlice(3);
           }
           return;
         case "stepBack":
-          if (store.viewMode.kind === "iso" && !(store.armedTool === "pointer" && store.selectedKeys.size > 0)) {
+          if (store.viewMode.kind === "iso") {
             e.preventDefault();
             store.stepSlice(-3);
           }

@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import type { Block } from "../types";
-import { tqecToThree, yBlockZOffset } from "../types";
+import type { Block, Position3D } from "../types";
+import { posKey, tqecToThree, yBlockZOffset } from "../types";
 
 const _vec3 = new THREE.Vector3();
 
@@ -33,6 +33,38 @@ export function getBlockKeysInScreenRect(
     const sy = ((1 - _vec3.y) / 2) * canvasHeight;
     if (sx >= minX && sx <= maxX && sy >= minY && sy <= maxY) {
       result.push(key);
+    }
+  }
+  return result;
+}
+
+/**
+ * Returns the position keys of all ports (user-placed markers and auto-inferred
+ * open pipe endpoints) whose projected center falls inside the given rectangle.
+ * Ports are rendered as 1×1×1 ghost cubes, so the default tqecToThree center applies.
+ */
+export function getPortKeysInScreenRect(
+  positions: Position3D[],
+  camera: THREE.Camera,
+  canvasWidth: number,
+  canvasHeight: number,
+  rect: { x1: number; y1: number; x2: number; y2: number },
+): string[] {
+  const minX = Math.min(rect.x1, rect.x2);
+  const maxX = Math.max(rect.x1, rect.x2);
+  const minY = Math.min(rect.y1, rect.y2);
+  const maxY = Math.max(rect.y1, rect.y2);
+
+  const result: string[] = [];
+  for (const pos of positions) {
+    const [tx, ty, tz] = tqecToThree(pos);
+    _vec3.set(tx, ty, tz);
+    _vec3.project(camera);
+    if (_vec3.z > 1) continue;
+    const sx = ((_vec3.x + 1) / 2) * canvasWidth;
+    const sy = ((1 - _vec3.y) / 2) * canvasHeight;
+    if (sx >= minX && sx <= maxX && sy >= minY && sy <= maxY) {
+      result.push(posKey(pos));
     }
   }
   return result;

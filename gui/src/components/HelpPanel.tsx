@@ -98,10 +98,11 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Modes</h4>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
           <li>
-            <b>Drag / Drop</b> — arm a tool in the toolbar to place cubes,
-            pipes, or ports, or use the pointer to click/drag-select blocks
-            (Shift-click to add/remove). Hold the delete modifier to
-            click-to-delete.
+            <b>Drag / Drop</b> — arm a placement tool in the toolbar to
+            click-place cubes, pipes, or ports, or switch to <b>Select</b>
+            to pick blocks (click, Shift-click to add/remove from the
+            selection, Ctrl+Shift-drag for a marquee). Hold the delete
+            modifier to click-to-delete.
           </li>
           <li>
             <b>Keyboard Build</b> — move a cursor with the keyboard to extend
@@ -109,10 +110,26 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
           </li>
         </ul>
 
-        <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Features</h4>
+        <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Analysis</h4>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
-          <li><b>Verify (tqec)</b> checks that the diagram is a valid TQEC structure via the <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a> package.</li>
-          <li><b>Flows (tqec)</b> computes stabilizer flows (correlation surfaces) for the diagram via the <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a> package.</li>
+          <li><b>Verify (tqec)</b> — check that the diagram is a valid TQEC block graph via the <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a> package.</li>
+          <li>
+            <b>Flows (tqec)</b> — compute stabilizer flows (correlation
+            surfaces) via <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a> and visualize each surface directly in 3D;
+            edit the Pauli basis on ports to query custom flows.
+          </li>
+          <li>
+            <b>ZX diagrams (tqec, pyzx)</b> — convert the diagram to a
+            ZX-calculus graph, optionally simplify and extract the
+            corresponding quantum circuit with{" "}
+            <a href="https://github.com/zxcalc/pyzx" target="_blank" rel="noreferrer">PyZX</a>
+            ; export to <code>.qgraph</code>, <code>.qasm</code>,{" "}
+            <code>.qc</code>, or <code>.qsim</code>.
+          </li>
+        </ul>
+
+        <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Files</h4>
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
           <li><b>Import</b>/<b>Export</b> round-trip through Collada (.dae) files.</li>
         </ul>
 
