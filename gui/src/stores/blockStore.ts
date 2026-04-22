@@ -284,7 +284,7 @@ interface BlockStore {
   flipSelected: () => void;
   rotateSelected: (direction: "cw" | "ccw", pivotOverride?: Position3D | null) => { ok: true } | { ok: false; reason: string };
   selectAll: () => void;
-  selectBlocks: (keys: string[], additive: boolean) => void;
+  selectBlocks: (keys: string[], additive: boolean, portKeys?: string[]) => void;
   togglePortSelection: (pos: Position3D, additive: boolean) => void;
   clearPortSelection: () => void;
   /** Allocate fresh `P1`, `P2`, ... labels for any port position missing an entry. Idempotent. */
@@ -443,6 +443,45 @@ function syncPortsAndPromote(
   }
 
   return { blocks: curBlocks, hiddenFaces: curHidden, addedEntries, promotedPortKeys };
+}
+
+/**
+ * User-placed port markers that sit at the dangling endpoint of a pipe lose
+ * their only reason to exist when that pipe is removed — an auto-inferred
+ * port ghost made them visually redundant before, and now neither anchors
+ * them. Collects the keys of such orphaned markers so callers can drop them
+ * as part of the same undo step as the pipe removal.
+ *
+ * `blocksAfter` must reflect the state *after* the pipes are removed so we
+ * don't falsely skip a port whose only remaining pipe just got deleted.
+ */
+function orphanedPortKeysFromRemovedPipes(
+  removedPipes: Array<{ pos: Position3D; type: PipeType }>,
+  blocksAfter: Map<string, Block>,
+  portPositions: Set<string>,
+): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const pipe of removedPipes) {
+    const base = pipe.type.replace("H", "");
+    const openAxis = base.indexOf("O");
+    const coords: [number, number, number] = [pipe.pos.x, pipe.pos.y, pipe.pos.z];
+    for (const offset of [-1, 2]) {
+      const n: [number, number, number] = [coords[0], coords[1], coords[2]];
+      n[openAxis] += offset;
+      const epPos: Position3D = { x: n[0], y: n[1], z: n[2] };
+      const key = posKey(epPos);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (!portPositions.has(key)) continue;
+      // Another cube occupies the slot — the port marker is still meaningful.
+      if (blocksAfter.has(key)) continue;
+      // Other pipes still anchor a port here.
+      if (countAttachedPipes(epPos, blocksAfter) > 0) continue;
+      result.push(key);
+    }
+  }
+  return result;
 }
 
 /**
@@ -1145,12 +1184,36 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       if (cascadeKeys.length === 0) {
         const { blocks, hiddenFaces } = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, key, block);
-        const cmd: UndoCommand = { kind: "remove", key, block };
         const newUndetermined = new Map(state.undeterminedCubes);
         newUndetermined.delete(key);
+        const removedPipes = isPipeType(block.type)
+          ? [{ pos: block.pos, type: block.type as PipeType }]
+          : [];
+        const orphanedPortKeys = removedPipes.length > 0
+          ? orphanedPortKeysFromRemovedPipes(removedPipes, blocks, state.portPositions)
+          : [];
+        if (orphanedPortKeys.length === 0) {
+          const cmd: UndoCommand = { kind: "remove", key, block };
+          return {
+            blocks,
+            hiddenFaces,
+            history: [...state.history, cmd].slice(-MAX_HISTORY),
+            future: [],
+            hoveredGridPos: null,
+            undeterminedCubes: newUndetermined,
+          };
+        }
+        const portPositions = new Set(state.portPositions);
+        for (const k of orphanedPortKeys) portPositions.delete(k);
+        const cmd: UndoCommand = {
+          kind: "bulk-remove",
+          entries: [{ key, block }],
+          portKeys: orphanedPortKeys,
+        };
         return {
           blocks,
           hiddenFaces,
+          portPositions,
           history: [...state.history, cmd].slice(-MAX_HISTORY),
           future: [],
           hoveredGridPos: null,
@@ -1159,6 +1222,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
 
       const entries: Array<{ key: string; block: Block }> = [{ key, block }];
+      const removedPipes: Array<{ pos: Position3D; type: PipeType }> = isPipeType(block.type)
+        ? [{ pos: block.pos, type: block.type as PipeType }]
+        : [];
       let blocks = state.blocks;
       let hiddenFaces = state.hiddenFaces;
       ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, key, block));
@@ -1168,13 +1234,25 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const cb = blocks.get(ck);
         if (!cb) continue;
         entries.push({ key: ck, block: cb });
+        if (isPipeType(cb.type)) removedPipes.push({ pos: cb.pos, type: cb.type as PipeType });
         ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, ck, cb));
         newUndetermined.delete(ck);
       }
-      const cmd: UndoCommand = { kind: "bulk-remove", entries };
+      const orphanedPortKeys = orphanedPortKeysFromRemovedPipes(removedPipes, blocks, state.portPositions);
+      let portPositions = state.portPositions;
+      if (orphanedPortKeys.length > 0) {
+        portPositions = new Set(state.portPositions);
+        for (const k of orphanedPortKeys) portPositions.delete(k);
+      }
+      const cmd: UndoCommand = {
+        kind: "bulk-remove",
+        entries,
+        ...(orphanedPortKeys.length > 0 ? { portKeys: orphanedPortKeys } : {}),
+      };
       return {
         blocks,
         hiddenFaces,
+        portPositions,
         history: [...state.history, cmd].slice(-MAX_HISTORY),
         future: [],
         hoveredGridPos: null,
@@ -2103,6 +2181,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     set((state) => {
       if (state.selectedKeys.size === 0 && state.selectedPortPositions.size === 0) return state;
       const entries: Array<{ key: string; block: Block }> = [];
+      const removedPipes: Array<{ pos: Position3D; type: PipeType }> = [];
       const seen = new Set<string>();
       let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
       for (const key of state.selectedKeys) {
@@ -2115,6 +2194,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           ? getAttachedPipeKeys(block.pos, blocks)
           : [];
         entries.push({ key, block });
+        if (isPipeType(block.type)) removedPipes.push({ pos: block.pos, type: block.type as PipeType });
         seen.add(key);
         ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, key, block));
         for (const ck of cascadeKeys) {
@@ -2122,17 +2202,30 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const cb = blocks.get(ck);
           if (!cb) continue;
           entries.push({ key: ck, block: cb });
+          if (isPipeType(cb.type)) removedPipes.push({ pos: cb.pos, type: cb.type as PipeType });
           seen.add(ck);
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, ck, cb));
         }
       }
       const portKeys: string[] = [];
+      const portKeysSet = new Set<string>();
       let portPositions = state.portPositions;
       for (const key of state.selectedPortPositions) {
         if (!portPositions.has(key)) continue;
         if (portKeys.length === 0) portPositions = new Set(portPositions);
         (portPositions as Set<string>).delete(key);
         portKeys.push(key);
+        portKeysSet.add(key);
+      }
+      if (removedPipes.length > 0) {
+        const orphaned = orphanedPortKeysFromRemovedPipes(removedPipes, blocks, portPositions);
+        for (const k of orphaned) {
+          if (portKeysSet.has(k)) continue;
+          if (portKeys.length === 0) portPositions = new Set(portPositions);
+          (portPositions as Set<string>).delete(k);
+          portKeys.push(k);
+          portKeysSet.add(k);
+        }
       }
       if (entries.length === 0 && portKeys.length === 0) return state;
       const cmd: UndoCommand = { kind: "bulk-remove", entries, ...(portKeys.length > 0 ? { portKeys } : {}) };
@@ -2341,13 +2434,17 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       return { selectedKeys: new Set(state.blocks.keys()), selectionPivot: null };
     }),
 
-  selectBlocks: (keys, additive) =>
+  selectBlocks: (keys, additive, portKeys) =>
     set((state) => {
       const next = additive ? new Set(state.selectedKeys) : new Set<string>();
       for (const key of keys) {
         if (state.blocks.has(key)) next.add(key);
       }
-      return { selectedKeys: next, selectionPivot: null };
+      const nextPorts = additive ? new Set(state.selectedPortPositions) : new Set<string>();
+      if (portKeys) {
+        for (const pk of portKeys) nextPorts.add(pk);
+      }
+      return { selectedKeys: next, selectedPortPositions: nextPorts, selectionPivot: null };
     }),
 
   setDragState: ({ isDragging, delta, valid }) =>

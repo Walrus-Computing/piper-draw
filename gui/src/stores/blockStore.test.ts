@@ -370,6 +370,63 @@ describe("blockStore", () => {
       useBlockStore.getState().undo();
       expect(useBlockStore.getState().blocks.size).toBe(3);
     });
+
+    it("removes a user-placed port marker left orphaned by deleting its only pipe", () => {
+      useBlockStore.getState().addPortAt({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      expect(useBlockStore.getState().portPositions.has("0,0,0")).toBe(true);
+      useBlockStore.setState({ selectedKeys: new Set(["1,0,0"]) });
+      useBlockStore.getState().deleteSelected();
+      expect(useBlockStore.getState().blocks.size).toBe(0);
+      expect(useBlockStore.getState().portPositions.has("0,0,0")).toBe(false);
+    });
+
+    it("keeps a user-placed port marker if a cube still occupies its slot", () => {
+      // Two colinear pipes share endpoint 0,0,0 → auto-promoted to a cube there.
+      const incoming = new Map<string, Block>([
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ["-2,0,0", { pos: { x: -2, y: 0, z: 0 }, type: "OZX" }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      // Record explicit port intent at the cube slot (user placed it there earlier).
+      useBlockStore.setState({ portPositions: new Set(["0,0,0"]) });
+      // Deleting one pipe leaves the cube (cubes don't auto-demote) — marker survives.
+      useBlockStore.setState({ selectedKeys: new Set(["1,0,0"]) });
+      useBlockStore.getState().deleteSelected();
+      expect(useBlockStore.getState().portPositions.has("0,0,0")).toBe(true);
+    });
+
+    it("undo of port-orphan cleanup restores both pipe and marker", () => {
+      useBlockStore.getState().addPortAt({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.setState({ selectedKeys: new Set(["1,0,0"]) });
+      useBlockStore.getState().deleteSelected();
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.has("1,0,0")).toBe(true);
+      expect(useBlockStore.getState().portPositions.has("0,0,0")).toBe(true);
+    });
+  });
+
+  describe("removeBlock port cleanup", () => {
+    it("removes a user-placed port marker left orphaned when its pipe is removed", () => {
+      useBlockStore.getState().addPortAt({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.getState().removeBlock({ x: 1, y: 0, z: 0 });
+      expect(useBlockStore.getState().portPositions.has("0,0,0")).toBe(false);
+    });
+
+    it("undo restores the user-placed port marker cleaned up by pipe removal", () => {
+      useBlockStore.getState().addPortAt({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.getState().removeBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.has("1,0,0")).toBe(true);
+      expect(useBlockStore.getState().portPositions.has("0,0,0")).toBe(true);
+    });
   });
 
   describe("convertBlockToPort", () => {

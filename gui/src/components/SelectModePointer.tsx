@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
-import { getBlockKeysInScreenRect } from "../utils/projection";
+import { getBlockKeysInScreenRect, getPortKeysInScreenRect } from "../utils/projection";
 import { pointerGroundPoint } from "../utils/groundPlane";
 import { isMoveValid } from "../utils/dragValidate";
 import { isEditableTarget } from "../utils/editableFocus";
-import { blockThreeSize, tqecToThree, yBlockZOffset } from "../types";
+import { blockThreeSize, getAllPortPositions, tqecToThree, yBlockZOffset } from "../types";
 import type { Block, Position3D } from "../types";
 
 /** Minimum drag distance (px) before a gesture commits to marquee or drag. */
@@ -391,7 +391,8 @@ export function SelectModePointer({
           x2: Math.max(e.clientX, state.startX) - canvasRect.left,
           y2: Math.max(e.clientY, state.startY) - canvasRect.top,
         };
-        const blocks = useBlockStore.getState().blocks;
+        const store = useBlockStore.getState();
+        const blocks = store.blocks;
         const keys = getBlockKeysInScreenRect(
           blocks,
           ts.camera,
@@ -399,7 +400,14 @@ export function SelectModePointer({
           canvasRect.height,
           screenRect,
         );
-        useBlockStore.getState().selectBlocks(keys, e.shiftKey);
+        const portKeys = getPortKeysInScreenRect(
+          getAllPortPositions(blocks, store.portPositions),
+          ts.camera,
+          canvasRect.width,
+          canvasRect.height,
+          screenRect,
+        );
+        store.selectBlocks(keys, e.shiftKey, portKeys);
         return;
       }
 
