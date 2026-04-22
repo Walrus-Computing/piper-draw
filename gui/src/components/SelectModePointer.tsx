@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
+import { actionForKey, useKeybindStore } from "../stores/keybindStore";
 import { getBlockKeysInScreenRect, getPortKeysInScreenRect } from "../utils/projection";
 import { pointerGroundPoint } from "../utils/groundPlane";
 import { isMoveValid } from "../utils/dragValidate";
@@ -52,7 +53,7 @@ type DraggingSelection = {
   planeY: number;
   /** TQEC-space start point of the pointer projected onto the drag plane (horizontal mode). */
   startTqec: { x: number; y: number } | null;
-  /** Accumulated z-nudge from ArrowUp/ArrowDown during the gesture, in TQEC units (multiples of 3). */
+  /** Accumulated z-nudge from nudgeUp/nudgeDown during the gesture, in TQEC units (multiples of 3). */
   zOffset: number;
   lastValidDelta: Position3D;
 };
@@ -226,12 +227,11 @@ export function SelectModePointer({
         hitKey = pickSelectedBlockAt(ts.camera, ndcX, ndcY, store.selectedKeys, store.blocks);
       }
 
-      // Ctrl+Shift forces marquee. Shift alone is reserved for select-mode
-      // gestures (vertical block drag) and must be swallowed so OrbitControls'
-      // built-in Shift-swap doesn't orbit the camera. Unmodified empty-space
-      // drags fall through to OrbitControls for the usual camera controls.
+      // Ctrl+Shift forces marquee. Shift+drag on a selected block is a
+      // vertical (z) drag. Empty-space drags — with or without Shift — fall
+      // through to OrbitControls so Shift+drag rotates the camera as usual.
       const marqueeRequested = e.ctrlKey && e.shiftKey;
-      if (!e.shiftKey && !hitKey) return;
+      if (!hitKey && !marqueeRequested) return;
 
       dragRef.current = {
         kind: "pending",
@@ -309,12 +309,6 @@ export function SelectModePointer({
           useBlockStore.getState().setDragState({ isDragging: true, delta: { x: 0, y: 0, z: 0 }, valid: true });
           latestEventRef.current = { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey };
           scheduleFrame();
-          return;
-        }
-
-        if (!state.marqueeRequested) {
-          // Shift-only on empty space: swallow the gesture so OrbitControls
-          // doesn't orbit. Leave in pending; pointerup will clean up.
           return;
         }
 
@@ -438,12 +432,17 @@ export function SelectModePointer({
         cancelDrag();
         return;
       }
-      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      const bindings = useKeybindStore.getState().bindings.edit;
+      const key = e.key.toLowerCase();
+      const ctrl = e.metaKey || e.ctrlKey;
+      const action = actionForKey(bindings, key, ctrl, e.shiftKey, e.altKey);
+      if (action !== "nudgeUp" && action !== "nudgeDown") return;
+      const dz = action === "nudgeUp" ? 3 : -3;
 
       if (state?.kind === "selection") {
         e.preventDefault();
         e.stopImmediatePropagation();
-        state.zOffset += e.key === "ArrowUp" ? 3 : -3;
+        state.zOffset += dz;
         scheduleFrame();
         return;
       }
@@ -454,7 +453,7 @@ export function SelectModePointer({
       if (store.selectedKeys.size === 0) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      store.moveSelection({ x: 0, y: 0, z: e.key === "ArrowUp" ? 3 : -3 });
+      store.moveSelection({ x: 0, y: 0, z: dz });
     },
     [cancelDrag, isSelectActive, scheduleFrame],
   );

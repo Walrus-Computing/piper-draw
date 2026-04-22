@@ -50,8 +50,12 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
       [bindingToLabel(b.paste), "Paste"],
     );
     if (hasSelection) {
-      hints.push(["↑/↓", "Nudge z ±1"]);
-    } else if (isIso) {
+      hints.push([
+        `${bindingToLabel(b.nudgeUp)}/${bindingToLabel(b.nudgeDown)}`,
+        "Nudge z ±1",
+      ]);
+    }
+    if (isIso && !hasSelection) {
       hints.push([
         `${bindingToLabel(b.stepForward)}/${bindingToLabel(b.stepBack)}`,
         `Step in ${viewMode.axis.toUpperCase()} direction`,

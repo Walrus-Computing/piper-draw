@@ -29,6 +29,8 @@ export type EditAction =
   | "redo"
   | "stepForward"
   | "stepBack"
+  | "nudgeUp"
+  | "nudgeDown"
   | "cyclePrev"
   | "cycleNext"
   | "copy"
@@ -57,7 +59,8 @@ export const ACTIONS: { [M in Mode]: readonly ActionForMode[M][] } = {
   edit: [
     "selectAll", "deleteSelection", "clearSelection", "flipColors", "holdToDelete",
     "rotateCcw", "rotateCw",
-    "undo", "redo", "stepForward", "stepBack", "cyclePrev", "cycleNext",
+    "undo", "redo", "stepForward", "stepBack", "nudgeUp", "nudgeDown",
+    "cyclePrev", "cycleNext",
     "copy", "paste",
   ],
 };
@@ -88,6 +91,8 @@ export const ACTION_LABELS: { [M in Mode]: Record<ActionForMode[M], string> } = 
     redo: "Redo",
     stepForward: "Step forward (iso)",
     stepBack: "Step back (iso)",
+    nudgeUp: "Nudge selection +z",
+    nudgeDown: "Nudge selection −z",
     cyclePrev: "Previous block / pipe",
     cycleNext: "Next block / pipe",
     copy: "Copy selection",
@@ -121,6 +126,8 @@ export const DEFAULT_BINDINGS: { [M in Mode]: Record<ActionForMode[M], KeyBindin
     redo: { key: "z", ctrl: true, shift: true },
     stepForward: { key: "arrowup" },
     stepBack: { key: "arrowdown" },
+    nudgeUp: { key: "w" },
+    nudgeDown: { key: "s" },
     cyclePrev: { key: "arrowleft" },
     cycleNext: { key: "arrowright" },
     copy: { key: "c", ctrl: true },
@@ -268,7 +275,7 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: "piper-draw-keybinds",
-      version: 12,
+      version: 13,
       migrate: () => ({ bindings: cloneDefaults() }),
       merge: (persisted, current) => {
         const p = persisted as Partial<KeybindState>;
