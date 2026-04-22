@@ -555,7 +555,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   history: [],
   future: [],
   mode: "edit",
-  armedTool: "cube",
+  armedTool: "port",
   xHeld: false,
   cubeType: "XZZ",
   pipeVariant: null,
@@ -2045,6 +2045,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         portPositions: new Set<string>(),
         selectionPivot: null,
         undeterminedCubes: new Map(),
+        armedTool: "port",
+        pipeVariant: null,
       };
     }),
 
