@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "dev": "node scripts/dev.mjs",
     "dev:frontend": "vite",
     "dev:backend": "cd .. && uv run uvicorn server:app --reload --port ${BACKEND_PORT:-8000}",
     "build": "tsc -b && vite build",
