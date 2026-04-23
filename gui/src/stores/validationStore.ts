@@ -4,7 +4,7 @@ import { posKey } from "../types";
 import { useBlockStore } from "./blockStore";
 import { validateDiagram } from "../utils/validate";
 
-export type ValidationStatus = "idle" | "loading" | "valid" | "invalid" | "error";
+export type ValidationStatus = "idle" | "loading" | "valid" | "invalid" | "error" | "aborted";
 
 export interface ValidationError {
   position: Position3D;
@@ -94,7 +94,7 @@ export const useValidationStore = create<ValidationStore>((set, get) => ({
     // Bump the request version so any in-flight validation ignores its result.
     ++requestVersion;
     set({
-      status: "error",
+      status: "aborted",
       errors: [{ position: { x: NaN, y: NaN, z: NaN }, message }],
       invalidKeys: new Set(),
       selectedErrorKey: null,

@@ -753,6 +753,73 @@ describe("blockStore", () => {
       expect(result).toEqual({ ok: true });
       expect(useBlockStore.getState().history.length).toBe(histBefore);
     });
+
+    it("aborts when rotating a lone cube would break its adjacent pipe", () => {
+      // Cube ZXZ at (0,0,0) with X-axis pipe OXZ (variant XZ) at (1,0,0) is a
+      // valid pair. Rotating the cube alone turns it into XZZ, whose Y=Z
+      // conflicts with the pipe's Y=X requirement.
+      useBlockStore.setState({ cubeType: "ZXZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: null });
+      const blocksBefore = new Map(useBlockStore.getState().blocks);
+
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
+      const result = useBlockStore.getState().rotateSelected("ccw");
+      expect(result.ok).toBe(false);
+
+      // State unchanged
+      const blocksAfter = useBlockStore.getState().blocks;
+      expect(blocksAfter.size).toBe(blocksBefore.size);
+      for (const [k, v] of blocksBefore) expect(blocksAfter.get(k)).toEqual(v);
+    });
+
+    it("allows the illegal-pair rotation when freeBuild is on", () => {
+      useBlockStore.setState({ cubeType: "ZXZ", freeBuild: true });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: null });
+
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
+      const result = useBlockStore.getState().rotateSelected("ccw");
+      expect(result).toEqual({ ok: true });
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZZ");
+    });
+
+    it("allows rotating a cube + its attached pipe together", () => {
+      useBlockStore.setState({ cubeType: "ZXZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: null });
+
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
+      useBlockStore.getState().selectBlock({ x: 1, y: 0, z: 0 }, true);
+      const result = useBlockStore.getState().rotateSelected("ccw");
+      expect(result).toEqual({ ok: true });
+    });
+
+    it("aborts when rotating a lone pipe would break a stationary neighbor cube", () => {
+      // Cube ZXZ at (0,0,0) with pipe OXZ at (1,0,0). Rotating just the pipe CCW
+      // (pivot snaps to (0,0,0)) moves it to (0,1,0) with type XOZ. The cube at
+      // (0,0,0) now needs X=X (mismatch with ZXZ's X=Z).
+      useBlockStore.setState({ cubeType: "ZXZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: null });
+      const blocksBefore = new Map(useBlockStore.getState().blocks);
+
+      useBlockStore.getState().selectBlock({ x: 1, y: 0, z: 0 }, false);
+      const result = useBlockStore.getState().rotateSelected("ccw");
+      expect(result.ok).toBe(false);
+
+      const blocksAfter = useBlockStore.getState().blocks;
+      expect(blocksAfter.size).toBe(blocksBefore.size);
+      for (const [k, v] of blocksBefore) expect(blocksAfter.get(k)).toEqual(v);
+    });
   });
 
   describe("setMode clears selection", () => {

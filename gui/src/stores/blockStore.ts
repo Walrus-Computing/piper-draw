@@ -2390,6 +2390,47 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
     }
 
+    // TQEC validity: cube types must remain compatible with adjacent pipes.
+    // Skipped under "Ignore color rules" (freeBuild), matching moveSelection
+    // and placement paths (GridPlane, BlockInstances, OpenPipeGhosts).
+    if (!state.freeBuild) {
+      const tentative = new Map(state.blocks);
+      for (const entry of entries) tentative.delete(entry.oldKey);
+      for (const entry of entries) tentative.set(entry.newKey, entry.newBlock);
+
+      // Cubes to re-validate: every rotated cube, plus any cube adjacent to a
+      // rotated pipe's new position (catches the mirror case where a pipe lands
+      // next to an unselected cube and breaks its constraints).
+      const toCheck = new Map<string, Block>();
+      for (const entry of entries) {
+        const b = entry.newBlock;
+        if (isPipeType(b.type)) {
+          const base = b.type.replace("H", "");
+          const axis = base.indexOf("O") as 0 | 1 | 2;
+          const nc: [number, number, number] = [b.pos.x, b.pos.y, b.pos.z];
+          for (const pipeToCubeOffset of [-1, 2]) {
+            nc[axis] = [b.pos.x, b.pos.y, b.pos.z][axis] + pipeToCubeOffset;
+            const key = posKey({ x: nc[0], y: nc[1], z: nc[2] });
+            const neighbor = tentative.get(key);
+            if (neighbor && !isPipeType(neighbor.type) && neighbor.type !== "Y") {
+              toCheck.set(key, neighbor);
+            }
+          }
+        } else if (b.type !== "Y") {
+          toCheck.set(entry.newKey, b);
+        }
+      }
+
+      for (const cube of toCheck.values()) {
+        const opts = determineCubeOptions(cube.pos, tentative);
+        const type = cube.type as CubeType;
+        const ok = opts.determined ? opts.type === type : opts.options.includes(type);
+        if (!ok) {
+          return { ok: false, reason: "Rotation would break color rules between adjacent blocks" };
+        }
+      }
+    }
+
     set((s) => {
       let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
       // Remove all old blocks first so collisions on mixed remove/add don't trip

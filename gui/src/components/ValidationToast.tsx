@@ -36,6 +36,7 @@ const styleVariants: Record<string, React.CSSProperties> = {
   valid: { background: "#d4edda", color: "#155724", border: "1px solid #c3e6cb", cursor: "pointer" },
   invalid: { background: "#f8d7da", color: "#721c24", border: "1px solid #f5c6cb" },
   error: { background: "#fff3cd", color: "#856404", border: "1px solid #ffeeba" },
+  aborted: { background: "#f8d7da", color: "#721c24", border: "1px solid #f5c6cb" },
 };
 
 const errorRowStyle: React.CSSProperties = {
@@ -102,6 +103,10 @@ export function ValidationToast({
       const t = setTimeout(dismiss, 3000);
       return () => clearTimeout(t);
     }
+    if (status === "aborted") {
+      const t = setTimeout(dismiss, 2000);
+      return () => clearTimeout(t);
+    }
   }, [status, dismiss]);
 
   if (status === "idle") return null;
@@ -124,6 +129,10 @@ export function ValidationToast({
         Diagram is valid
       </div>
     );
+  }
+
+  if (status === "aborted") {
+    return <div style={style}>{errors[0]?.message ?? ""}</div>;
   }
 
   // Invalid / error status
