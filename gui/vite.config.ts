@@ -22,7 +22,7 @@ export default defineConfig({
   },
   server: {
     port: Number(process.env.VITE_PORT ?? 5173),
-    strictPort: true,
+    strictPort: false,
     proxy: {
       '/api': `http://localhost:${process.env.BACKEND_PORT ?? 8000}`,
     },
