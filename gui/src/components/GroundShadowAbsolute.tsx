@@ -76,7 +76,7 @@ export function GroundShadowAbsolute({
           side={THREE.DoubleSide}
         />
       </mesh>
-      <line
+      <lineSegments
         position={[0, Y_OFFSET, 0]}
         scale={[1, v.lineLen, 1]}
         geometry={lineGeom}
@@ -88,7 +88,7 @@ export function GroundShadowAbsolute({
           opacity={v.lineOpacity}
           depthWrite={false}
         />
-      </line>
+      </lineSegments>
     </group>
   );
 }

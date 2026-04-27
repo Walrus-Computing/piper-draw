@@ -1,4 +1,5 @@
 import ReactThreeTestRenderer from "@react-three/test-renderer";
+import * as THREE from "three";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useBlockStore } from "../stores/blockStore";
 import type { Block, BlockType, Position3D } from "../types";
@@ -39,7 +40,7 @@ beforeEach(() => {
 });
 
 function setPaste(opts: {
-  clipboard?: Map<string, Block>;
+  clipboard?: Map<string, Block> | null;
   hoveredGridPos?: Position3D | null;
   blocks?: Map<string, Block>;
 }) {
@@ -93,9 +94,10 @@ describe("<PasteGhost>", () => {
       hoveredGridPos: { x: 0, y: 0, z: 0 },
     });
     const r = await ReactThreeTestRenderer.create(<PasteGhost />);
-    // 2 ghost meshes; no Lines because no GroundShadowAbsolute fires at z=0.
+    // 2 ghost meshes; ghost edges (LineSegments) for each = 2 LineSegments.
+    // No shadows because z=0.
     expect(r.scene.findAllByType("Mesh")).toHaveLength(2);
-    expect(r.scene.findAllByType("Line")).toHaveLength(0);
+    expect(r.scene.findAllByType("LineSegments")).toHaveLength(2);
   });
 
   it("renders shadow + projection line for elevated paste-ghost block", async () => {
@@ -104,9 +106,9 @@ describe("<PasteGhost>", () => {
       hoveredGridPos: { x: 0, y: 0, z: 0 },
     });
     const r = await ReactThreeTestRenderer.create(<PasteGhost />);
-    // 1 ghost mesh + 1 shadow mesh = 2; 1 projection line
+    // 1 ghost mesh + 1 shadow mesh = 2; ghost edges + shadow line = 2 LineSegments.
     expect(r.scene.findAllByType("Mesh")).toHaveLength(2);
-    expect(r.scene.findAllByType("Line")).toHaveLength(1);
+    expect(r.scene.findAllByType("LineSegments")).toHaveLength(2);
   });
 
   it("turns shadow red when paste collides with existing block", async () => {
@@ -116,11 +118,13 @@ describe("<PasteGhost>", () => {
       blocks: new Map([["0,0,3", mk({ x: 0, y: 0, z: 3 })]]), // collision
     });
     const r = await ReactThreeTestRenderer.create(<PasteGhost />);
-    const line = r.scene.findByType("Line");
-    const lineColor = (
-      line.instance.material as { color: { getHex: () => number } }
-    ).color.getHex();
-    expect(lineColor).toBe(0xff0000);
+    // Both ghost edges and shadow line should be red on collision.
+    const lines = r.scene.findAllByType("LineSegments");
+    expect(lines.length).toBeGreaterThanOrEqual(1);
+    for (const line of lines) {
+      const mat = (line.instance as THREE.LineSegments).material as THREE.LineBasicMaterial;
+      expect(mat.color.getHex()).toBe(0xff0000);
+    }
   });
 
   it("Y-cube paste at z=0 with pipe above gets a lifted shadow", async () => {
@@ -132,7 +136,8 @@ describe("<PasteGhost>", () => {
       blocks: new Map([["0,0,1", mk({ x: 0, y: 0, z: 1 }, "ZXO")]]),
     });
     const r = await ReactThreeTestRenderer.create(<PasteGhost />);
-    expect(r.scene.findAllByType("Line")).toHaveLength(1);
+    // ghost edges + shadow line = 2 LineSegments (shadow renders thanks to yBlockZOffset).
+    expect(r.scene.findAllByType("LineSegments")).toHaveLength(2);
   });
 
   it("caps clipboard at 200 entries (MAX_PASTE_SHADOWS)", async () => {
@@ -146,8 +151,9 @@ describe("<PasteGhost>", () => {
       hoveredGridPos: { x: 0, y: 0, z: 0 },
     });
     const r = await ReactThreeTestRenderer.create(<PasteGhost />);
-    // 200 paste-ghost meshes + 200 shadow meshes = 400 total
+    // 200 paste-ghost meshes + 200 shadow meshes = 400 total.
+    // 200 ghost edges + 200 shadow lines = 400 LineSegments.
     expect(r.scene.findAllByType("Mesh")).toHaveLength(400);
-    expect(r.scene.findAllByType("Line")).toHaveLength(200);
+    expect(r.scene.findAllByType("LineSegments")).toHaveLength(400);
   });
 });

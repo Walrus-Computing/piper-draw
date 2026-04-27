@@ -1,8 +1,13 @@
 import ReactThreeTestRenderer from "@react-three/test-renderer";
+import * as THREE from "three";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useBlockStore } from "../stores/blockStore";
 import type { Block } from "../types";
 import { DragShadow, MAX_SHADOWS } from "./DragShadow";
+
+function meshColor(node: { instance: unknown }): number {
+  return ((node.instance as THREE.Mesh).material as THREE.MeshBasicMaterial).color.getHex();
+}
 
 function mk(pos: { x: number; y: number; z: number }, type: Block["type"] = "XZZ"): Block {
   return { pos, type };
@@ -92,12 +97,8 @@ describe("<DragShadow>", () => {
       dragValid: false, // would turn red if drag mode kicked in
     });
     const r = await ReactThreeTestRenderer.create(<DragShadow />);
-    const mesh = r.scene.findByType("Mesh");
-    const matColor = (
-      mesh.instance.material as { color: { getHex: () => number } }
-    ).color.getHex();
     // At-rest -> always-valid -> black mesh, not red
-    expect(matColor).toBe(0x000000);
+    expect(meshColor(r.scene.findByType("Mesh"))).toBe(0x000000);
   });
 
   it("renders red shadows when dragValid=false during a real drag", async () => {
@@ -108,11 +109,7 @@ describe("<DragShadow>", () => {
       dragValid: false,
     });
     const r = await ReactThreeTestRenderer.create(<DragShadow />);
-    const mesh = r.scene.findByType("Mesh");
-    const matColor = (
-      mesh.instance.material as { color: { getHex: () => number } }
-    ).color.getHex();
-    expect(matColor).toBe(0xff5555);
+    expect(meshColor(r.scene.findByType("Mesh"))).toBe(0xff5555);
   });
 
   it("caps at MAX_SHADOWS for huge selections", async () => {
@@ -141,7 +138,7 @@ describe("<DragShadow>", () => {
     const r = await ReactThreeTestRenderer.create(<DragShadow />);
     // With the lift, the Y-cube's effective z is 0.5 -> shadow appears.
     expect(r.scene.findAllByType("Group")).toHaveLength(1);
-    const line = r.scene.findByType("Line");
+    const line = r.scene.findByType("LineSegments");
     // Line len = 0.5 - Y_OFFSET ≈ 0.49
     expect(line.instance.scale.y).toBeCloseTo(0.49, 2);
   });
@@ -158,7 +155,7 @@ describe("<DragShadow>", () => {
       dragDelta: { x: 3, y: 0, z: 3 },
     });
     const r = await ReactThreeTestRenderer.create(<DragShadow />);
-    const line = r.scene.findByType("Line");
+    const line = r.scene.findByType("LineSegments");
     // Pure shifted z=3, line len = 3 - Y_OFFSET ≈ 2.99
     expect(line.instance.scale.y).toBeCloseTo(2.99, 2);
   });

@@ -1,4 +1,5 @@
 import ReactThreeTestRenderer from "@react-three/test-renderer";
+import * as THREE from "three";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useBlockStore } from "../stores/blockStore";
 import type { Block, BlockType, Position3D } from "../types";
@@ -94,8 +95,8 @@ describe("<GhostBlock>", () => {
     const groups = r.scene.findAllByType("Group");
     // ghost outer + ghost inner-scaled + GroundShadowAbsolute world-positioned group = 3
     expect(groups.length).toBe(3);
-    // Shadow's mesh and line should be present
-    expect(r.scene.findAllByType("Line")).toHaveLength(1);
+    // 2 LineSegments: ghost-block edges (existing) + shadow projection line (new).
+    expect(r.scene.findAllByType("LineSegments")).toHaveLength(2);
   });
 
   it("Y-cube placement preview at z=0 with pipe above gets a lifted shadow", async () => {
@@ -112,8 +113,9 @@ describe("<GhostBlock>", () => {
     );
     const r = await ReactThreeTestRenderer.create(<GhostBlock />);
     // Without the yBlockZOffset adjustment, no shadow would render (logical z=0).
-    // With it, effective z=0.5 → shadow + line appear.
-    expect(r.scene.findAllByType("Line")).toHaveLength(1);
+    // With it, effective z=0.5 → shadow + line appear. 2 LineSegments total:
+    // ghost-block edges + shadow projection line.
+    expect(r.scene.findAllByType("LineSegments")).toHaveLength(2);
   });
 
   it("port placement preview at z=2 renders port ghost + GroundShadow", async () => {
@@ -125,7 +127,8 @@ describe("<GhostBlock>", () => {
     // Port ghost positioned group + GroundShadowAbsolute group = 2
     const groups = r.scene.findAllByType("Group");
     expect(groups.length).toBe(2);
-    expect(r.scene.findAllByType("Line")).toHaveLength(1);
+    // port-ghost edges (existing) + shadow line (new) = 2 LineSegments.
+    expect(r.scene.findAllByType("LineSegments")).toHaveLength(2);
   });
 
   it("isInvalid hover at z=2 renders red shadow (invalid color)", async () => {
@@ -139,12 +142,15 @@ describe("<GhostBlock>", () => {
       false,
     );
     const r = await ReactThreeTestRenderer.create(<GhostBlock />);
-    const line = r.scene.findByType("Line");
-    const lineColor = (
-      line.instance.material as { color: { getHex: () => number } }
-    ).color.getHex();
-    // Invalid line color = #ff0000
-    expect(lineColor).toBe(0xff0000);
+    // Both the ghost edges and the shadow line render in red for invalid hover.
+    // GhostBlock uses #ff0000 lineMaterial; GroundShadowAbsolute uses #ff0000.
+    // Assert all LineSegments are red.
+    const lines = r.scene.findAllByType("LineSegments");
+    expect(lines.length).toBeGreaterThanOrEqual(1);
+    for (const line of lines) {
+      const mat = (line.instance as THREE.LineSegments).material as THREE.LineBasicMaterial;
+      expect(mat.color.getHex()).toBe(0xff0000);
+    }
   });
 
   it("isDelete (xHeld in edit mode) renders delete preview but NO shadow", async () => {
@@ -161,6 +167,7 @@ describe("<GhostBlock>", () => {
       false,
     );
     const r = await ReactThreeTestRenderer.create(<GhostBlock />);
-    expect(r.scene.findAllByType("Line")).toHaveLength(0);
+    // Delete branch renders only a mesh (no edges). No shadow either.
+    expect(r.scene.findAllByType("LineSegments")).toHaveLength(0);
   });
 });
