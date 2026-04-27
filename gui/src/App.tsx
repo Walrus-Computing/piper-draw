@@ -972,23 +972,17 @@ export default function App() {
     };
   }, []);
 
-  // Persist the Y-defect overlay toggle across sessions.
+  // Persist the Y-defect overlay toggle across sessions. Initial value is
+  // hydrated in the store factory; this effect just writes back on changes.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("piperDraw.showYDefects");
-      if (raw === "1") useBlockStore.getState().setShowYDefects(true);
-    } catch {
-      // private mode / unavailable — ignore
-    }
-    const unsub = useBlockStore.subscribe((state, prev) => {
+    return useBlockStore.subscribe((state, prev) => {
       if (state.showYDefects === prev.showYDefects) return;
       try {
         localStorage.setItem("piperDraw.showYDefects", state.showYDefects ? "1" : "0");
       } catch {
-        // ignore
+        // private mode / unavailable — ignore
       }
     });
-    return unsub;
   }, []);
 
   return (
