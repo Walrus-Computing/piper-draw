@@ -771,7 +771,11 @@ export function Toolbar({
                   onClick={() => {
                     setFBPreset(preset);
                   }}
-                  title={`Free-build color-swap pipe (${preset.label}) with a Y defect at the midpoint`}
+                  title={
+                    preset.spec.swapAxes && preset.spec.swapAxes !== "all"
+                      ? `Free-build half color-swap pipe (${preset.label}) — only one wall pair flips at the midpoint`
+                      : `Free-build color-swap pipe (${preset.label}) with a Y defect at the midpoint`
+                  }
                   style={blockBtnStyle(
                     mode === "edit" && armedTool === "pipe" && fbPreset?.id === preset.id,
                     false,

@@ -47,6 +47,12 @@ export type PipeType = (typeof PIPE_TYPES)[number];
  * sit strictly inside (0,1). One defect at 0.5 = today's color-swap pipe.
  * Two defects = a future 3-color pipe. Zero defects = a future solid pipe.
  *
+ * `swapAxes` controls which closed-axis wall pairs participate in the basis
+ * swap at each defect position. "all" (default) flips both pairs — all 4 walls
+ * change color. "first" / "second" flip only one pair (2 opposite faces); the
+ * other pair shows its baseAtStart-derived color as a solid throughout.
+ * "first" / "second" index the closedAxes array in Three.js axis order.
+ *
  * FB blocks ride the existing Y-defect overlay for boundary visualization
  * (magenta cylinders at each defect position) and are excluded from `.dae`
  * export and TQEC validation.
@@ -57,6 +63,7 @@ export interface FreeBuildPipeSpec {
   baseAtStart: "X" | "Z";       // closed-axis bases at the open-axis START end
   baseAtEnd: "X" | "Z";         // ...at the END end
   defectPositions: number[];    // 0..1 along the open axis
+  swapAxes?: "all" | "first" | "second"; // which closed-axis pair(s) swap; default "all"
 }
 
 export type BlockType = CubeType | "Y" | PipeType | FreeBuildPipeSpec;
@@ -93,7 +100,11 @@ export interface FBPreset {
   spec: FreeBuildPipeSpec;
 }
 
-/** v1 FB presets: two color-swap pipes with one Y defect at the midpoint. */
+/**
+ * FB presets: color-swap pipes with one Y defect at the midpoint.
+ * Full presets swap all 4 walls; half presets swap only one closed-axis pair
+ * (the other pair shows its baseAtStart-derived color as a solid).
+ */
 export const FB_PRESETS: ReadonlyArray<FBPreset> = [
   {
     id: "swap-zx",
@@ -104,6 +115,30 @@ export const FB_PRESETS: ReadonlyArray<FBPreset> = [
     id: "swap-xz",
     label: "X→Z",
     spec: { kind: "fb-pipe", openAxis: 2, baseAtStart: "X", baseAtEnd: "Z", defectPositions: [0.5] },
+  },
+  {
+    id: "half-zx",
+    label: "Z→X½",
+    spec: {
+      kind: "fb-pipe",
+      openAxis: 2,
+      baseAtStart: "Z",
+      baseAtEnd: "X",
+      defectPositions: [0.5],
+      swapAxes: "first",
+    },
+  },
+  {
+    id: "half-xz",
+    label: "X→Z½",
+    spec: {
+      kind: "fb-pipe",
+      openAxis: 2,
+      baseAtStart: "X",
+      baseAtEnd: "Z",
+      defectPositions: [0.5],
+      swapAxes: "first",
+    },
   },
 ];
 
@@ -207,7 +242,8 @@ export function isAnyPipeBlock(b: Block): boolean {
  */
 export function blockTypeCacheKey(bt: BlockType): string {
   if (typeof bt === "string") return bt;
-  return `fb:${bt.openAxis}|${bt.baseAtStart}|${bt.baseAtEnd}|${bt.defectPositions.join(",")}`;
+  const sw = bt.swapAxes ?? "all";
+  return `fb:${bt.openAxis}|${bt.baseAtStart}|${bt.baseAtEnd}|${bt.defectPositions.join(",")}|${sw}`;
 }
 
 /** Map a TQEC basis character ('X' or 'Z') to its THREE.Color. */
@@ -430,6 +466,7 @@ function createPipeGeometry(
   bandColor: THREE.Color | null = null,
   hiddenFaces: FaceMask = 0,
   hBandHalfHeight?: number,
+  swapAxes: "all" | "first" | "second" = "all",
 ): THREE.BufferGeometry {
   const closedAxes = [0, 1, 2].filter(a => a !== openAxis) as [number, number];
 
@@ -542,6 +579,14 @@ function createPipeGeometry(
 
       // Strips along the open axis. In "band" mode: below / band / above.
       // In "split" mode: below / above only (bh = 0, middle has zero extent).
+      // For FB pipes, swapAxes can suppress the swap on a specific wall pair:
+      // when this wall is on the non-swapping closed axis, the above strip
+      // reuses the below color so the wall is visually solid.
+      const swapsThisWall =
+        swapAxes === "all" ||
+        (swapAxes === "first" && i === 0) ||
+        (swapAxes === "second" && i === 1);
+      const aboveColor = swapsThisWall ? wallColorsAbove[i] : wallColors[i];
       const [b0, b1, b2, b3] = quad(-1, -bh);
       addQuad(b0, b1, b2, b3, n, wallColors[i]);
       if (splitMode === "band" && bandColor) {
@@ -549,7 +594,7 @@ function createPipeGeometry(
         addQuad(m0, m1, m2, m3, n, bandColor);
       }
       const [a0, a1, a2, a3] = quad(bh, 1);
-      addQuad(a0, a1, a2, a3, n, wallColorsAbove[i]);
+      addQuad(a0, a1, a2, a3, n, aboveColor);
     }
   }
 
@@ -589,7 +634,15 @@ export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask 
       wallColors = [wallColors[1], wallColors[0]];
     }
     void closedAxes; // closedAxes computed for symmetry with TQEC branch; unused here.
-    return createPipeGeometry(threeOpenAxis, wallColors, "split", null, hiddenFaces, hBandHalfHeight);
+    return createPipeGeometry(
+      threeOpenAxis,
+      wallColors,
+      "split",
+      null,
+      hiddenFaces,
+      hBandHalfHeight,
+      blockType.swapAxes ?? "all",
+    );
   }
 
   if (isPipeType(blockType)) {
@@ -777,8 +830,9 @@ export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0
  * opposite basis meet). Hadamard pipes additionally get TWO band rings at
  * `±H_BAND_HALF_HEIGHT` along the open axis (the boundaries of the Y-basis
  * band region).
- * Free-build pipes: same 4 corner edges as TQEC pipes, plus ONE ring per
- * `defectPositions[i]` mapped from 0..1 to the open-axis local range.
+ * Free-build pipes: corner edges only span open-axis runs where the two
+ * closed-axis wall pairs hold different bases; ring segments at each defect
+ * are emitted only on walls whose closed axis actually swaps (per `swapAxes`).
  * Y blocks: empty (single-basis block, no X/Z transitions).
  *
  * An edge is skipped if both adjacent faces are hidden.
@@ -798,6 +852,11 @@ export function createYDefectEdges(blockType: BlockType, hiddenFaces: FaceMask =
   const hx = bx / 2 - e2 / 2;
   const hy = by / 2 - e2 / 2;
   const hz = bz / 2 - e2 / 2;
+
+  if (isFreeBuildPipeSpec(blockType)) {
+    return createFBYDefectEdges(blockType, hiddenFaces, [hx, hy, hz]);
+  }
+
   const corners: Array<[number, number, number]> = [
     [-hx, -hy, -hz],
     [-hx, -hy,  hz],
@@ -843,30 +902,7 @@ export function createYDefectEdges(blockType: BlockType, hiddenFaces: FaceMask =
   // spans [-1,+1] along the open axis with halfExt[oa]=1 in the wall geometry).
   const ringOaVals: number[] = [];
 
-  if (isFreeBuildPipeSpec(blockType)) {
-    const tqecOpen = blockType.openAxis;
-    threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpen];
-    const closed = [0, 1, 2].filter(a => a !== threeOpenAxis) as [number, number];
-    // FB pipe: closed-axis walls always have OPPOSITE bases (the "below split"
-    // colors). Corner edges along the open axis are therefore Y defects in
-    // both halves regardless of swap, so a single basis assignment works for
-    // the corner-edge detection.
-    const startBase = blockType.baseAtStart;
-    const otherStart = startBase === "X" ? "Z" : "X";
-    // Match the same wall-color assignment used by createBlockGeometry: the
-    // first closed Three.js axis takes baseAtStart (post Y-open swap), the
-    // second takes its opposite.
-    const ca0Basis: "X" | "Z" = tqecOpen === 1 ? otherStart : startBase;
-    const ca1Basis: "X" | "Z" = tqecOpen === 1 ? startBase : otherStart;
-    faceBasis[FACE_BIT_BY_INDEX[closed[0] * 2]] = ca0Basis;
-    faceBasis[FACE_BIT_BY_INDEX[closed[0] * 2 + 1]] = ca0Basis;
-    faceBasis[FACE_BIT_BY_INDEX[closed[1] * 2]] = ca1Basis;
-    faceBasis[FACE_BIT_BY_INDEX[closed[1] * 2 + 1]] = ca1Basis;
-    // Map normalized 0..1 defect positions to open-axis local coords -1..+1.
-    for (const p of blockType.defectPositions) {
-      ringOaVals.push(-1 + 2 * p);
-    }
-  } else if (isPipeType(blockType)) {
+  if (isPipeType(blockType)) {
     const base = blockType.replace("H", "");
     const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
     threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpen];
@@ -909,8 +945,7 @@ export function createYDefectEdges(blockType: BlockType, hiddenFaces: FaceMask =
   }
 
   // Band-ring emission: a 4-segment loop around the cross-section at each
-  // ring position along the open axis. Used by Hadamard pipes (2 rings) and
-  // free-build pipes (1 per defect).
+  // ring position along the open axis. Used by Hadamard pipes (2 rings).
   if (threeOpenAxis !== null && ringOaVals.length > 0) {
     const halfExts = [hx, hy, hz];
     const closed = [0, 1, 2].filter(a => a !== threeOpenAxis) as [number, number];
@@ -925,6 +960,120 @@ export function createYDefectEdges(blockType: BlockType, hiddenFaces: FaceMask =
       }
       for (let k = 0; k < 4; k++) {
         linePoints.push(...ringCorners[k], ...ringCorners[(k + 1) % 4]);
+      }
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(linePoints), 3));
+  return geo;
+}
+
+/**
+ * FB-specific Y-defect edges. Walks the open axis as a sequence of segments
+ * separated by `defectPositions`, tracking the basis on each closed-axis wall
+ * pair (which flips at every defect according to `swapAxes`). A corner edge is
+ * a Y defect only on segments where the two closed-axis walls hold different
+ * bases. Ring segments at a defect cover only the walls whose axis flipped
+ * there.
+ */
+function createFBYDefectEdges(
+  blockType: FreeBuildPipeSpec,
+  hiddenFaces: FaceMask,
+  halfExts: [number, number, number],
+): THREE.BufferGeometry {
+  const tqecOpen = blockType.openAxis;
+  const threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpen];
+  const closed = [0, 1, 2].filter(a => a !== threeOpenAxis) as [number, number];
+  const swapAxes = blockType.swapAxes ?? "all";
+  const swapsCa0 = swapAxes === "all" || swapAxes === "first";
+  const swapsCa1 = swapAxes === "all" || swapAxes === "second";
+
+  const startBase = blockType.baseAtStart;
+  const otherStart: "X" | "Z" = startBase === "X" ? "Z" : "X";
+  // Match the wall-color assignment used by createBlockGeometry: the first
+  // closed Three.js axis takes baseAtStart, the second takes its opposite,
+  // with a Y-open swap (mirrors the geometry's tail-orientation flip).
+  let curCa0: "X" | "Z" = tqecOpen === 1 ? otherStart : startBase;
+  let curCa1: "X" | "Z" = tqecOpen === 1 ? startBase : otherStart;
+
+  // Build segments along the open axis. Defects (sorted) split [-1, +1] into
+  // N+1 segments; `bases` records (ca0, ca1) on each one.
+  const sortedDefects = [...blockType.defectPositions].sort((a, b) => a - b);
+  const breakpoints = [0, ...sortedDefects, 1].map(p => -1 + 2 * p);
+  type Seg = { start: number; end: number; ca0: "X" | "Z"; ca1: "X" | "Z" };
+  const segments: Seg[] = [];
+  for (let s = 0; s < breakpoints.length - 1; s++) {
+    segments.push({ start: breakpoints[s], end: breakpoints[s + 1], ca0: curCa0, ca1: curCa1 });
+    if (s < sortedDefects.length) {
+      if (swapsCa0) curCa0 = curCa0 === "X" ? "Z" : "X";
+      if (swapsCa1) curCa1 = curCa1 === "X" ? "Z" : "X";
+    }
+  }
+
+  // Coalesce adjacent Y-defect segments so a fully-swapping pipe still emits
+  // one corner edge per corner instead of one per inter-defect segment.
+  const yDefectRuns: Array<{ start: number; end: number }> = [];
+  let runStart: number | null = null;
+  for (let s = 0; s < segments.length; s++) {
+    const isYDefect = segments[s].ca0 !== segments[s].ca1;
+    if (isYDefect && runStart === null) runStart = segments[s].start;
+    if (!isYDefect && runStart !== null) {
+      yDefectRuns.push({ start: runStart, end: segments[s - 1].end });
+      runStart = null;
+    }
+  }
+  if (runStart !== null) {
+    yDefectRuns.push({ start: runStart, end: segments[segments.length - 1].end });
+  }
+
+  const linePoints: number[] = [];
+
+  // Corner edges along the open axis, one per (ca0-sign, ca1-sign) pair per
+  // Y-defect run. Skipped if either adjacent wall face is hidden.
+  for (const run of yDefectRuns) {
+    for (const [s1, s2] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+      const faceA = FACE_BIT_BY_INDEX[closed[0] * 2 + (s1 > 0 ? 0 : 1)];
+      const faceB = FACE_BIT_BY_INDEX[closed[1] * 2 + (s2 > 0 ? 0 : 1)];
+      if ((hiddenFaces & faceA) || (hiddenFaces & faceB)) continue;
+      const v0: [number, number, number] = [0, 0, 0];
+      const v1: [number, number, number] = [0, 0, 0];
+      v0[closed[0]] = s1 * halfExts[closed[0]];
+      v0[closed[1]] = s2 * halfExts[closed[1]];
+      v0[threeOpenAxis] = run.start * halfExts[threeOpenAxis];
+      v1[closed[0]] = s1 * halfExts[closed[0]];
+      v1[closed[1]] = s2 * halfExts[closed[1]];
+      v1[threeOpenAxis] = run.end * halfExts[threeOpenAxis];
+      linePoints.push(...v0, ...v1);
+    }
+  }
+
+  // Ring segments at each defect, restricted to the walls whose closed axis
+  // actually swaps there. A ring edge running along ca1 lies on a ca0=± wall
+  // and is a Y defect iff ca0 swaps; symmetrically for the other direction.
+  for (const p of sortedDefects) {
+    const oaVal = -1 + 2 * p;
+    const corner = (s1: -1 | 1, s2: -1 | 1): [number, number, number] => {
+      const v: [number, number, number] = [0, 0, 0];
+      v[threeOpenAxis] = oaVal;
+      v[closed[0]] = s1 * halfExts[closed[0]];
+      v[closed[1]] = s2 * halfExts[closed[1]];
+      return v;
+    };
+    if (swapsCa0) {
+      // 2 segments on ca0=± walls (run along ca1).
+      for (const s1 of [1, -1] as const) {
+        const faceBit = FACE_BIT_BY_INDEX[closed[0] * 2 + (s1 > 0 ? 0 : 1)];
+        if (hiddenFaces & faceBit) continue;
+        linePoints.push(...corner(s1, -1), ...corner(s1, 1));
+      }
+    }
+    if (swapsCa1) {
+      // 2 segments on ca1=± walls (run along ca0).
+      for (const s2 of [1, -1] as const) {
+        const faceBit = FACE_BIT_BY_INDEX[closed[1] * 2 + (s2 > 0 ? 0 : 1)];
+        if (hiddenFaces & faceBit) continue;
+        linePoints.push(...corner(-1, s2), ...corner(1, s2));
       }
     }
   }
