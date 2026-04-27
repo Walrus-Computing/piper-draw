@@ -218,7 +218,7 @@ function GhostBlockInner() {
               </lineSegments>
             )}
             {showFoldOutCube && (
-              <FoldOutCubeFaces blockType={activeType as string} topAxis={foldTopAxis} />
+              <FoldOutCubeFaces blockType={activeType} topAxis={foldTopAxis} />
             )}
           </group>
         )}
