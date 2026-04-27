@@ -6,6 +6,12 @@ import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPo
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
+import {
+  buildShareUrl,
+  encodeSnapshotToHashParam,
+  isCompressionStreamSupported,
+} from "../utils/sceneShare";
+import { captureSnapshot } from "../utils/sceneSnapshot";
 import { fetchTemplateManifest, loadTemplateBlocks, type TemplateEntry } from "../utils/templates";
 import { evalCoordExpr } from "../utils/parseCoordExpr";
 import { usePreviewImages } from "./PreviewRenderer";
@@ -1108,7 +1114,15 @@ function FileMenu({
   const [templates, setTemplates] = useState<TemplateEntry[] | null>(null);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [loadingFile, setLoadingFile] = useState<string | null>(null);
+  const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "too-long" | "error">("idle");
+  const shareTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const compressionSupported = isCompressionStreamSupported();
+
+  // ~6 KB total URL — Twitter/X and most chat clients are well above this,
+  // but very long URLs choke older SMS, some embeds, and the URL bar in
+  // older browsers. Past this we surface the .dae export instead.
+  const SHARE_URL_MAX_LEN = 6144;
 
   useEffect(() => {
     if (!open) return;
@@ -1157,6 +1171,52 @@ function FileMenu({
     cursor: disabled ? "default" : "pointer",
     whiteSpace: "nowrap",
   });
+
+  const onShare = async () => {
+    if (!compressionSupported || blocksEmpty) return;
+    if (shareTimeoutRef.current !== null) {
+      clearTimeout(shareTimeoutRef.current);
+      shareTimeoutRef.current = null;
+    }
+    try {
+      const snapshot = captureSnapshot();
+      const encoded = await encodeSnapshotToHashParam(snapshot);
+      const url = buildShareUrl(encoded);
+      if (url.length > SHARE_URL_MAX_LEN) {
+        setShareStatus("too-long");
+      } else {
+        await navigator.clipboard.writeText(url);
+        setShareStatus("copied");
+      }
+    } catch {
+      setShareStatus("error");
+    }
+    shareTimeoutRef.current = setTimeout(() => {
+      setShareStatus("idle");
+      setOpen(false);
+      shareTimeoutRef.current = null;
+    }, 1600);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (shareTimeoutRef.current !== null) clearTimeout(shareTimeoutRef.current);
+    };
+  }, []);
+
+  let shareLabel = "Share link";
+  let shareTitle = "Copy a link that loads this exact scene";
+  if (!compressionSupported) {
+    shareTitle = "Share link is unsupported in this browser (needs CompressionStream)";
+  } else if (shareStatus === "copied") {
+    shareLabel = "Link copied!";
+  } else if (shareStatus === "too-long") {
+    shareLabel = "Too large — use Export";
+    shareTitle = "Scene is too big for a URL; use Export to send a .dae file instead";
+  } else if (shareStatus === "error") {
+    shareLabel = "Could not copy";
+  }
+  const shareDisabled = blocksEmpty || !compressionSupported;
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
@@ -1214,6 +1274,16 @@ function FileMenu({
             style={item(blocksEmpty)}
           >
             Export
+          </button>
+          <button
+            onClick={() => {
+              void onShare();
+            }}
+            disabled={shareDisabled}
+            title={shareTitle}
+            style={item(shareDisabled)}
+          >
+            {shareLabel}
           </button>
           <button
             onClick={() => {
