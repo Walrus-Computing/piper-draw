@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createBlockGeometry, createYDefectEdges, getHiddenFaceMaskForPos, FACE_NEG_X, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_X, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, CUBE_TYPES, PIPE_TYPES } from "./index";
-import type { PipeType, CubeType } from "./index";
+import { createBlockGeometry, createYDefectEdges, getHiddenFaceMaskForPos, FACE_NEG_X, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_X, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, getOrderedPortPositions, CUBE_TYPES, PIPE_TYPES } from "./index";
+import type { PipeType, CubeType, PortMeta } from "./index";
 import type { BlockType } from "./index";
 import { Vector3 } from "three";
 
@@ -600,5 +600,62 @@ describe("createYDefectEdges", () => {
     // Sanity: hiding everything yields zero edges.
     const all = FACE_POS_X | FACE_NEG_X | FACE_POS_Y | FACE_NEG_Y | FACE_POS_Z | FACE_NEG_Z;
     expect(edgeCount(createYDefectEdges("XZZ", all))).toBe(0);
+  });
+});
+
+describe("getOrderedPortPositions", () => {
+  const explicitPorts = new Set([
+    "0,0,0",
+    "3,0,0",
+    "6,0,0",
+    "9,0,0",
+  ]);
+  const blocks = new Map<
+    string,
+    { pos: { x: number; y: number; z: number }; type: BlockType }
+  >();
+
+  it("falls back to spatial sort when no ranks are set", () => {
+    const portMeta = new Map<string, PortMeta>([
+      ["3,0,0", { label: "P1", io: "in" }],
+      ["0,0,0", { label: "P2", io: "in" }],
+      ["9,0,0", { label: "P3", io: "in" }],
+      ["6,0,0", { label: "P4", io: "in" }],
+    ]);
+    const result = getOrderedPortPositions(blocks, explicitPorts, portMeta);
+    expect(result.map((p) => p.x)).toEqual([0, 3, 6, 9]);
+  });
+
+  it("orders ports by rank when ranks are set", () => {
+    const portMeta = new Map<string, PortMeta>([
+      ["0,0,0", { label: "P1", io: "in", rank: 3 }],
+      ["3,0,0", { label: "P2", io: "in", rank: 1 }],
+      ["6,0,0", { label: "P3", io: "in", rank: 0 }],
+      ["9,0,0", { label: "P4", io: "in", rank: 2 }],
+    ]);
+    const result = getOrderedPortPositions(blocks, explicitPorts, portMeta);
+    expect(result.map((p) => p.x)).toEqual([6, 3, 9, 0]);
+  });
+
+  it("places ranked ports before unranked ones; unranked sort spatially", () => {
+    const portMeta = new Map<string, PortMeta>([
+      ["9,0,0", { label: "P1", io: "in", rank: 0 }],
+      ["3,0,0", { label: "P2", io: "in" }],
+      ["0,0,0", { label: "P3", io: "in" }],
+      // P4 at (6,0,0) has no PortMeta entry at all — also unranked.
+    ]);
+    const result = getOrderedPortPositions(blocks, explicitPorts, portMeta);
+    expect(result.map((p) => p.x)).toEqual([9, 0, 3, 6]);
+  });
+
+  it("breaks ties between equal ranks by spatial order", () => {
+    const portMeta = new Map<string, PortMeta>([
+      ["6,0,0", { label: "P1", io: "in", rank: 0 }],
+      ["0,0,0", { label: "P2", io: "in", rank: 0 }],
+      ["9,0,0", { label: "P3", io: "in", rank: 1 }],
+      ["3,0,0", { label: "P4", io: "in", rank: 1 }],
+    ]);
+    const result = getOrderedPortPositions(blocks, explicitPorts, portMeta);
+    expect(result.map((p) => p.x)).toEqual([0, 6, 3, 9]);
   });
 });
