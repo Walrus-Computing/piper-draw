@@ -139,6 +139,49 @@ describe("blockStore", () => {
       expect(useBlockStore.getState().blocks.size).toBe(0);
     });
 
+    it("cascades attached FB pipes the same way as TQEC pipes", () => {
+      // Without FB-aware attachment counting, the cube would delete cleanly
+      // and leave two orphaned FB pipes floating in the scene.
+      const fbX = {
+        kind: "fb-pipe" as const,
+        openAxis: 0 as const,
+        baseAtStart: "Z" as const,
+        baseAtEnd: "X" as const,
+        defectPositions: [0.5],
+      };
+      const fbY = { ...fbX, openAxis: 1 as const };
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: fbX }],
+        ["0,1,0", { pos: { x: 0, y: 1, z: 0 }, type: fbY }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.getState().removeBlock({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(0);
+    });
+
+    it("cleans up an orphaned port marker when an FB pipe is removed", () => {
+      // User-placed port at (0,0,0); FB pipe at (1,0,0) ends at that port.
+      // Removing the pipe should sweep up the port marker since nothing else
+      // anchors it — same behavior we already get for TQEC pipes.
+      // (loadBlocks clears portPositions, so addPortAt has to happen after.)
+      const fbX = {
+        kind: "fb-pipe" as const,
+        openAxis: 0 as const,
+        baseAtStart: "Z" as const,
+        baseAtEnd: "X" as const,
+        defectPositions: [0.5],
+      };
+      const incoming = new Map<string, Block>([
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: fbX }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.getState().addPortAt({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().portPositions.has("0,0,0")).toBe(true);
+      useBlockStore.getState().removeBlock({ x: 1, y: 0, z: 0 });
+      expect(useBlockStore.getState().portPositions.has("0,0,0")).toBe(false);
+    });
+
     it("does not cascade when removing a cube with <2 pipes", () => {
       const incoming = new Map<string, Block>([
         ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
@@ -466,6 +509,43 @@ describe("blockStore", () => {
       useBlockStore.getState().convertBlockToPort({ x: 1, y: 0, z: 0 });
       expect(useBlockStore.getState().blocks.size).toBe(1);
       expect(useBlockStore.getState().portWarning).toMatch(/Only cubes/);
+    });
+
+    it("refuses a free-build pipe and sets the same warning", () => {
+      const fbSpec = {
+        kind: "fb-pipe" as const,
+        openAxis: 0 as const,
+        baseAtStart: "Z" as const,
+        baseAtEnd: "X" as const,
+        defectPositions: [0.5],
+      };
+      const incoming = new Map<string, Block>([
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: fbSpec }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.getState().convertBlockToPort({ x: 1, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(1);
+      expect(useBlockStore.getState().portWarning).toMatch(/Only cubes/);
+    });
+
+    it("refuses a cube with 2+ FB pipes attached (parity with TQEC pipe attachment)", () => {
+      const fbX = {
+        kind: "fb-pipe" as const,
+        openAxis: 0 as const,
+        baseAtStart: "Z" as const,
+        baseAtEnd: "X" as const,
+        defectPositions: [0.5],
+      };
+      const fbY = { ...fbX, openAxis: 1 as const };
+      const incoming = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: fbX }],
+        ["0,1,0", { pos: { x: 0, y: 1, z: 0 }, type: fbY }],
+      ]);
+      useBlockStore.getState().loadBlocks(incoming);
+      useBlockStore.getState().convertBlockToPort({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(3);
+      expect(useBlockStore.getState().portWarning).toMatch(/2 pipes attached/);
     });
 
     it("is a no-op on an empty position", () => {

@@ -15,7 +15,7 @@ import {
   getAdjacentPos,
   getAllPortPositions,
 } from "../types";
-import { resolvePipeTypeFromFace } from "./BlockInstances";
+import { resolveFBSpecFromFace, resolvePipeTypeFromFace } from "./BlockInstances";
 import type { Position3D, BlockType, CubeType } from "../types";
 
 // Sentinel cube type for sizing/face-normal calculations on a port (which has
@@ -78,17 +78,28 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
       return;
     }
 
-    if (store.armedTool === "pipe" && store.pipeVariant) {
+    if (store.armedTool === "pipe" && (store.pipeVariant || store.fbPreset)) {
       // Pipe placement adjacent to a port: use the hovered face normal to compute
       // which adjacent pipe slot to target, mirroring BlockInstances' face logic.
       if (!e.face) {
         store.setHoveredGridPos(null);
         return;
       }
-      const resolved = resolvePipeTypeFromFace(pos, PORT_SENTINEL_TYPE, e.face.normal, store.pipeVariant);
-      if (!resolved) {
-        store.setHoveredGridPos(null);
-        return;
+      let resolved: BlockType;
+      if (store.fbPreset) {
+        const r = resolveFBSpecFromFace(pos, PORT_SENTINEL_TYPE, e.face.normal, store.fbPreset);
+        if (!r) {
+          store.setHoveredGridPos(null);
+          return;
+        }
+        resolved = r.spec;
+      } else {
+        const r = resolvePipeTypeFromFace(pos, PORT_SENTINEL_TYPE, e.face.normal, store.pipeVariant!);
+        if (!r) {
+          store.setHoveredGridPos(null);
+          return;
+        }
+        resolved = r;
       }
       const adj = getAdjacentPos(pos, PORT_SENTINEL_TYPE, e.face.normal, resolved);
       const adjKey = posKey(adj);
@@ -135,10 +146,18 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
     }
     // Port tool: clicking a port is a no-op (it's already a port).
     if (store.armedTool === "port") return;
-    if (store.armedTool === "pipe" && store.pipeVariant) {
+    if (store.armedTool === "pipe" && (store.pipeVariant || store.fbPreset)) {
       if (!e.face) return;
-      const resolved = resolvePipeTypeFromFace(pos, PORT_SENTINEL_TYPE, e.face.normal, store.pipeVariant);
-      if (!resolved) return;
+      let resolved: BlockType;
+      if (store.fbPreset) {
+        const r = resolveFBSpecFromFace(pos, PORT_SENTINEL_TYPE, e.face.normal, store.fbPreset);
+        if (!r) return;
+        resolved = r.spec;
+      } else {
+        const r = resolvePipeTypeFromFace(pos, PORT_SENTINEL_TYPE, e.face.normal, store.pipeVariant!);
+        if (!r) return;
+        resolved = r;
+      }
       const adj = getAdjacentPos(pos, PORT_SENTINEL_TYPE, e.face.normal, resolved);
       store.addBlock(adj);
       return;

@@ -20,6 +20,7 @@ import {
   isValidBlockPos,
   isValidPos,
   pipeAxisFromPos,
+  pipeOpenAxisOf,
   resolvePipeType,
   buildSpatialIndex,
   addToSpatialIndex,
@@ -473,15 +474,14 @@ function syncPortsAndPromote(
  * don't falsely skip a port whose only remaining pipe just got deleted.
  */
 function orphanedPortKeysFromRemovedPipes(
-  removedPipes: Array<{ pos: Position3D; type: PipeType }>,
+  removedPipes: Array<{ pos: Position3D; type: PipeType | FreeBuildPipeSpec }>,
   blocksAfter: Map<string, Block>,
   portPositions: Set<string>,
 ): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
   for (const pipe of removedPipes) {
-    const base = pipe.type.replace("H", "");
-    const openAxis = base.indexOf("O");
+    const openAxis = pipeOpenAxisOf(pipe.type);
     const coords: [number, number, number] = [pipe.pos.x, pipe.pos.y, pipe.pos.z];
     for (const offset of [-1, 2]) {
       const n: [number, number, number] = [coords[0], coords[1], coords[2]];
@@ -1074,7 +1074,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       const block = state.blocks.get(key);
       if (!block) return state;
       // Converting a pipe to a port makes no sense — pipes aren't cube-slot blocks.
-      if (isPipeType(block.type)) {
+      if (isPipeType(block.type) || isFreeBuildPipeSpec(block.type)) {
         return { portWarning: "Only cubes can be converted to a port." };
       }
       const pipeCount = countAttachedPipes(pos, state.blocks);
@@ -1242,7 +1242,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       // the pipes (each becomes a dangling segment with two ports). Take them out
       // in the same operation so the model stays consistent. Single-pipe and
       // pipeless cubes delete cleanly without cascade.
-      const cascadeKeys = !isPipeType(block.type) && countAttachedPipes(pos, state.blocks) >= 2
+      const blockIsCube = !isPipeType(block.type) && !isFreeBuildPipeSpec(block.type);
+      const cascadeKeys = blockIsCube && countAttachedPipes(pos, state.blocks) >= 2
         ? getAttachedPipeKeys(pos, state.blocks)
         : [];
 
@@ -1250,9 +1251,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const { blocks, hiddenFaces } = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, key, block);
         const newUndetermined = new Map(state.undeterminedCubes);
         newUndetermined.delete(key);
-        const removedPipes = isPipeType(block.type)
-          ? [{ pos: block.pos, type: block.type as PipeType }]
-          : [];
+        const removedPipes: Array<{ pos: Position3D; type: PipeType | FreeBuildPipeSpec }> =
+          isPipeType(block.type) || isFreeBuildPipeSpec(block.type)
+            ? [{ pos: block.pos, type: block.type as PipeType | FreeBuildPipeSpec }]
+            : [];
         const orphanedPortKeys = removedPipes.length > 0
           ? orphanedPortKeysFromRemovedPipes(removedPipes, blocks, state.portPositions)
           : [];
@@ -1286,9 +1288,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
 
       const entries: Array<{ key: string; block: Block }> = [{ key, block }];
-      const removedPipes: Array<{ pos: Position3D; type: PipeType }> = isPipeType(block.type)
-        ? [{ pos: block.pos, type: block.type as PipeType }]
-        : [];
+      const removedPipes: Array<{ pos: Position3D; type: PipeType | FreeBuildPipeSpec }> =
+        isPipeType(block.type) || isFreeBuildPipeSpec(block.type)
+          ? [{ pos: block.pos, type: block.type as PipeType | FreeBuildPipeSpec }]
+          : [];
       let blocks = state.blocks;
       let hiddenFaces = state.hiddenFaces;
       ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, key, block));
@@ -1298,7 +1301,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const cb = blocks.get(ck);
         if (!cb) continue;
         entries.push({ key: ck, block: cb });
-        if (isPipeType(cb.type)) removedPipes.push({ pos: cb.pos, type: cb.type as PipeType });
+        if (isPipeType(cb.type) || isFreeBuildPipeSpec(cb.type)) {
+          removedPipes.push({ pos: cb.pos, type: cb.type as PipeType | FreeBuildPipeSpec });
+        }
         ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, ck, cb));
         newUndetermined.delete(ck);
       }
@@ -2245,7 +2250,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     set((state) => {
       if (state.selectedKeys.size === 0 && state.selectedPortPositions.size === 0) return state;
       const entries: Array<{ key: string; block: Block }> = [];
-      const removedPipes: Array<{ pos: Position3D; type: PipeType }> = [];
+      const removedPipes: Array<{ pos: Position3D; type: PipeType | FreeBuildPipeSpec }> = [];
       const seen = new Set<string>();
       let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
       for (const key of state.selectedKeys) {
@@ -2254,11 +2259,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (!block) continue;
         // Junction-cube cascade: selecting a cube with ≥2 attached pipes also removes
         // those pipes, mirroring single-block removeBlock behaviour.
-        const cascadeKeys = !isPipeType(block.type) && countAttachedPipes(block.pos, blocks) >= 2
+        const blockIsCube = !isPipeType(block.type) && !isFreeBuildPipeSpec(block.type);
+        const cascadeKeys = blockIsCube && countAttachedPipes(block.pos, blocks) >= 2
           ? getAttachedPipeKeys(block.pos, blocks)
           : [];
         entries.push({ key, block });
-        if (isPipeType(block.type)) removedPipes.push({ pos: block.pos, type: block.type as PipeType });
+        if (isPipeType(block.type) || isFreeBuildPipeSpec(block.type)) {
+          removedPipes.push({ pos: block.pos, type: block.type as PipeType | FreeBuildPipeSpec });
+        }
         seen.add(key);
         ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, key, block));
         for (const ck of cascadeKeys) {
@@ -2266,7 +2274,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const cb = blocks.get(ck);
           if (!cb) continue;
           entries.push({ key: ck, block: cb });
-          if (isPipeType(cb.type)) removedPipes.push({ pos: cb.pos, type: cb.type as PipeType });
+          if (isPipeType(cb.type) || isFreeBuildPipeSpec(cb.type)) {
+            removedPipes.push({ pos: cb.pos, type: cb.type as PipeType | FreeBuildPipeSpec });
+          }
           seen.add(ck);
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, ck, cb));
         }

@@ -1522,6 +1522,13 @@ export function determineCubeOptions(
  * Used by the cube → port conversion (must have ≤1) and by the cascade-delete
  * path (deleting a junction cube also removes its attached pipes).
  */
+/** Open-axis for a TQEC pipe or free-build pipe. Single source of truth so call
+ * sites don't need to special-case FreeBuildPipeSpec vs string PipeType. */
+export function pipeOpenAxisOf(type: PipeType | FreeBuildPipeSpec): 0 | 1 | 2 {
+  if (isFreeBuildPipeSpec(type)) return type.openAxis;
+  return type.replace("H", "").indexOf("O") as 0 | 1 | 2;
+}
+
 export function getAttachedPipeKeys(
   cubePos: Position3D,
   blocks: Map<string, Block>,
@@ -1534,9 +1541,9 @@ export function getAttachedPipeKeys(
       nCoords[axis] += pipeOffset;
       const k = posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
       const neighbor = blocks.get(k);
-      if (!neighbor || !isPipeType(neighbor.type)) continue;
-      const base = neighbor.type.replace("H", "");
-      if (base.indexOf("O") === axis) keys.push(k);
+      if (!neighbor) continue;
+      if (!isPipeType(neighbor.type) && !isFreeBuildPipeSpec(neighbor.type)) continue;
+      if (pipeOpenAxisOf(neighbor.type) === axis) keys.push(k);
     }
   }
   return keys;

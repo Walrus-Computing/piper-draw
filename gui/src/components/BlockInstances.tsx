@@ -16,13 +16,14 @@ import {
   isValidPos,
   isPipeType,
   isFreeBuildPipeSpec,
+  pipeAxisFromPos,
   resolvePipeType,
   getAdjacentPos,
   posKey,
   blockTypeCacheKey,
   VARIANT_AXIS_MAP,
 } from "../types";
-import type { BlockType, CubeType, Block, FaceMask, Position3D, PipeVariant } from "../types";
+import type { BlockType, CubeType, Block, FaceMask, Position3D, PipeVariant, FBPreset, FreeBuildPipeSpec } from "../types";
 import { posInActiveSlice } from "../utils/isoView";
 
 const DIMMED_OPACITY = 0.18;
@@ -57,6 +58,29 @@ export function resolvePipeTypeFromFace(
     if (!isValidPipePos(probe)) continue;
     const resolved = resolvePipeType(variant, probe);
     if (resolved) return resolved;
+  }
+  return null;
+}
+
+// FB analogue of resolvePipeTypeFromFace. Iterates candidate open-axis values
+// to find a face-adjacent slot that lands on a valid pipe position, then sets
+// the spec's openAxis to match the slot's TQEC axis. Mirrors the placement
+// invariant in addBlock — the preset's template openAxis is overridden by
+// pipeAxisFromPos at placement time.
+// eslint-disable-next-line react-refresh/only-export-components
+export function resolveFBSpecFromFace(
+  srcPos: Position3D,
+  srcType: BlockType,
+  normal: THREE.Vector3,
+  preset: FBPreset,
+): { adj: Position3D; spec: FreeBuildPipeSpec } | null {
+  for (const ax of [0, 1, 2] as const) {
+    const candidate: FreeBuildPipeSpec = { ...preset.spec, openAxis: ax };
+    const adj = getAdjacentPos(srcPos, srcType, normal, candidate);
+    if (!isValidPipePos(adj)) continue;
+    const tqecAxis = pipeAxisFromPos(adj);
+    if (tqecAxis === null) continue;
+    return { adj, spec: { ...preset.spec, openAxis: tqecAxis } };
   }
   return null;
 }
@@ -270,7 +294,14 @@ function TypedInstances({
 
       // Determine the destination block type for adjacent placement
       let dstType: BlockType = store.cubeType;
-      if (store.pipeVariant) {
+      if (store.fbPreset) {
+        const r = resolveFBSpecFromFace(hovered.pos, hovered.type, e.face.normal, store.fbPreset);
+        if (!r) {
+          store.setHoveredGridPos(null);
+          return;
+        }
+        dstType = r.spec;
+      } else if (store.pipeVariant) {
         const resolved = resolvePipeTypeFromFace(hovered.pos, hovered.type, e.face.normal, store.pipeVariant);
         if (!resolved) {
           store.setHoveredGridPos(null);
@@ -358,7 +389,11 @@ function TypedInstances({
       if (!e.face) return;
 
       let dstType: BlockType = store.cubeType;
-      if (store.pipeVariant) {
+      if (store.fbPreset) {
+        const r = resolveFBSpecFromFace(clicked.pos, clicked.type, e.face.normal, store.fbPreset);
+        if (!r) return;
+        dstType = r.spec;
+      } else if (store.pipeVariant) {
         const resolved = resolvePipeTypeFromFace(clicked.pos, clicked.type, e.face.normal, store.pipeVariant);
         if (!resolved) return;
         dstType = resolved;
