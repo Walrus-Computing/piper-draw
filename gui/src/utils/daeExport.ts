@@ -1,5 +1,5 @@
 import type { Block } from "../types";
-import { isPipeType } from "../types";
+import { isPipeType, isFreeBuildBlock } from "../types";
 
 // ---------------------------------------------------------------------------
 // Constants matching tqec's Collada output
@@ -69,10 +69,19 @@ function stubGeometryXml(id: string): string {
  * (both use the same mod-3 grid where scale factor = 1 + pipe_length = 3).
  */
 export function exportBlocksToDae(blocks: Map<string, Block>): string {
+  // Defense-in-depth: strip free-build (non-TQEC) pieces before any DAE
+  // emission. The UI Export button is disabled when FB blocks are present;
+  // this filter is a safety net for programmatic callers.
+  if (Array.from(blocks.values()).some(isFreeBuildBlock)) {
+    blocks = new Map(
+      Array.from(blocks.entries()).filter(([, b]) => !isFreeBuildBlock(b)),
+    );
+  }
   // Collect unique block kinds
   const usedKinds = new Set<string>();
   for (const block of blocks.values()) {
-    usedKinds.add(block.type);
+    // After the filter above, block.type is always a TQEC string.
+    usedKinds.add(block.type as string);
   }
 
   // Build materials XML — always include all 4 to keep it simple
@@ -138,7 +147,9 @@ export function exportBlocksToDae(blocks: Map<string, Block>): string {
   let instanceIdx = 0;
 
   for (const block of blocks.values()) {
-    const kindLower = block.type.toLowerCase();
+    // After the FB filter at the top of this function, block.type is always
+    // a TQEC string. The cast keeps TypeScript happy under the widened union.
+    const kindLower = (block.type as string).toLowerCase();
     const nodeId = `lib_${kindLower}`;
 
     const tx = block.pos.x;

@@ -576,9 +576,11 @@ describe("createYDefectEdges", () => {
     expect(edgeCount(createYDefectEdges("ZXO"))).toBe(4);
   });
 
-  it("Hadamard pipes emit the same 4 wall-meeting edges (band ring is v1 follow-up)", () => {
-    expect(edgeCount(createYDefectEdges("OZXH"))).toBe(4);
-    expect(edgeCount(createYDefectEdges("XZOH"))).toBe(4);
+  it("Hadamard pipes emit 4 wall-meeting edges + 2 band rings (8 ring segments) = 12", () => {
+    // 4 corner edges along the open axis + 2 rings (top + bottom of the
+    // yellow band) × 4 segments each = 8 ring segments. Total: 12.
+    expect(edgeCount(createYDefectEdges("OZXH"))).toBe(12);
+    expect(edgeCount(createYDefectEdges("XZOH"))).toBe(12);
   });
 
   it("skips every edge adjacent to a hidden face (continuous surface across the join)", () => {

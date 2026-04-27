@@ -41,7 +41,25 @@ export type CubeType = (typeof CUBE_TYPES)[number];
 export const PIPE_TYPES = ["OZX", "OXZ", "OZXH", "OXZH", "ZOX", "XOZ", "ZOXH", "XOZH", "ZXO", "XZO", "ZXOH", "XZOH"] as const;
 export type PipeType = (typeof PIPE_TYPES)[number];
 
-export type BlockType = CubeType | "Y" | PipeType;
+/**
+ * Free-build pipe spec — a non-TQEC pipe parameterized by Y-defect positions.
+ * `defectPositions` are normalized 0..1 along the open axis; physical defects
+ * sit strictly inside (0,1). One defect at 0.5 = today's color-swap pipe.
+ * Two defects = a future 3-color pipe. Zero defects = a future solid pipe.
+ *
+ * FB blocks ride the existing Y-defect overlay for boundary visualization
+ * (magenta cylinders at each defect position) and are excluded from `.dae`
+ * export and TQEC validation.
+ */
+export interface FreeBuildPipeSpec {
+  kind: "fb-pipe";
+  openAxis: 0 | 1 | 2;          // TQEC axis (0=x, 1=y, 2=z)
+  baseAtStart: "X" | "Z";       // closed-axis bases at the open-axis START end
+  baseAtEnd: "X" | "Z";         // ...at the END end
+  defectPositions: number[];    // 0..1 along the open axis
+}
+
+export type BlockType = CubeType | "Y" | PipeType | FreeBuildPipeSpec;
 export type FaceMask = number;
 
 export const FACE_POS_X = 1 << 0; // +X face in Three.js box geometry order
@@ -63,6 +81,31 @@ export const FACE_BIT_BY_INDEX: ReadonlyArray<number> = [
 /** Pipe variant: the two non-O face characters (+ optional H). Open axis determined by position. */
 export type PipeVariant = "ZX" | "XZ" | "ZXH" | "XZH";
 export const PIPE_VARIANTS: PipeVariant[] = ["ZX", "XZ", "ZXH", "XZH"];
+
+/**
+ * Free-build pipe presets shown in the toolbar's "Free Build" group.
+ * The `spec` is a TEMPLATE — `openAxis` is overridden at placement time
+ * based on which pipe slot the user clicks.
+ */
+export interface FBPreset {
+  id: string;
+  label: string;
+  spec: FreeBuildPipeSpec;
+}
+
+/** v1 FB presets: two color-swap pipes with one Y defect at the midpoint. */
+export const FB_PRESETS: ReadonlyArray<FBPreset> = [
+  {
+    id: "swap-zx",
+    label: "Z→X",
+    spec: { kind: "fb-pipe", openAxis: 2, baseAtStart: "Z", baseAtEnd: "X", defectPositions: [0.5] },
+  },
+  {
+    id: "swap-xz",
+    label: "X→Z",
+    spec: { kind: "fb-pipe", openAxis: 2, baseAtStart: "X", baseAtEnd: "Z", defectPositions: [0.5] },
+  },
+];
 
 /**
  * Toolbar-order list of placeable items (Port + 6 cubes + Y + 4 pipes).
@@ -139,7 +182,32 @@ const FACE_MASK_EPS = 1e-9;
 // ---------------------------------------------------------------------------
 
 export function isPipeType(bt: BlockType): bt is PipeType {
-  return (PIPE_TYPES as readonly string[]).includes(bt);
+  return typeof bt === "string" && (PIPE_TYPES as readonly string[]).includes(bt);
+}
+
+/** True iff the block is a free-build (non-TQEC) block. */
+export function isFreeBuildBlock(b: Block): b is Block & { type: FreeBuildPipeSpec } {
+  return typeof b.type === "object" && b.type !== null && b.type.kind === "fb-pipe";
+}
+
+/** True iff the BlockType is a free-build pipe spec (object, not a TQEC string). */
+export function isFreeBuildPipeSpec(bt: BlockType): bt is FreeBuildPipeSpec {
+  return typeof bt === "object" && bt !== null && bt.kind === "fb-pipe";
+}
+
+/** True iff this block is any pipe (TQEC pipe OR free-build pipe). */
+export function isAnyPipeBlock(b: Block): boolean {
+  return isFreeBuildBlock(b) || isPipeType(b.type);
+}
+
+/**
+ * Deterministic string key for a BlockType — works for both TQEC strings and
+ * FreeBuildPipeSpec objects. Used as a cache/grouping key in BlockInstances
+ * and YDefectOverlay so distinct FB specs don't collide on `[object Object]`.
+ */
+export function blockTypeCacheKey(bt: BlockType): string {
+  if (typeof bt === "string") return bt;
+  return `fb:${bt.openAxis}|${bt.baseAtStart}|${bt.baseAtEnd}|${bt.defectPositions.join(",")}`;
 }
 
 /** Map a TQEC basis character ('X' or 'Z') to its THREE.Color. */
@@ -177,7 +245,7 @@ export function isValidPipePos(pos: Position3D): boolean {
 }
 
 export function isValidPos(pos: Position3D, blockType: BlockType): boolean {
-  if (isPipeType(blockType)) return isValidPipePos(pos);
+  if (isPipeType(blockType) || isFreeBuildPipeSpec(blockType)) return isValidPipePos(pos);
   return isValidBlockPos(pos);
 }
 
@@ -258,6 +326,12 @@ export function snapGroundPos(rawX: number, rawY: number, forPipe: boolean): Pos
 
 /** TQEC dimensions [X, Y, Z] for each block type. */
 export function blockTqecSize(blockType: BlockType): [number, number, number] {
+  if (isFreeBuildPipeSpec(blockType)) {
+    // Free-build pipes have the same shape as TQEC pipes: 2 along the open axis, 1 elsewhere.
+    const dims: [number, number, number] = [1, 1, 1];
+    dims[blockType.openAxis] = 2;
+    return dims;
+  }
   switch (blockType) {
     case "Y": return [1, 1, 0.5];
     case "ZXO": case "XZO": case "ZXOH": case "XZOH": return [1, 1, 2];
@@ -333,27 +407,33 @@ const THREE_TO_TQEC_AXIS = [0, 2, 1] as const;
 /**
  * Unified pipe geometry constructor. Builds a pipe open along one Three.js axis.
  *
- * For non-Hadamard pipes: a BoxGeometry with the open-axis face pair removed and
- * closed-axis walls inset by WALL_EPS.
- *
- * For Hadamard pipes: each wall is subdivided into 3 strips (below band, yellow
- * Hadamard band, above band) with the two wall colors swapping above the band.
+ * Three modes, determined by `splitMode`:
+ *   - "none": uniform-color walls (BoxGeometry with the open-axis face pair removed
+ *     and closed-axis walls inset by WALL_EPS). Used by plain TQEC pipes.
+ *   - "band": walls subdivided into 3 strips (below band, yellow Hadamard band,
+ *     above band) with the two wall colors swapping above the band. Used by
+ *     Hadamard TQEC pipes; pass `bandColor=H_COLOR`.
+ *   - "split": walls subdivided into 2 strips (below split, above split) with
+ *     colors swapping at the split line. NO middle band. Used by free-build
+ *     color-swap pipes; pass `bandColor=null`.
  *
  * @param openAxis   Three.js axis index (0=X, 1=Y, 2=Z) that is open (length 2)
  * @param wallColors Colors for the two closed-axis wall pairs, ordered by Three.js axis number
- * @param hadamard   If true, subdivide walls with a yellow Hadamard band; colors swap above it
+ * @param splitMode  "none" | "band" | "split"
+ * @param bandColor  Color of the middle band (mode="band" only). Ignored otherwise.
  * @param hiddenFaces Bitmask of faces to omit from geometry
  */
 function createPipeGeometry(
   openAxis: number,
   wallColors: [THREE.Color, THREE.Color],
-  hadamard: boolean,
+  splitMode: "none" | "band" | "split",
+  bandColor: THREE.Color | null = null,
   hiddenFaces: FaceMask = 0,
   hBandHalfHeight?: number,
 ): THREE.BufferGeometry {
   const closedAxes = [0, 1, 2].filter(a => a !== openAxis) as [number, number];
 
-  if (!hadamard) {
+  if (splitMode === "none") {
     const e = WALL_EPS;
     const dims: [number, number, number] = [1, 1, 1];
     dims[openAxis] = 2;
@@ -398,11 +478,13 @@ function createPipeGeometry(
     return geo;
   }
 
-  // --- Hadamard pipe: 4 walls × 3 strips each ---
+  // --- Split pipe: 4 walls × (2 or 3) strips each ---
+  // mode "band": 3 strips (below / band / above), middle uses bandColor.
+  // mode "split": 2 strips (below / above) meeting at the midpoint, no band.
 
   const halfExt: [number, number, number] = [0.5, 0.5, 0.5];
   for (const ca of closedAxes) halfExt[ca] -= WALL_EPS;
-  const bh = hBandHalfHeight ?? H_BAND_HALF_HEIGHT;
+  const bh = splitMode === "split" ? 0 : (hBandHalfHeight ?? H_BAND_HALF_HEIGHT);
   // Above the band, the two closed-axis colors swap per TQEC convention
   const wallColorsAbove: [THREE.Color, THREE.Color] = [wallColors[1], wallColors[0]];
 
@@ -458,11 +540,14 @@ function createPipeGeometry(
         return [make(t0, -ocDir), make(t1, -ocDir), make(t1, ocDir), make(t0, ocDir)];
       };
 
-      // Three strips along the open axis: below band, yellow band, above band
+      // Strips along the open axis. In "band" mode: below / band / above.
+      // In "split" mode: below / above only (bh = 0, middle has zero extent).
       const [b0, b1, b2, b3] = quad(-1, -bh);
       addQuad(b0, b1, b2, b3, n, wallColors[i]);
-      const [m0, m1, m2, m3] = quad(-bh, bh);
-      addQuad(m0, m1, m2, m3, n, H_COLOR);
+      if (splitMode === "band" && bandColor) {
+        const [m0, m1, m2, m3] = quad(-bh, bh);
+        addQuad(m0, m1, m2, m3, n, bandColor);
+      }
       const [a0, a1, a2, a3] = quad(bh, 1);
       addQuad(a0, a1, a2, a3, n, wallColorsAbove[i]);
     }
@@ -484,6 +569,29 @@ function createPipeGeometry(
  * for that TQEC axis ('X', 'Z', or 'O' for open). Hadamard variants end in 'H'.
  */
 export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask = 0, hBandHalfHeight?: number): THREE.BufferGeometry {
+  if (isFreeBuildPipeSpec(blockType)) {
+    // Free-build color-swap pipe: same wall geometry as a Hadamard pipe but
+    // without the yellow band. Wall colors swap at each defect position.
+    // v1: only one defect at 0.5 is rendered correctly; multi-defect support
+    // is future work.
+    const tqecOpenAxis = blockType.openAxis;
+    const threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpenAxis];
+    const closedAxes = [0, 1, 2].filter(a => a !== threeOpenAxis) as [number, number];
+    // Below-split colors: bases-at-start mapped to the two closed-axis walls.
+    // Walls are ordered by Three.js axis number (closedAxes[0] then [1]).
+    // Per the TQEC convention used by string-typed pipes, the FIRST closed
+    // wall takes baseAtStart and the SECOND takes its opposite.
+    const startBase = blockType.baseAtStart;
+    const otherStart = startBase === "X" ? "Z" : "X";
+    let wallColors: [THREE.Color, THREE.Color] = [basisColor(startBase), basisColor(otherStart)];
+    // Y-open pipes: same orientation pre-swap as Hadamard (tail at -Z in Three.js).
+    if (tqecOpenAxis === 1) {
+      wallColors = [wallColors[1], wallColors[0]];
+    }
+    void closedAxes; // closedAxes computed for symmetry with TQEC branch; unused here.
+    return createPipeGeometry(threeOpenAxis, wallColors, "split", null, hiddenFaces, hBandHalfHeight);
+  }
+
   if (isPipeType(blockType)) {
     const base = blockType.replace("H", "");
     const hadamard = blockType.length > 3;
@@ -497,7 +605,14 @@ export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask 
     if (hadamard && tqecOpenAxis === 1) {
       wallColors = [wallColors[1], wallColors[0]];
     }
-    return createPipeGeometry(threeOpenAxis, wallColors, hadamard, hiddenFaces, hBandHalfHeight);
+    return createPipeGeometry(
+      threeOpenAxis,
+      wallColors,
+      hadamard ? "band" : "none",
+      hadamard ? H_COLOR : null,
+      hiddenFaces,
+      hBandHalfHeight,
+    );
   }
 
   if (blockType === "Y") {
@@ -557,10 +672,12 @@ export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask 
   return geo;
 }
 
-/** Edge line segments for a block type, including Hadamard band edges for H pipes. */
+/** Edge line segments for a block type, including Hadamard band edges for H pipes.
+ *  Free-build pipes use the same outline as a plain pipe (no extra band-ring
+ *  wireframe — the boundary is marked by magenta Y-defect cylinders instead). */
 export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0, hBandHalfHeight?: number): THREE.BufferGeometry {
   const [bx, by, bz] = blockThreeSize(blockType);
-  const pipe = isPipeType(blockType);
+  const pipe = isPipeType(blockType) || isFreeBuildPipeSpec(blockType);
   const e2 = pipe ? 2 * WALL_EPS : 0;
   const hx = bx / 2 - e2 / 2;
   const hy = by / 2 - e2 / 2;
@@ -605,8 +722,9 @@ export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0
     }
   }
 
-  // Hadamard band edge rings
-  if (pipe && blockType.endsWith("H")) {
+  // Hadamard band edge rings (TQEC Hadamard pipes only — FB pipes don't get
+  // wireframe band rings; their boundary is marked by Y-defect cylinders).
+  if (isPipeType(blockType) && blockType.endsWith("H")) {
     const base = blockType.replace("H", "");
     const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
     const threeOpen = TQEC_TO_THREE_AXIS[tqecOpen];
@@ -655,9 +773,12 @@ export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0
  *
  * Cubes: 8 of 12 edges qualify for any TQEC cube type (the 4 edges parallel to
  * the matched-basis axis are the same-basis pair and are skipped).
- * Pipes: the 4 edges along the open axis (where the two wall-pairs of opposite
- * basis meet). End caps and band rings are not emitted in v1; the H-pipe band
- * ring is a known follow-up.
+ * TQEC pipes: the 4 edges along the open axis (where the two wall-pairs of
+ * opposite basis meet). Hadamard pipes additionally get TWO band rings at
+ * `±H_BAND_HALF_HEIGHT` along the open axis (the boundaries of the Y-basis
+ * band region).
+ * Free-build pipes: same 4 corner edges as TQEC pipes, plus ONE ring per
+ * `defectPositions[i]` mapped from 0..1 to the open-axis local range.
  * Y blocks: empty (single-basis block, no X/Z transitions).
  *
  * An edge is skipped if both adjacent faces are hidden.
@@ -672,7 +793,7 @@ export function createYDefectEdges(blockType: BlockType, hiddenFaces: FaceMask =
   if (blockType === "Y") return empty();
 
   const [bx, by, bz] = blockThreeSize(blockType);
-  const pipe = isPipeType(blockType);
+  const pipe = isPipeType(blockType) || isFreeBuildPipeSpec(blockType);
   const e2 = pipe ? 2 * WALL_EPS : 0;
   const hx = bx / 2 - e2 / 2;
   const hy = by / 2 - e2 / 2;
@@ -716,15 +837,49 @@ export function createYDefectEdges(blockType: BlockType, hiddenFaces: FaceMask =
     [FACE_POS_Z]: null, [FACE_NEG_Z]: null,
   };
 
-  if (pipe) {
+  // Open-axis info: which Three.js axis is open (for ring emission). null = cube.
+  let threeOpenAxis: number | null = null;
+  // Ring positions in open-axis local coordinates (range -1..+1, since the pipe
+  // spans [-1,+1] along the open axis with halfExt[oa]=1 in the wall geometry).
+  const ringOaVals: number[] = [];
+
+  if (isFreeBuildPipeSpec(blockType)) {
+    const tqecOpen = blockType.openAxis;
+    threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpen];
+    const closed = [0, 1, 2].filter(a => a !== threeOpenAxis) as [number, number];
+    // FB pipe: closed-axis walls always have OPPOSITE bases (the "below split"
+    // colors). Corner edges along the open axis are therefore Y defects in
+    // both halves regardless of swap, so a single basis assignment works for
+    // the corner-edge detection.
+    const startBase = blockType.baseAtStart;
+    const otherStart = startBase === "X" ? "Z" : "X";
+    // Match the same wall-color assignment used by createBlockGeometry: the
+    // first closed Three.js axis takes baseAtStart (post Y-open swap), the
+    // second takes its opposite.
+    const ca0Basis: "X" | "Z" = tqecOpen === 1 ? otherStart : startBase;
+    const ca1Basis: "X" | "Z" = tqecOpen === 1 ? startBase : otherStart;
+    faceBasis[FACE_BIT_BY_INDEX[closed[0] * 2]] = ca0Basis;
+    faceBasis[FACE_BIT_BY_INDEX[closed[0] * 2 + 1]] = ca0Basis;
+    faceBasis[FACE_BIT_BY_INDEX[closed[1] * 2]] = ca1Basis;
+    faceBasis[FACE_BIT_BY_INDEX[closed[1] * 2 + 1]] = ca1Basis;
+    // Map normalized 0..1 defect positions to open-axis local coords -1..+1.
+    for (const p of blockType.defectPositions) {
+      ringOaVals.push(-1 + 2 * p);
+    }
+  } else if (isPipeType(blockType)) {
     const base = blockType.replace("H", "");
     const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
-    const threeOpen = TQEC_TO_THREE_AXIS[tqecOpen];
-    const closed = [0, 1, 2].filter(a => a !== threeOpen) as [number, number];
+    threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpen];
+    const closed = [0, 1, 2].filter(a => a !== threeOpenAxis) as [number, number];
     for (const ta of closed) {
       const ch = base[THREE_TO_TQEC_AXIS[ta]] as "X" | "Z";
       faceBasis[FACE_BIT_BY_INDEX[ta * 2]] = ch;
       faceBasis[FACE_BIT_BY_INDEX[ta * 2 + 1]] = ch;
+    }
+    // Hadamard pipes: emit TWO rings at ±H_BAND_HALF_HEIGHT (the boundaries of
+    // the yellow Y-basis band region). Resolves the previous follow-up.
+    if (blockType.endsWith("H")) {
+      ringOaVals.push(-H_BAND_HALF_HEIGHT, H_BAND_HALF_HEIGHT);
     }
     // Open-axis faces stay null (no basis).
   } else {
@@ -751,6 +906,27 @@ export function createYDefectEdges(blockType: BlockType, hiddenFaces: FaceMask =
     // Acceptable trade-off; tagged as known limitation.)
     if ((hiddenFaces & faceA) || (hiddenFaces & faceB)) continue;
     linePoints.push(...corners[i], ...corners[j]);
+  }
+
+  // Band-ring emission: a 4-segment loop around the cross-section at each
+  // ring position along the open axis. Used by Hadamard pipes (2 rings) and
+  // free-build pipes (1 per defect).
+  if (threeOpenAxis !== null && ringOaVals.length > 0) {
+    const halfExts = [hx, hy, hz];
+    const closed = [0, 1, 2].filter(a => a !== threeOpenAxis) as [number, number];
+    for (const oaVal of ringOaVals) {
+      const ringCorners: [number, number, number][] = [];
+      for (const [s1, s2] of [[-1, -1], [1, -1], [1, 1], [-1, 1]] as const) {
+        const v: [number, number, number] = [0, 0, 0];
+        v[threeOpenAxis] = oaVal;
+        v[closed[0]] = s1 * halfExts[closed[0]];
+        v[closed[1]] = s2 * halfExts[closed[1]];
+        ringCorners.push(v);
+      }
+      for (let k = 0; k < 4; k++) {
+        linePoints.push(...ringCorners[k], ...ringCorners[(k + 1) % 4]);
+      }
+    }
   }
 
   const geo = new THREE.BufferGeometry();
@@ -1082,6 +1258,11 @@ export function hasPipeColorConflict(
 
     if (neighbor.type === "Y") continue;
     if (isPipeType(neighbor.type)) continue;
+    // Free-build pipe neighbors are non-TQEC; treat them as "no constraint"
+    // for TQEC color validation. (TQEC operations are blocked at the UI layer
+    // when FB blocks exist, so this path is mostly reachable only via tests
+    // or programmatic calls.)
+    if (isFreeBuildPipeSpec(neighbor.type)) continue;
 
     for (let axis = 0; axis < 3; axis++) {
       if (axis === openAxis) continue;
@@ -1254,6 +1435,13 @@ export function swapPipeVariant(pipeBase: string): string {
  */
 export function flipBlockType(type: BlockType): BlockType {
   if (type === "Y") return type;
+  if (isFreeBuildPipeSpec(type)) {
+    return {
+      ...type,
+      baseAtStart: type.baseAtStart === "X" ? "Z" : "X",
+      baseAtEnd: type.baseAtEnd === "X" ? "Z" : "X",
+    };
+  }
   let out = "";
   for (const ch of type) {
     if (ch === "X") out += "Z";

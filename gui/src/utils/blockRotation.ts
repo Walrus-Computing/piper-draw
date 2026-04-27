@@ -1,5 +1,5 @@
 import type { Block, Position3D } from "../types";
-import { isPipeType } from "../types";
+import { isFreeBuildPipeSpec, isPipeType } from "../types";
 
 // ---------------------------------------------------------------------------
 // Hadamard direction equivalences (same as tqec's adjust_hadamards_direction)
@@ -172,6 +172,17 @@ export function rotateBlockAroundZ(
   direction: RotationDirection,
 ): Block {
   const rot = direction === "ccw" ? ROT_Z_CCW : ROT_Z_CW;
+
+  // Free-build pipe: rotate the open-axis index (X↔Y for Z-axis rotation;
+  // Z stays). Bases and defect positions ride along the rotation unchanged.
+  if (isFreeBuildPipeSpec(block.type)) {
+    const oldAxis = block.type.openAxis;
+    const newAxis: 0 | 1 | 2 =
+      oldAxis === 2 ? 2 : oldAxis === 0 ? 1 : 0;
+    const newPos = rotatePositionAroundZ(block.pos, pivot, direction, true);
+    return { pos: newPos, type: { ...block.type, openAxis: newAxis } };
+  }
+
   const isPipe = isPipeType(block.type);
 
   let newType = rotateBlockKind(block.type, rot);

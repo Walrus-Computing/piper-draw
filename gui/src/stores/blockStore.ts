@@ -3,7 +3,8 @@ import { useKeybindStore } from "./keybindStore";
 import type { Flow } from "../utils/flows";
 import type {
   Position3D, Block, BlockType, CubeType, PipeVariant, PipeType, SpatialIndex, FaceMask,
-  BuildDirection, UndeterminedCubeInfo, ViewMode, IsoAxis, PortMeta, PortIO,
+  BuildDirection, UndeterminedCubeInfo, ViewMode, IsoAxis, PortMeta, PortIO, FBPreset,
+  FreeBuildPipeSpec,
 } from "../types";
 import {
   posKey,
@@ -13,9 +14,12 @@ import {
   hasCubeColorConflict,
   hasPipeColorConflict,
   hasYCubePipeAxisConflict,
+  isFreeBuildBlock,
+  isFreeBuildPipeSpec,
   isPipeType,
   isValidBlockPos,
   isValidPos,
+  pipeAxisFromPos,
   resolvePipeType,
   buildSpatialIndex,
   addToSpatialIndex,
@@ -141,6 +145,13 @@ interface BlockStore {
   cubeType: BlockType;
   pipeVariant: PipeVariant | null;
   /**
+   * Currently selected free-build pipe preset. When non-null, placement
+   * constructs an FB pipe from the preset spec (openAxis resolved from the
+   * target pipe slot). Mutually exclusive with `pipeVariant` and TQEC
+   * `cubeType`-as-pipe state.
+   */
+  fbPreset: FBPreset | null;
+  /**
    * True between pointerdown on a placeable toolbar button and the
    * subsequent window-level pointerup. While true, the pointerup handler
    * places a block at the current hoveredGridPos (drag-from-palette gesture).
@@ -218,6 +229,7 @@ interface BlockStore {
   setXHeld: (held: boolean) => void;
   setCubeType: (cubeType: BlockType) => void;
   setPipeVariant: (variant: PipeVariant) => void;
+  setFBPreset: (preset: FBPreset | null) => void;
   setPlacePort: (on: boolean) => void;
   /** Cycle the armed placeable by ±1 within PLACEABLE_ORDER (Drag / Drop mode only). */
   cycleArmedType: (dir: -1 | 1) => void;
@@ -612,6 +624,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   xHeld: false,
   cubeType: "XZZ",
   pipeVariant: null,
+  fbPreset: null,
   paletteDragging: false,
   portWarning: null,
   hoveredGridPos: null,
@@ -644,7 +657,15 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   lastBuildAxis: null,
 
   freeBuild: false,
-  toggleFreeBuild: () => set((s) => ({ freeBuild: !s.freeBuild })),
+  toggleFreeBuild: () => set((s) => {
+    const next = !s.freeBuild;
+    // Disabling Free Build clears any armed FB preset so the user can't
+    // accidentally place an FB pipe via a stale arm state.
+    if (!next && s.fbPreset) {
+      return { freeBuild: next, fbPreset: null, armedTool: "pointer" };
+    }
+    return { freeBuild: next };
+  }),
 
   showGrid: true,
   showHints: true,
@@ -770,8 +791,22 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     ...(tool !== "pointer" ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null } : {}),
   }),
   setXHeld: (held) => set({ xHeld: held, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
-  setCubeType: (cubeType) => set({ cubeType, armedTool: "cube", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
-  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], armedTool: "pipe", portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
+  setCubeType: (cubeType) => set({ cubeType, armedTool: "cube", pipeVariant: null, fbPreset: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
+  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], armedTool: "pipe", fbPreset: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
+  setFBPreset: (preset) => set({
+    fbPreset: preset,
+    pipeVariant: null,
+    armedTool: preset ? "pipe" : "pointer",
+    portWarning: null,
+    hoveredGridPos: null,
+    hoveredBlockType: null,
+    hoveredInvalid: false,
+    hoveredInvalidReason: null,
+    hoveredReplace: false,
+    selectedKeys: new Set<string>(),
+    selectedPortPositions: new Set<string>(),
+    selectionPivot: null,
+  }),
   setPlacePort: (on) => set({ armedTool: on ? "port" : "pointer", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, ...(on ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null } : {}) }),
   cycleArmedType: (dir) => {
     const s = get();
@@ -1092,8 +1127,15 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       const store = get();
       let blockType: BlockType = store.cubeType;
 
-      // If pipe variant selected, resolve to correct PipeType based on position
-      if (store.pipeVariant) {
+      // FB pipe preset takes precedence over TQEC pipe variant. The preset's
+      // openAxis is overridden to match the target pipe slot's axis.
+      if (store.fbPreset) {
+        const tqecAxis = pipeAxisFromPos(pos);
+        if (tqecAxis === null) return state;
+        const spec: FreeBuildPipeSpec = { ...store.fbPreset.spec, openAxis: tqecAxis };
+        blockType = spec;
+      } else if (store.pipeVariant) {
+        // If pipe variant selected, resolve to correct PipeType based on position
         const resolved = resolvePipeType(store.pipeVariant, pos);
         if (!resolved) return state;
         blockType = resolved;
@@ -1113,9 +1155,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         return state;
       }
       if (hasBlockOverlap(pos, blockType, state.blocks, state.spatialIndex, existing ? key : undefined)) return state;
+      // Free-build pieces must only be placed when Free Build is on.
+      if (isFreeBuildPipeSpec(blockType) && !store.freeBuild) return state;
       if (!store.freeBuild) {
         if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, state.blocks)) return state;
-        if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
+        if (!isPipeType(blockType) && !isFreeBuildPipeSpec(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
         if (hasYCubePipeAxisConflict(blockType, pos, state.blocks)) return state;
       }
 
@@ -1785,7 +1829,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
             ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, sr.key, curSrc));
             const newSrcOptions = determineCubeOptions(step.prevCursorPos, blocks);
             const candidates = newSrcOptions.determined ? [newSrcOptions.type] : newSrcOptions.options;
-            const validForPipe = candidates.filter(ct => step.pipe && inferPipeType(ct, step.pipe.block.type.replace("H", "").indexOf("O") as 0 | 1 | 2) !== null);
+            const validForPipe = candidates.filter(ct => step.pipe && isPipeType(step.pipe.block.type) && inferPipeType(ct, step.pipe.block.type.replace("H", "").indexOf("O") as 0 | 1 | 2) !== null);
             const srcType = validForPipe.length > 0 ? validForPipe[0] : sr.prevType;
             ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, sr.key, { pos: step.prevCursorPos, type: srcType }));
           }
@@ -3517,3 +3561,13 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   setZXPanelOpen: (open) => set({ zxPanelOpen: open }),
   toggleZXPanel: () => set((s) => ({ zxPanelOpen: !s.zxPanelOpen })),
 }));
+
+/**
+ * Selector: true iff the scene contains at least one free-build (non-TQEC)
+ * block. Used to disable Verify and Export DAE so TQEC operations never run
+ * on a scene that mixes TQEC and free-build pieces.
+ */
+export const sceneHasFreeBuildBlocks = (s: BlockStore): boolean => {
+  for (const b of s.blocks.values()) if (isFreeBuildBlock(b)) return true;
+  return false;
+};

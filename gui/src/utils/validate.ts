@@ -1,4 +1,5 @@
 import type { Block } from "../types";
+import { isFreeBuildBlock } from "../types";
 
 export interface ValidationErrorItem {
   position: [number, number, number] | null;
@@ -13,10 +14,15 @@ export interface ValidationResult {
 export async function validateDiagram(
   blocks: Map<string, Block>,
 ): Promise<ValidationResult> {
-  const payload = Array.from(blocks.values()).map((b) => ({
-    pos: [b.pos.x, b.pos.y, b.pos.z],
-    type: b.type,
-  }));
+  // Defense-in-depth: drop free-build (non-TQEC) pieces before sending to the
+  // backend. The Verify button is disabled when FB blocks are present; this
+  // filter is a safety net for programmatic callers.
+  const payload = Array.from(blocks.values())
+    .filter((b) => !isFreeBuildBlock(b))
+    .map((b) => ({
+      pos: [b.pos.x, b.pos.y, b.pos.z],
+      type: b.type as string,
+    }));
 
   try {
     const res = await fetch("/api/validate", {

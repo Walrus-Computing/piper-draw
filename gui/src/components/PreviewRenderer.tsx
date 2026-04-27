@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import * as THREE from "three";
 import {
   CUBE_TYPES,
+  FB_PRESETS,
   VARIANT_AXIS_MAP,
   createBlockGeometry,
   createBlockEdges,
@@ -9,7 +10,7 @@ import {
   blockThreeSize,
   Y_DEFECT_HEX,
 } from "../types";
-import type { BlockType, PipeVariant, ViewMode } from "../types";
+import type { BlockType, FreeBuildPipeSpec, PipeVariant, ViewMode } from "../types";
 import { useBlockStore } from "../stores/blockStore";
 import {
   FOLD_ANGLE,
@@ -38,6 +39,14 @@ const PREVIEW_TYPES: { key: string; blockType: BlockType | null; isoZBlockType?:
     key: v,
     blockType: VARIANT_AXIS_MAP[v][2] as BlockType,
     isoZBlockType: VARIANT_AXIS_MAP[v][1] as BlockType,
+  })),
+  // Free-build pipe presets — keyed by preset.id ("swap-zx", "swap-xz").
+  // Default openAxis = 2 (Z-open) for persp + iso-x/iso-y; iso-z uses Y-open
+  // so the pipe is visible (Z-open pipes point into the screen in iso-z).
+  ...FB_PRESETS.map((p) => ({
+    key: p.id,
+    blockType: p.spec as BlockType,
+    isoZBlockType: { ...p.spec, openAxis: 1 } as FreeBuildPipeSpec as BlockType,
   })),
 ];
 
@@ -243,13 +252,17 @@ export function usePreviewImages(controlsRef: React.RefObject<any>) {
         }
         continue;
       }
-      const isCube = (CUBE_TYPES as readonly string[]).includes(blockType);
+      // PREVIEW_TYPES never contains FB specs — all blockTypes here are TQEC
+      // strings — but the BlockType union now includes FreeBuildPipeSpec, so
+      // the typeof guard is required for the .includes() and the fold-out
+      // helper which expect string arguments.
+      const isCube = typeof blockType === "string" && (CUBE_TYPES as readonly string[]).includes(blockType);
       const regular = buildRegularEntry(blockType);
       meshesRef.current.set(variantKey(key, "persp"), regular);
 
       if (isCube) {
         for (const v of FOLD_VARIANTS) {
-          meshesRef.current.set(variantKey(key, v), buildFoldOutCubeEntry(blockType, variantTopAxis(v)));
+          meshesRef.current.set(variantKey(key, v), buildFoldOutCubeEntry(blockType as string, variantTopAxis(v)));
         }
       } else {
         const isoZ = isoZBlockType ? buildRegularEntry(isoZBlockType) : regular;

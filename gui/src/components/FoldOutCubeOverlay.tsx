@@ -29,6 +29,7 @@ export function FoldOutCubeOverlay() {
       hf: number;
     }> = [];
     for (const block of blocks.values()) {
+      if (typeof block.type !== "string") continue;  // skip FB blocks (objects)
       if (!(CUBE_TYPES as readonly string[]).includes(block.type)) continue;
       const k = posKey(block.pos);
       if (undeterminedCubes.has(k)) continue;

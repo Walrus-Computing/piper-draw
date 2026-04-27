@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
 import {
+  blockTypeCacheKey,
   createYDefectCylinderGroup,
   posKey,
   tqecToThree,
@@ -21,7 +22,7 @@ type CylinderInstance = {
 const templateCache = new Map<string, CylinderInstance[]>();
 
 function getCachedTemplate(blockType: BlockType, hiddenFaces: FaceMask): CylinderInstance[] {
-  const key = `${blockType}:${hiddenFaces}`;
+  const key = `${blockTypeCacheKey(blockType)}:${hiddenFaces}`;
   let arr = templateCache.get(key);
   if (!arr) {
     const group = createYDefectCylinderGroup(blockType, hiddenFaces, yDefectMaterial);

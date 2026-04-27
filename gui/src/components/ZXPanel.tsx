@@ -21,7 +21,8 @@ import {
   type ZXResult,
   type ZXVertex,
 } from "../utils/zx";
-import type { Position3D } from "../types";
+import { blockTypeCacheKey } from "../types";
+import type { BlockType, Position3D } from "../types";
 
 const Z_COLOR = "#5bc466";
 const X_COLOR = "#ff7f7f";
@@ -33,11 +34,11 @@ const MARGIN = 32;
 const SPIDER_RADIUS = 11;
 
 function signature(
-  blocks: Map<string, { pos: Position3D; type: string }>,
+  blocks: Map<string, { pos: Position3D; type: BlockType }>,
   portMeta: Map<string, { label: string; io: "in" | "out" }>,
 ): string {
   const b: string[] = [];
-  for (const [k, v] of blocks) b.push(`${k}:${v.type}`);
+  for (const [k, v] of blocks) b.push(`${k}:${blockTypeCacheKey(v.type)}`);
   b.sort();
   const m: string[] = [];
   for (const [k, v] of portMeta) m.push(`${k}=${v.label}`);

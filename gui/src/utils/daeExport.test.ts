@@ -163,4 +163,24 @@ describe("round-trip: export → import", () => {
       expect(imported.get(key)!.type).toBe(type);
     }
   });
+
+  it("strips free-build pipes from exported XML (defense-in-depth)", () => {
+    const blocks = new Map<string, Block>();
+    blocks.set("0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" as Block["type"] });
+    blocks.set("0,0,1", {
+      pos: { x: 0, y: 0, z: 1 },
+      type: { kind: "fb-pipe", openAxis: 2, baseAtStart: "Z", baseAtEnd: "X", defectPositions: [0.5] },
+    });
+    blocks.set("0,0,3", { pos: { x: 0, y: 0, z: 3 }, type: "ZXZ" as Block["type"] });
+    const xml = exportBlocksToDae(blocks);
+    // The two TQEC cubes round-trip; the FB pipe must be absent.
+    const imported = parseDaeToBlocks(xml);
+    expect(imported.size).toBe(2);
+    expect(imported.has("0,0,0")).toBe(true);
+    expect(imported.has("0,0,3")).toBe(true);
+    expect(imported.has("0,0,1")).toBe(false);
+    // No `[object Object]` artifact in the XML — FB types should never have
+    // been stringified in.
+    expect(xml).not.toContain("object Object");
+  });
 });

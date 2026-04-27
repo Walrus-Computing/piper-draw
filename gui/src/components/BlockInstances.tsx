@@ -15,9 +15,11 @@ import {
   isValidPipePos,
   isValidPos,
   isPipeType,
+  isFreeBuildPipeSpec,
   resolvePipeType,
   getAdjacentPos,
   posKey,
+  blockTypeCacheKey,
   VARIANT_AXIS_MAP,
 } from "../types";
 import type { BlockType, CubeType, Block, FaceMask, Position3D, PipeVariant } from "../types";
@@ -33,7 +35,7 @@ const MIN_CAPACITY = 64;
  * geometry never changes. Bounded at ~19 types × 64 masks = ~1216 entries max.
  */
 const geometryCache = new Map<string, THREE.BufferGeometry>();
-const fullBoxCache = new Map<BlockType, THREE.BoxGeometry>();
+const fullBoxCache = new Map<string, THREE.BoxGeometry>();
 const edgesCache = new Map<string, THREE.BufferGeometry>();
 const edgeLineMaterial = new THREE.LineBasicMaterial({ color: "#000000" });
 const dimmedEdgeLineMaterial = new THREE.LineBasicMaterial({
@@ -61,7 +63,7 @@ export function resolvePipeTypeFromFace(
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function getCachedGeometry(blockType: BlockType, hiddenFaces: FaceMask): THREE.BufferGeometry {
-  const key = `${blockType}:${hiddenFaces}`;
+  const key = `${blockTypeCacheKey(blockType)}:${hiddenFaces}`;
   let geo = geometryCache.get(key);
   if (!geo) {
     geo = createBlockGeometry(blockType, hiddenFaces);
@@ -72,7 +74,7 @@ export function getCachedGeometry(blockType: BlockType, hiddenFaces: FaceMask): 
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function getCachedEdges(blockType: BlockType, hiddenFaces: FaceMask): THREE.BufferGeometry {
-  const key = `${blockType}:${hiddenFaces}`;
+  const key = `${blockTypeCacheKey(blockType)}:${hiddenFaces}`;
   let geo = edgesCache.get(key);
   if (!geo) {
     geo = createBlockEdges(blockType, hiddenFaces);
@@ -83,10 +85,11 @@ export function getCachedEdges(blockType: BlockType, hiddenFaces: FaceMask): THR
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function getCachedFullBox(blockType: BlockType): THREE.BoxGeometry {
-  let geo = fullBoxCache.get(blockType);
+  const key = blockTypeCacheKey(blockType);
+  let geo = fullBoxCache.get(key);
   if (!geo) {
     geo = new THREE.BoxGeometry(...blockThreeSize(blockType));
-    fullBoxCache.set(blockType, geo);
+    fullBoxCache.set(key, geo);
   }
   return geo;
 }
@@ -116,7 +119,7 @@ function TypedInstances({
   while (maxCount < blocks.length) maxCount *= 2;
   if (maxCount !== capacity) setCapacity(maxCount);
 
-  const pipe = isPipeType(cubeType);
+  const pipe = isPipeType(cubeType) || isFreeBuildPipeSpec(cubeType);
   const geometry = getCachedGeometry(cubeType, hiddenFaces);
   const fullBoxGeometry = pipe ? getCachedFullBox(cubeType) : null;
   const material = useMemo(
@@ -404,7 +407,7 @@ export function BlockInstances() {
       const dimmed =
         flowVizMode ||
         (viewMode.kind === "iso" && !posInActiveSlice(viewMode, block.pos));
-      const key = `${block.type}:${hf}:${dimmed ? 1 : 0}`;
+      const key = `${blockTypeCacheKey(block.type)}:${hf}:${dimmed ? 1 : 0}`;
       const existing = map.get(key);
       if (existing) {
         existing.blocks.push(block);

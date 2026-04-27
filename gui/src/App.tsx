@@ -38,7 +38,7 @@ import { BuildModeHints } from "./components/BuildModeHints";
 import { EditModeHints } from "./components/EditModeHints";
 import { KeybindEditor, type KeybindEditorTab } from "./components/KeybindEditor";
 import { HelpPanel } from "./components/HelpPanel";
-import { useBlockStore } from "./stores/blockStore";
+import { useBlockStore, sceneHasFreeBuildBlocks } from "./stores/blockStore";
 import {
   useKeybindStore,
   actionForKey,
@@ -550,6 +550,13 @@ export default function App() {
             break;
           case "s":
             e.preventDefault();
+            // Block export when scene contains free-build pieces — TQEC ops
+            // shouldn't silently strip them. UI's File → Export is also
+            // disabled with a tooltip; this guards the keyboard shortcut.
+            if (sceneHasFreeBuildBlocks(store)) {
+              console.warn("[export] DAE export blocked: scene contains Free Build pieces. Remove them or use Undo.");
+              return;
+            }
             void downloadDae(store.blocks);
             return;
         }

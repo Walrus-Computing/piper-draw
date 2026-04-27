@@ -175,6 +175,7 @@ function GhostBlockInner() {
     !isDelete &&
     !isInvalid &&
     viewMode.kind === "iso" &&
+    typeof activeType === "string" &&
     (CUBE_TYPES as readonly string[]).includes(activeType);
   const foldTopAxis: ThreeAxis = viewMode.kind === "iso" ? isoTopThreeAxis(viewMode.axis) : 0;
 
@@ -206,7 +207,7 @@ function GhostBlockInner() {
             </lineSegments>
           )}
           {showFoldOutCube && (
-            <FoldOutCubeFaces blockType={activeType} topAxis={foldTopAxis} />
+            <FoldOutCubeFaces blockType={activeType as string} topAxis={foldTopAxis} />
           )}
         </group>
       )}

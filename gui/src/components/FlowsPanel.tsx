@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBlockStore } from "../stores/blockStore";
 import { computeFlows, type FlowsResult } from "../utils/flows";
-import { getAllPortPositions, type Position3D } from "../types";
+import { blockTypeCacheKey, getAllPortPositions, type BlockType, type Position3D } from "../types";
 import { isInSpanGF2, pauliToSymplectic } from "../utils/stabilizerSpan";
 import { useFloatingPanel } from "../hooks/useFloatingPanel";
 import { ResizeGrip } from "../hooks/ResizeGrip";
@@ -38,11 +38,11 @@ const PAULI_COLOR: Record<string, string> = {
 };
 
 function signature(
-  blocks: Map<string, { pos: Position3D; type: string }>,
+  blocks: Map<string, { pos: Position3D; type: BlockType }>,
   portMeta: Map<string, { label: string; io: "in" | "out" }>,
 ): string {
   const b: string[] = [];
-  for (const [k, v] of blocks) b.push(`${k}:${v.type}`);
+  for (const [k, v] of blocks) b.push(`${k}:${blockTypeCacheKey(v.type)}`);
   b.sort();
   const m: string[] = [];
   for (const [k, v] of portMeta) m.push(`${k}=${v.label}/${v.io}`);

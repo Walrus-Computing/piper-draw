@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { useBlockStore, type BuildStep } from "../stores/blockStore";
+import { useBlockStore, sceneHasFreeBuildBlocks, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
 import { useKeybindStore, type Mode as KeybindMode, type NavStyle } from "../stores/keybindStore";
-import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
+import { CUBE_TYPES, FB_PRESETS, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
@@ -121,6 +121,8 @@ export function Toolbar({
   const blocksEmpty = useBlockStore((s) => s.blocks.size === 0);
   const freeBuild = useBlockStore((s) => s.freeBuild);
   const toggleFreeBuild = useBlockStore((s) => s.toggleFreeBuild);
+  const fbPreset = useBlockStore((s) => s.fbPreset);
+  const setFBPreset = useBlockStore((s) => s.setFBPreset);
   const selectedCount = useBlockStore((s) => {
     if (s.selectedKeys.size === 0) return 0;
     let count = 0;
@@ -218,6 +220,10 @@ export function Toolbar({
       const k = s.selectedKeys.values().next().value as string;
       const b = s.blocks.get(k);
       if (!b || isPipeType(b.type)) return null;
+      // Skip free-build blocks here — they're pipes and shouldn't reach this
+      // cube-slot info path; the isPipeType guard above doesn't catch them
+      // because FB specs are objects (isPipeType returns false for them).
+      if (typeof b.type !== "string") return null;
       pos = b.pos;
       currentType = b.type;
     } else {
@@ -746,6 +752,40 @@ export function Toolbar({
         </div>
       </div>
 
+      {/* Free Build group — only visible when freeBuild is enabled.
+         Non-TQEC pipes parameterized by Y-defect positions. */}
+      {freeBuild && (
+        <>
+          <div style={{ width: 1, background: "#ddd" }} />
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <span style={groupLabelStyle}>Free Build</span>
+            <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
+              {FB_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  onPointerDown={() => {
+                    if (mode !== "edit") return;
+                    setFBPreset(preset);
+                    setPaletteDragging(true);
+                  }}
+                  onClick={() => {
+                    setFBPreset(preset);
+                  }}
+                  title={`Free-build color-swap pipe (${preset.label}) with a Y defect at the midpoint`}
+                  style={blockBtnStyle(
+                    mode === "edit" && armedTool === "pipe" && fbPreset?.id === preset.id,
+                    false,
+                  )}
+                >
+                  {preset.label}
+                  <div style={previewWrapStyle}>{previewImg(preset.id)}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Position display */}
       <div style={{ width: 1, background: "#ddd" }} />
       <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", fontFamily: "monospace", fontSize: "12px", color: "#555", lineHeight: "1.6", minWidth: 90 }}>
@@ -1109,6 +1149,7 @@ function FileMenu({
   const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [loadingFile, setLoadingFile] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const hasFB = useBlockStore(sceneHasFreeBuildBlocks);
 
   useEffect(() => {
     if (!open) return;
@@ -1210,8 +1251,11 @@ function FileMenu({
               downloadDae(useBlockStore.getState().blocks);
               setOpen(false);
             }}
-            disabled={blocksEmpty}
-            style={item(blocksEmpty)}
+            disabled={blocksEmpty || hasFB}
+            title={hasFB
+              ? "DAE export requires a TQEC-only scene. Remove Free Build pieces (or use Undo) to export."
+              : undefined}
+            style={item(blocksEmpty || hasFB)}
           >
             Export
           </button>
@@ -1329,6 +1373,7 @@ function AnalyzeMenu() {
   const zxPanelOpen = useBlockStore((s) => s.zxPanelOpen);
   const validationStatus = useValidationStore((s) => s.status);
   const runValidation = useValidationStore((s) => s.validate);
+  const hasFB = useBlockStore(sceneHasFreeBuildBlocks);
 
   useEffect(() => {
     if (!open) return;
@@ -1339,7 +1384,10 @@ function AnalyzeMenu() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  const verifyDisabled = blocksEmpty || validationStatus === "loading";
+  const verifyDisabled = blocksEmpty || validationStatus === "loading" || hasFB;
+  const verifyTitle = hasFB
+    ? "Validation requires a TQEC-only scene. Remove Free Build pieces (or use Undo) to validate."
+    : "Server-side validation via the TQEC library";
   const verifyBorder =
     validationStatus === "valid" ? "#28a745" :
     validationStatus === "invalid" ? "#dc3545" :
@@ -1401,10 +1449,10 @@ function AnalyzeMenu() {
           <button
             onClick={() => { runValidation(); }}
             disabled={verifyDisabled}
-            title="Server-side validation via the TQEC library"
+            title={verifyTitle}
             style={{
               ...btnStyle(false),
-              opacity: blocksEmpty ? 0.4 : 1,
+              opacity: blocksEmpty || hasFB ? 0.4 : 1,
               cursor: verifyDisabled ? "default" : "pointer",
               borderColor: verifyBorder ?? "#ccc",
               background: verifyBackground ?? "#fff",

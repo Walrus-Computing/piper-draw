@@ -1,4 +1,5 @@
 import type { Block, Position3D, PortMeta } from "../types";
+import { isFreeBuildBlock } from "../types";
 
 export interface SurfacePiece {
   basis: "X" | "Z";
@@ -30,10 +31,16 @@ export async function computeFlows(
   blocks: Map<string, Block>,
   portMeta: Map<string, PortMeta>,
 ): Promise<FlowsResult> {
-  const blocksPayload = Array.from(blocks.values()).map((b) => ({
-    pos: [b.pos.x, b.pos.y, b.pos.z],
-    type: b.type,
-  }));
+  // Defense-in-depth: drop free-build (non-TQEC) blocks before sending to
+  // the backend. The Flows panel runs against a TQEC scene; FB pieces are
+  // already excluded from the UI when Verify is disabled, but a stale Flows
+  // result from a mixed scene shouldn't include FB types.
+  const blocksPayload = Array.from(blocks.values())
+    .filter((b) => !isFreeBuildBlock(b))
+    .map((b) => ({
+      pos: [b.pos.x, b.pos.y, b.pos.z],
+      type: b.type as string,
+    }));
   const portLabels = Array.from(portMeta.entries()).map(([key, meta]) => {
     const p = posFromKey(key);
     return { pos: [p.x, p.y, p.z], label: meta.label };

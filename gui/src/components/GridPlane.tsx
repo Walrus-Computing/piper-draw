@@ -12,11 +12,12 @@ import {
   hasYCubePipeAxisConflict,
   isValidPos,
   isPipeType,
+  pipeAxisFromPos,
   resolvePipeType,
   posKey,
   axisIndex,
 } from "../types";
-import type { CubeType, Position3D, ViewMode } from "../types";
+import type { BlockType, CubeType, FreeBuildPipeSpec, Position3D, ViewMode } from "../types";
 import { cameraGroundPoint } from "../utils/groundPlane";
 import { snapIsoPos, isoGridMeshTransform } from "../utils/isoView";
 
@@ -90,12 +91,16 @@ export function GridPlane() {
       }
       return;
     }
-    const forPipe = store.pipeVariant !== null;
+    const forPipe = store.pipeVariant !== null || store.fbPreset !== null;
     const pos = snapForViewMode(viewMode, e.point, forPipe);
 
     // Determine actual block type for this position
-    let blockType = store.cubeType;
-    if (store.pipeVariant) {
+    let blockType: BlockType = store.cubeType;
+    if (store.fbPreset) {
+      const tqecAxis = pipeAxisFromPos(pos);
+      if (tqecAxis === null) { setHoveredGridPos(pos, undefined, true); return; }
+      blockType = { ...store.fbPreset.spec, openAxis: tqecAxis } as FreeBuildPipeSpec;
+    } else if (store.pipeVariant) {
       const resolved = resolvePipeType(store.pipeVariant, pos);
       if (!resolved) { setHoveredGridPos(pos, undefined, true); return; }
       blockType = resolved;
@@ -143,7 +148,7 @@ export function GridPlane() {
       store.addPortAt(pos);
       return;
     }
-    const forPipe = store.pipeVariant !== null;
+    const forPipe = store.pipeVariant !== null || store.fbPreset !== null;
     const pos = snapForViewMode(viewMode, e.point, forPipe);
     addBlock(pos);
   };
