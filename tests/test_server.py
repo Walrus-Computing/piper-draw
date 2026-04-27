@@ -724,6 +724,74 @@ class TestZXEndpoint:
         labels = {v["label"] for v in result["vertices"] if v["label"]}
         assert labels == {"a", "b"}
 
+    def test_extract_qubit_register_follows_port_rank(self):
+        # Two parallel identity chains → 2 inputs, 2 outputs. The qubit-index
+        # of each input is determined by the user-defined rank on PortLabelInput
+        # (matching the Ports table order), not by alphabetical label sort.
+        # Swapping the ranks must swap which port maps to qubit 0.
+        blocks = [
+            # Chain 1 at y=0
+            BlockInput(pos=[0, 0, 0], type="ZXZ"),
+            BlockInput(pos=[-2, 0, 0], type="OXZ"),
+            BlockInput(pos=[1, 0, 0], type="OXZ"),
+            # Chain 2 at y=3
+            BlockInput(pos=[0, 3, 0], type="ZXZ"),
+            BlockInput(pos=[-2, 3, 0], type="OXZ"),
+            BlockInput(pos=[1, 3, 0], type="OXZ"),
+        ]
+        port_io = {"a_in": "in", "a_out": "out", "b_in": "in", "b_out": "out"}
+
+        def qubit_of_input_label(result: dict, label: str) -> int:
+            # After extract, vertex pos is [row, 0, -qubit]; inputs land at the
+            # smallest row in the layout. Find the vertex carrying `label` and
+            # return its qubit index.
+            for v in result["vertices"]:
+                if v["label"] == label and v["pos"] is not None:
+                    return int(round(-v["pos"][2]))
+            raise AssertionError(f"no vertex labelled {label!r}")
+
+        # Case A: rank a_in=0, b_in=1 → a_in is qubit 0, b_in is qubit 1.
+        port_labels_a = [
+            PortLabelInput(pos=[-3, 0, 0], label="a_in", rank=0),
+            PortLabelInput(pos=[3, 0, 0], label="a_out", rank=2),
+            PortLabelInput(pos=[-3, 3, 0], label="b_in", rank=1),
+            PortLabelInput(pos=[3, 3, 0], label="b_out", rank=3),
+        ]
+        result_a = self._run(
+            ZXRequest(
+                blocks=blocks,
+                port_labels=port_labels_a,
+                port_io=port_io,
+                simplify=True,
+                extract=True,
+            )
+        )
+        assert result_a["ok"] is True, result_a
+        assert result_a["circuit_error"] is None, result_a["circuit_error"]
+        assert qubit_of_input_label(result_a, "a_in") == 0
+        assert qubit_of_input_label(result_a, "b_in") == 1
+
+        # Case B: swap input ranks → b_in is now qubit 0, a_in is qubit 1.
+        port_labels_b = [
+            PortLabelInput(pos=[-3, 0, 0], label="a_in", rank=1),
+            PortLabelInput(pos=[3, 0, 0], label="a_out", rank=2),
+            PortLabelInput(pos=[-3, 3, 0], label="b_in", rank=0),
+            PortLabelInput(pos=[3, 3, 0], label="b_out", rank=3),
+        ]
+        result_b = self._run(
+            ZXRequest(
+                blocks=blocks,
+                port_labels=port_labels_b,
+                port_io=port_io,
+                simplify=True,
+                extract=True,
+            )
+        )
+        assert result_b["ok"] is True, result_b
+        assert result_b["circuit_error"] is None, result_b["circuit_error"]
+        assert qubit_of_input_label(result_b, "a_in") == 1
+        assert qubit_of_input_label(result_b, "b_in") == 0
+
     def test_extract_without_outputs_errors(self):
         result = self._run(
             ZXRequest(
