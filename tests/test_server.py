@@ -378,6 +378,54 @@ class TestZXEndpoint:
         assert simplified["simplified"] is True
         assert len(simplified["vertices"]) <= len(raw["vertices"])
 
+    def test_simplify_with_all_output_ports(self):
+        # Regression for #221: full_reduce + normalize raised TypeError when
+        # every port was marked 'out', because pyzx auto_detect_io fires
+        # whenever num_inputs() == 0 and can't classify boundary vertices that
+        # share a row with their neighbor.
+        result = self._run(
+            ZXRequest(
+                blocks=[
+                    BlockInput(pos=[0, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[-2, 0, 0], type="OXZ"),
+                    BlockInput(pos=[1, 0, 0], type="OXZ"),
+                ],
+                port_labels=[
+                    PortLabelInput(pos=[-3, 0, 0], label="P1"),
+                    PortLabelInput(pos=[3, 0, 0], label="P2"),
+                ],
+                port_io={"P1": "out", "P2": "out"},
+                simplify=True,
+            )
+        )
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["simplified"] is True
+        # Both output boundaries should survive full_reduce.
+        assert len(result["vertices"]) == 2
+
+    def test_simplify_with_all_input_ports(self):
+        # Sister case to test_simplify_with_all_output_ports: locks in that
+        # all-input diagrams keep working, since pyzx's auto_detect_io guard
+        # only triggers when num_inputs() == 0.
+        result = self._run(
+            ZXRequest(
+                blocks=[
+                    BlockInput(pos=[0, 0, 0], type="ZXZ"),
+                    BlockInput(pos=[-2, 0, 0], type="OXZ"),
+                    BlockInput(pos=[1, 0, 0], type="OXZ"),
+                ],
+                port_labels=[
+                    PortLabelInput(pos=[-3, 0, 0], label="P1"),
+                    PortLabelInput(pos=[3, 0, 0], label="P2"),
+                ],
+                port_io={"P1": "in", "P2": "in"},
+                simplify=True,
+            )
+        )
+        assert result["ok"] is True
+        assert result["error"] is None
+
     def test_invalid_diagram_returns_error(self):
         # Mismatched pipe colors -> tqec validation error surfaces
         result = self._run(

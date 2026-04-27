@@ -549,8 +549,13 @@ async def zx(req: ZXRequest) -> ZXResponse:
     if req.simplify:
         pyzx.simplify.full_reduce(pzx.g)
         # normalize() places inputs/outputs at sensible (qubit, row) — required
-        # before extract_circuit and nicer for display.
-        pzx.g.normalize()
+        # before extract_circuit and nicer for display. Skip it when only
+        # outputs are set: pyzx.normalize() invokes auto_detect_io() whenever
+        # num_inputs() == 0, which clobbers our explicit outputs and raises
+        # TypeError on boundary vertices that share a row with their neighbor
+        # (issue #221). Frontend falls back to a circle layout in that case.
+        if pzx.g.num_inputs() > 0 or pzx.g.num_outputs() == 0:
+            pzx.g.normalize()
 
     circuit_info: ZXCircuit | None = None
     circuit_error: str | None = None
