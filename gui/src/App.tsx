@@ -33,6 +33,7 @@ import { ZXPanel } from "./components/ZXPanel";
 import { PortLabels3D } from "./components/PortLabels3D";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
 import { FlowSurfaceOverlay } from "./components/FlowSurfaceOverlay";
+import { YDefectOverlay } from "./components/YDefectOverlay";
 import { BuildModeHints } from "./components/BuildModeHints";
 import { EditModeHints } from "./components/EditModeHints";
 import { KeybindEditor, type KeybindEditorTab } from "./components/KeybindEditor";
@@ -971,6 +972,25 @@ export default function App() {
     };
   }, []);
 
+  // Persist the Y-defect overlay toggle across sessions.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("piperDraw.showYDefects");
+      if (raw === "1") useBlockStore.getState().setShowYDefects(true);
+    } catch {
+      // private mode / unavailable — ignore
+    }
+    const unsub = useBlockStore.subscribe((state, prev) => {
+      if (state.showYDefects === prev.showYDefects) return;
+      try {
+        localStorage.setItem("piperDraw.showYDefects", state.showYDefects ? "1" : "0");
+      } catch {
+        // ignore
+      }
+    });
+    return unsub;
+  }, []);
+
   return (
     <>
       <Toolbar
@@ -1062,6 +1082,7 @@ export default function App() {
         {!photoRequest && !flowVizMode && <OpenPipeGhosts />}
       {!photoRequest && (flowsPanelOpen || zxPanelOpen || flowVizMode) && <PortLabels3D />}
         {!photoRequest && <FlowSurfaceOverlay />}
+        {!photoRequest && <YDefectOverlay />}
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
         {!photoRequest && !flowVizMode && <GhostBlock />}

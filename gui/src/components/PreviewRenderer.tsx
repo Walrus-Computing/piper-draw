@@ -5,7 +5,9 @@ import {
   VARIANT_AXIS_MAP,
   createBlockGeometry,
   createBlockEdges,
+  createYDefectCylinderGroup,
   blockThreeSize,
+  Y_DEFECT_HEX,
 } from "../types";
 import type { BlockType, PipeVariant, ViewMode } from "../types";
 import { useBlockStore } from "../stores/blockStore";
@@ -46,6 +48,7 @@ const HALF = 0.5;
 
 const vertexColorMaterial = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
 const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
+const yDefectMaterial = new THREE.MeshBasicMaterial({ color: Y_DEFECT_HEX });
 /** Ghost-cube material for the PORT preview — matches OpenPipeGhosts.tsx styling. */
 const portGhostMaterial = new THREE.MeshBasicMaterial({
   color: 0xdddddd,
@@ -89,6 +92,7 @@ function variantKey(key: string, variant: Variant): string {
 type PreviewEntry = {
   obj: THREE.Object3D;
   edges: THREE.Object3D;
+  yDefects: THREE.Object3D | null;
   center: THREE.Vector3;
   radius: number;
 };
@@ -101,11 +105,14 @@ function buildRegularEntry(blockType: BlockType): PreviewEntry {
   const edgeGeo = createBlockEdges(blockType, 0, previewBandHH);
   const edges = new THREE.LineSegments(edgeGeo, edgeMaterial);
 
+  const yDefectGroup = createYDefectCylinderGroup(blockType, 0, yDefectMaterial);
+  const yDefects = yDefectGroup.children.length > 0 ? yDefectGroup : null;
+
   const [sx, sy, sz] = blockThreeSize(blockType);
   const center = new THREE.Vector3(0, 0, 0);
   const radius = Math.sqrt(sx * sx + sy * sy + sz * sz) / 2;
 
-  return { obj: mesh, edges, center, radius };
+  return { obj: mesh, edges, yDefects, center, radius };
 }
 
 function addFoldOutFace(
@@ -169,7 +176,7 @@ function buildFoldOutCubeEntry(blockType: string, topAxis: ThreeAxis): PreviewEn
 
   // After fold by π/6, max corner extends to ~1.18 from origin; pick a slightly smaller
   // radius so the camera frames the cube body comparably to the regular preview.
-  return { obj: meshGroup, edges: edgeGroup, center: new THREE.Vector3(0, 0, 0), radius: 1.05 };
+  return { obj: meshGroup, edges: edgeGroup, yDefects: null, center: new THREE.Vector3(0, 0, 0), radius: 1.05 };
 }
 
 /**
@@ -187,6 +194,7 @@ export function usePreviewImages(controlsRef: React.RefObject<any>) {
   const meshesRef = useRef<Map<string, PreviewEntry>>(new Map());
   const lastQuatRef = useRef(new THREE.Quaternion());
   const lastVariantRef = useRef<Variant>("persp");
+  const lastShowYDefectsRef = useRef<boolean>(false);
   const rafRef = useRef(0);
   const lastRenderRef = useRef(0);
   const dirVec = useRef(new THREE.Vector3());
@@ -225,6 +233,7 @@ export function usePreviewImages(controlsRef: React.RefObject<any>) {
         const portEntry: PreviewEntry = {
           obj: mesh,
           edges,
+          yDefects: null,
           center: new THREE.Vector3(0, 0, 0),
           radius: Math.sqrt(3) / 2,
         };
@@ -265,13 +274,17 @@ export function usePreviewImages(controlsRef: React.RefObject<any>) {
       const mainCamera = controls.object as THREE.PerspectiveCamera;
       if (!mainCamera) return;
 
-      const variant = variantForViewMode(useBlockStore.getState().viewMode);
+      const storeState = useBlockStore.getState();
+      const variant = variantForViewMode(storeState.viewMode);
+      const showYDefects = storeState.showYDefects;
       const quat = mainCamera.quaternion;
       const quatChanged = lastQuatRef.current.angleTo(quat) >= 0.005;
       const variantChanged = lastVariantRef.current !== variant;
-      if (!quatChanged && !variantChanged) return;
+      const yDefectsChanged = lastShowYDefectsRef.current !== showYDefects;
+      if (!quatChanged && !variantChanged && !yDefectsChanged) return;
       lastQuatRef.current.copy(quat);
       lastVariantRef.current = variant;
+      lastShowYDefectsRef.current = showYDefects;
       lastRenderRef.current = now;
 
       const renderer = rendererRef.current!;
@@ -286,13 +299,13 @@ export function usePreviewImages(controlsRef: React.RefObject<any>) {
       for (const { key } of PREVIEW_TYPES) {
         const entry = meshesRef.current.get(variantKey(key, variant))!;
 
-        // Swap preview object: remove previous, add current
-        if (scene.children.length > 2) {
-          scene.remove(scene.children[scene.children.length - 1]);
+        // Pop any previously-added preview children (lights occupy children[0..1]).
+        while (scene.children.length > 2) {
           scene.remove(scene.children[scene.children.length - 1]);
         }
         scene.add(entry.obj);
         scene.add(entry.edges);
+        if (showYDefects && entry.yDefects) scene.add(entry.yDefects);
 
         // Position camera to frame the block
         const dist = entry.radius / Math.tan((FOV * Math.PI) / 360) * 1.3;
@@ -321,6 +334,10 @@ export function usePreviewImages(controlsRef: React.RefObject<any>) {
         entry.edges.traverse((node) => {
           const ls = node as THREE.LineSegments;
           if (ls.isLineSegments) ls.geometry.dispose();
+        });
+        entry.yDefects?.traverse((node) => {
+          const mesh = node as THREE.Mesh;
+          if (mesh.isMesh) mesh.geometry.dispose();
         });
       }
       meshesRef.current.clear();

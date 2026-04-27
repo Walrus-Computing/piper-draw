@@ -322,6 +322,11 @@ interface BlockStore {
   toggleShowGrid: () => void;
   toggleShowHints: () => void;
 
+  // Y-defect overlay: highlight X/Z transition edges (twists) in magenta.
+  showYDefects: boolean;
+  toggleShowYDefects: () => void;
+  setShowYDefects: (on: boolean) => void;
+
   // Photo export — transient flag consumed by ScreenshotCapture inside <Canvas>.
   photoRequest: boolean;
   requestPhoto: () => void;
@@ -636,6 +641,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   showHints: true,
   toggleShowGrid: () => set((s) => ({ showGrid: !s.showGrid })),
   toggleShowHints: () => set((s) => ({ showHints: !s.showHints })),
+
+  showYDefects: false,
+  toggleShowYDefects: () => set((s) => ({ showYDefects: !s.showYDefects })),
+  setShowYDefects: (on) => set({ showYDefects: on }),
 
   photoRequest: false,
   requestPhoto: () => set({ photoRequest: true }),

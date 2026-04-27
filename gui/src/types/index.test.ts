@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createBlockGeometry, getHiddenFaceMaskForPos, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, CUBE_TYPES, PIPE_TYPES } from "./index";
+import { createBlockGeometry, createYDefectEdges, getHiddenFaceMaskForPos, FACE_NEG_X, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_X, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, CUBE_TYPES, PIPE_TYPES } from "./index";
 import type { PipeType, CubeType } from "./index";
 import type { BlockType } from "./index";
 import { Vector3 } from "three";
@@ -552,5 +552,53 @@ describe("defaultPortIO", () => {
 
   it("port with no surrounding pipe defaults to 'in'", () => {
     expect(defaultPortIO({ x: 0, y: 0, z: 0 }, makeBlocks([]))).toBe("in");
+  });
+});
+
+describe("createYDefectEdges", () => {
+  function edgeCount(geo: ReturnType<typeof createYDefectEdges>): number {
+    const arr = geo.getAttribute("position").array as Float32Array;
+    // 2 endpoints × 3 coords = 6 floats per edge
+    return arr.length / 6;
+  }
+
+  it("Y blocks have no Y-defect edges (single basis)", () => {
+    expect(edgeCount(createYDefectEdges("Y"))).toBe(0);
+  });
+
+  it.each(CUBE_TYPES)("cube %s emits 8 Y-defect edges (12 - 4 same-basis)", (cube) => {
+    expect(edgeCount(createYDefectEdges(cube))).toBe(8);
+  });
+
+  it("non-Hadamard ZX pipe emits 4 Y-defect edges along the open axis", () => {
+    expect(edgeCount(createYDefectEdges("OZX"))).toBe(4);
+    expect(edgeCount(createYDefectEdges("ZOX"))).toBe(4);
+    expect(edgeCount(createYDefectEdges("ZXO"))).toBe(4);
+  });
+
+  it("Hadamard pipes emit the same 4 wall-meeting edges (band ring is v1 follow-up)", () => {
+    expect(edgeCount(createYDefectEdges("OZXH"))).toBe(4);
+    expect(edgeCount(createYDefectEdges("XZOH"))).toBe(4);
+  });
+
+  it("skips every edge adjacent to a hidden face (continuous surface across the join)", () => {
+    // XZZ cube: +X face is X-basis (red); ±Y, ±Z all Z-basis (blue).
+    // 8 Y-defect edges total: 4 around +X face, 4 around -X face.
+    // Hiding +X removes those 4 edges (the seam-side defects vanish because
+    // the neighboring pipe/cube extends the surrounding Z faces seamlessly).
+    expect(edgeCount(createYDefectEdges("XZZ", FACE_POS_X))).toBe(4);
+    // Hiding +X plus a Z face: +X removes 4; the +Y face additionally hides
+    // the +Y/-X edge (a defect not yet skipped), giving 8 - 5 = 3.
+    expect(edgeCount(createYDefectEdges("XZZ", FACE_POS_X | FACE_POS_Y))).toBe(3);
+    expect(edgeCount(createYDefectEdges("XZZ", FACE_POS_X | FACE_POS_Z))).toBe(3);
+    // Hiding two same-basis faces (+Y and +Z) skips their 4 unique adjacent
+    // defects: ±X/+Y and ±X/+Z, leaving the four around -X.
+    expect(edgeCount(createYDefectEdges("XZZ", FACE_POS_Y | FACE_POS_Z))).toBe(4);
+    // Hiding the whole +X side: skips 4 (+X-adjacent) + 1 (-X/+Y from +Y)
+    // + 1 (-X/+Z from +Z) = 6. Remaining: 2 (the -X/-Y and -X/-Z edges).
+    expect(edgeCount(createYDefectEdges("XZZ", FACE_POS_X | FACE_POS_Y | FACE_POS_Z))).toBe(2);
+    // Sanity: hiding everything yields zero edges.
+    const all = FACE_POS_X | FACE_NEG_X | FACE_POS_Y | FACE_NEG_Y | FACE_POS_Z | FACE_NEG_Z;
+    expect(edgeCount(createYDefectEdges("XZZ", all))).toBe(0);
   });
 });
