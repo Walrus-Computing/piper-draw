@@ -117,13 +117,17 @@ export interface PortMeta {
 
 export const X_COLOR = new THREE.Color("#ff7f7f"); // red
 export const Z_COLOR = new THREE.Color("#7396ff"); // blue
-export const Y_COLOR = new THREE.Color("#63c676"); // green
+export const Y_COLOR = new THREE.Color("#63c676"); // green (Y half-cube blocks)
 export const H_COLOR = new THREE.Color("#ffff65"); // yellow
+// Y-type defect ("twist") edges per Gidney's defect-diagram convention.
+// Distinct from Y_COLOR so Y blocks (green) and Y defects (magenta) read apart.
+export const Y_DEFECT_COLOR = new THREE.Color("#ff39c2");
 
 export const X_HEX = "#ff7f7f";
 export const Z_HEX = "#7396ff";
 export const Y_HEX = "#63c676";
 export const H_HEX = "#ffff65";
+export const Y_DEFECT_HEX = "#ff39c2";
 
 const H_BAND_HALF_HEIGHT = 0.08;
 /** Inset so pipe walls are never coplanar with adjacent blocks/pipes. */
@@ -642,6 +646,161 @@ export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(linePoints), 3));
   return geo;
+}
+
+/**
+ * Y-defect edges: the subset of block edges where the two adjacent faces have
+ * different basis (one X, one Z). These are the "twist" defects in TQEC defect
+ * diagrams — see Gidney's "Understanding Defect Diagrams".
+ *
+ * Cubes: 8 of 12 edges qualify for any TQEC cube type (the 4 edges parallel to
+ * the matched-basis axis are the same-basis pair and are skipped).
+ * Pipes: the 4 edges along the open axis (where the two wall-pairs of opposite
+ * basis meet). End caps and band rings are not emitted in v1; the H-pipe band
+ * ring is a known follow-up.
+ * Y blocks: empty (single-basis block, no X/Z transitions).
+ *
+ * An edge is skipped if both adjacent faces are hidden.
+ */
+export function createYDefectEdges(blockType: BlockType, hiddenFaces: FaceMask = 0): THREE.BufferGeometry {
+  const empty = () => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(0), 3));
+    return g;
+  };
+
+  if (blockType === "Y") return empty();
+
+  const [bx, by, bz] = blockThreeSize(blockType);
+  const pipe = isPipeType(blockType);
+  const e2 = pipe ? 2 * WALL_EPS : 0;
+  const hx = bx / 2 - e2 / 2;
+  const hy = by / 2 - e2 / 2;
+  const hz = bz / 2 - e2 / 2;
+  const corners: Array<[number, number, number]> = [
+    [-hx, -hy, -hz],
+    [-hx, -hy,  hz],
+    [-hx,  hy, -hz],
+    [-hx,  hy,  hz],
+    [ hx, -hy, -hz],
+    [ hx, -hy,  hz],
+    [ hx,  hy, -hz],
+    [ hx,  hy,  hz],
+  ];
+
+  // Each cube edge with the two face bits that share it.
+  // Corner index bits: 0=±X, 1=±Y, 2=±Z (0=neg, 1=pos).
+  const edgeFacePairs: Array<{ i: number; j: number; faceA: number; faceB: number }> = [
+    // X-aligned edges (vary X bit)
+    { i: 0, j: 4, faceA: FACE_NEG_Y, faceB: FACE_NEG_Z },
+    { i: 1, j: 5, faceA: FACE_NEG_Y, faceB: FACE_POS_Z },
+    { i: 2, j: 6, faceA: FACE_POS_Y, faceB: FACE_NEG_Z },
+    { i: 3, j: 7, faceA: FACE_POS_Y, faceB: FACE_POS_Z },
+    // Y-aligned edges (vary Y bit)
+    { i: 0, j: 2, faceA: FACE_NEG_X, faceB: FACE_NEG_Z },
+    { i: 1, j: 3, faceA: FACE_NEG_X, faceB: FACE_POS_Z },
+    { i: 4, j: 6, faceA: FACE_POS_X, faceB: FACE_NEG_Z },
+    { i: 5, j: 7, faceA: FACE_POS_X, faceB: FACE_POS_Z },
+    // Z-aligned edges (vary Z bit)
+    { i: 0, j: 1, faceA: FACE_NEG_X, faceB: FACE_NEG_Y },
+    { i: 2, j: 3, faceA: FACE_NEG_X, faceB: FACE_POS_Y },
+    { i: 4, j: 5, faceA: FACE_POS_X, faceB: FACE_NEG_Y },
+    { i: 6, j: 7, faceA: FACE_POS_X, faceB: FACE_POS_Y },
+  ];
+
+  // Resolve the basis ('X' | 'Z' | null) of each Three.js face for this block.
+  // null = open / no-basis face (pipe end caps).
+  const faceBasis: Record<number, "X" | "Z" | null> = {
+    [FACE_POS_X]: null, [FACE_NEG_X]: null,
+    [FACE_POS_Y]: null, [FACE_NEG_Y]: null,
+    [FACE_POS_Z]: null, [FACE_NEG_Z]: null,
+  };
+
+  if (pipe) {
+    const base = blockType.replace("H", "");
+    const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
+    const threeOpen = TQEC_TO_THREE_AXIS[tqecOpen];
+    const closed = [0, 1, 2].filter(a => a !== threeOpen) as [number, number];
+    for (const ta of closed) {
+      const ch = base[THREE_TO_TQEC_AXIS[ta]] as "X" | "Z";
+      faceBasis[FACE_BIT_BY_INDEX[ta * 2]] = ch;
+      faceBasis[FACE_BIT_BY_INDEX[ta * 2 + 1]] = ch;
+    }
+    // Open-axis faces stay null (no basis).
+  } else {
+    // Cube type. Three.js face → TQEC axis: +X/-X→X(0), +Y/-Y→Z(2), +Z/-Z→Y(1).
+    const xCh = blockType[0] as "X" | "Z";
+    const yCh = blockType[1] as "X" | "Z";
+    const zCh = blockType[2] as "X" | "Z";
+    faceBasis[FACE_POS_X] = xCh; faceBasis[FACE_NEG_X] = xCh;
+    faceBasis[FACE_POS_Y] = zCh; faceBasis[FACE_NEG_Y] = zCh;
+    faceBasis[FACE_POS_Z] = yCh; faceBasis[FACE_NEG_Z] = yCh;
+  }
+
+  const linePoints: number[] = [];
+  for (const { i, j, faceA, faceB } of edgeFacePairs) {
+    const ba = faceBasis[faceA];
+    const bb = faceBasis[faceB];
+    if (!ba || !bb) continue;          // open / no-basis face
+    if (ba === bb) continue;           // same basis → not a Y defect
+    // If either adjacent face is hidden, the visible surface continues into the
+    // neighboring block. Piper-draw's color rules guarantee the neighbor extends
+    // that face with the same basis, so the merged surface has no transition at
+    // this edge — the Y-defect "vanishes into the join". (In free-build mode the
+    // color rules can be violated, in which case we'd miss a real transition.
+    // Acceptable trade-off; tagged as known limitation.)
+    if ((hiddenFaces & faceA) || (hiddenFaces & faceB)) continue;
+    linePoints.push(...corners[i], ...corners[j]);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(linePoints), 3));
+  return geo;
+}
+
+/** Default cylinder radius for Y-defect tubes, in Three.js units (block edge = 1). */
+export const Y_DEFECT_CYLINDER_RADIUS = 0.05;
+
+/**
+ * Returns a Group of cylinder meshes representing Y-defect edges as 3D tubes,
+ * matching the Gidney defect-diagram convention (magenta cylinders along
+ * X/Z-transition edges). Uses createYDefectEdges as the geometric source so
+ * tube placement and line-segment placement are guaranteed to agree.
+ *
+ * Geometry only — caller supplies the material. Cylinders are oriented from
+ * each edge's first endpoint to its second; the group is centered in the
+ * block's local space so it can be added directly alongside the block mesh.
+ */
+export function createYDefectCylinderGroup(
+  blockType: BlockType,
+  hiddenFaces: FaceMask = 0,
+  material: THREE.Material,
+  radius: number = Y_DEFECT_CYLINDER_RADIUS,
+): THREE.Group {
+  const group = new THREE.Group();
+  const edges = createYDefectEdges(blockType, hiddenFaces);
+  const positions = edges.getAttribute("position").array as Float32Array;
+  edges.dispose();
+
+  const up = new THREE.Vector3(0, 1, 0);
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const dir = new THREE.Vector3();
+
+  for (let i = 0; i < positions.length; i += 6) {
+    a.set(positions[i], positions[i + 1], positions[i + 2]);
+    b.set(positions[i + 3], positions[i + 4], positions[i + 5]);
+    dir.subVectors(b, a);
+    const length = dir.length();
+    if (length < 1e-6) continue;
+
+    const cyl = new THREE.CylinderGeometry(radius, radius, length, 12);
+    const mesh = new THREE.Mesh(cyl, material);
+    mesh.position.copy(a).addScaledVector(dir, 0.5);
+    mesh.quaternion.setFromUnitVectors(up, dir.divideScalar(length));
+    group.add(mesh);
+  }
+  return group;
 }
 
 // ---------------------------------------------------------------------------

@@ -408,6 +408,8 @@ export function Toolbar({
   const setPerspView = useBlockStore((s) => s.setPerspView);
   const setIsoView = useBlockStore((s) => s.setIsoView);
   const stepSlice = useBlockStore((s) => s.stepSlice);
+  const showYDefects = useBlockStore((s) => s.showYDefects);
+  const toggleShowYDefects = useBlockStore((s) => s.toggleShowYDefects);
 
   const previewImg = (key: string) => {
     const src = previewImages.get(key);
@@ -492,6 +494,13 @@ export function Toolbar({
         )}
         <button onClick={onResetCamera} style={btnStyle(false)} title="Recenter the camera on the origin">
           Origin
+        </button>
+        <button
+          onClick={toggleShowYDefects}
+          style={btnStyle(showYDefects)}
+          title="Highlight Y-type defects (twists) along edges where X and Z faces meet"
+        >
+          Y defects
         </button>
       </div>
 

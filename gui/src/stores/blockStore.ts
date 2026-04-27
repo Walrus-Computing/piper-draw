@@ -322,6 +322,11 @@ interface BlockStore {
   toggleShowGrid: () => void;
   toggleShowHints: () => void;
 
+  // Y-defect overlay: highlight X/Z transition edges (twists) in magenta.
+  showYDefects: boolean;
+  toggleShowYDefects: () => void;
+  setShowYDefects: (on: boolean) => void;
+
   // Photo export — transient flag consumed by ScreenshotCapture inside <Canvas>.
   photoRequest: boolean;
   requestPhoto: () => void;
@@ -587,6 +592,15 @@ function computeDerivedFromBlocks(blocks: Map<string, Block>): {
   return { spatialIndex, hiddenFaces, undeterminedCubes };
 }
 
+function readShowYDefects(): boolean {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    return localStorage.getItem("piperDraw.showYDefects") === "1";
+  } catch {
+    return false;
+  }
+}
+
 export const useBlockStore = create<BlockStore>((set, get) => ({
   blocks: new Map(),
   spatialIndex: new Map(),
@@ -636,6 +650,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   showHints: true,
   toggleShowGrid: () => set((s) => ({ showGrid: !s.showGrid })),
   toggleShowHints: () => set((s) => ({ showHints: !s.showHints })),
+
+  // Hydrate from localStorage at store creation so the toolbar paints the
+  // correct state on first render — avoids a one-frame flicker on reload.
+  showYDefects: readShowYDefects(),
+  toggleShowYDefects: () => set((s) => ({ showYDefects: !s.showYDefects })),
+  setShowYDefects: (on) => set({ showYDefects: on }),
 
   photoRequest: false,
   requestPhoto: () => set({ photoRequest: true }),
