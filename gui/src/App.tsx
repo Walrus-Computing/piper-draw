@@ -26,6 +26,7 @@ import { SelectionHighlights } from "./components/SelectionHighlights";
 import { BuildCursor } from "./components/BuildCursor";
 import { SelectModePointer, type ThreeState } from "./components/SelectModePointer";
 import { DragGhost } from "./components/DragGhost";
+import { DragShadow } from "./components/DragShadow";
 import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { FlowsPanel } from "./components/FlowsPanel";
@@ -1072,6 +1073,7 @@ export default function App() {
         {!photoRequest && <LocatePulseHighlight />}
         {!photoRequest && !flowVizMode && <SelectionHighlights />}
         {!photoRequest && !flowVizMode && <DragGhost />}
+        {!photoRequest && !flowVizMode && <DragShadow />}
         {!photoRequest && !flowVizMode && <BuildCursor />}
         {!photoRequest && !flowVizMode && <OpenPipeGhosts />}
       {!photoRequest && (flowsPanelOpen || zxPanelOpen || flowVizMode) && <PortLabels3D />}

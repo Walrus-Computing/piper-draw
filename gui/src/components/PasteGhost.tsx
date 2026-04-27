@@ -4,6 +4,9 @@ import { useBlockStore } from "../stores/blockStore";
 import { tqecToThree, yBlockZOffset, isValidPos } from "../types";
 import type { Block, Position3D } from "../types";
 import { getCachedGeometry, getCachedEdges } from "./BlockInstances";
+import { GroundShadowAbsolute } from "./GroundShadowAbsolute";
+
+const MAX_PASTE_SHADOWS = 200;
 
 const noRaycast = () => {};
 
@@ -57,7 +60,7 @@ export function PasteGhost() {
 
   const entries = useMemo(() => {
     if (!clipboard) return null;
-    return Array.from(clipboard.values());
+    return Array.from(clipboard.values()).slice(0, MAX_PASTE_SHADOWS);
   }, [clipboard]);
 
   if (mode !== "edit" || armedTool !== "paste" || !hoveredGridPos || !entries) {
@@ -103,17 +106,23 @@ function PasteGhostBlock({
   const [x, y, z] = tqecToThree(worldPos, block.type, zo);
   const meshMat = collides ? invalidMaterial : pasteMaterial;
   const lineMat = collides ? invalidLineMaterial : pasteLineMaterial;
+  // Shadow position uses the visually-rendered z (logical + Y-cube lift), so
+  // shadow + projection line align with what the user sees.
+  const shadowPos = { ...worldPos, z: worldPos.z + zo };
 
   return (
-    <group position={[x, y, z]}>
-      <mesh raycast={noRaycast}>
-        <primitive object={geometry} attach="geometry" />
-        <primitive object={meshMat} attach="material" />
-      </mesh>
-      <lineSegments raycast={noRaycast}>
-        <primitive object={edges} attach="geometry" />
-        <primitive object={lineMat} attach="material" />
-      </lineSegments>
-    </group>
+    <>
+      <group position={[x, y, z]}>
+        <mesh raycast={noRaycast}>
+          <primitive object={geometry} attach="geometry" />
+          <primitive object={meshMat} attach="material" />
+        </mesh>
+        <lineSegments raycast={noRaycast}>
+          <primitive object={edges} attach="geometry" />
+          <primitive object={lineMat} attach="material" />
+        </lineSegments>
+      </group>
+      <GroundShadowAbsolute pos={shadowPos} blockType={block.type} valid={!collides} />
+    </>
   );
 }
