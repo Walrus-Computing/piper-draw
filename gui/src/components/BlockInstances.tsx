@@ -234,6 +234,16 @@ function TypedInstances({
       // Port-conversion tool: no ghost preview on existing blocks — the click
       // either removes the cube or does nothing (and sets a warning).
       store.setHoveredGridPos(null);
+    } else if (
+      store.mode === "edit" &&
+      armed === "pipe" &&
+      store.fbPreset &&
+      isFreeBuildPipeSpec(b[e.instanceId].type)
+    ) {
+      // Mirrors the click branch below: hovering an existing FB pipe with an
+      // FB preset armed will select it on click, not place adjacent — so
+      // suppress the place-adjacent ghost.
+      store.setHoveredGridPos(null);
     } else {
       // Place mode: pure decision logic lives in BlockInstances.logic.ts so
       // the cube-replace gate and FB/TQEC pipe paths are unit-testable.
@@ -268,6 +278,15 @@ function TypedInstances({
     }
     const armed = store.armedTool;
     if (armed === "pointer") {
+      store.selectBlock(b[e.instanceId].pos, e.nativeEvent.shiftKey);
+      return;
+    }
+    // Free Build: clicking an existing FB pipe focuses it (opens the variants
+    // picker, enables Backspace-to-delete) instead of trying to place an
+    // adjacent pipe. Chain-extension still works via the port ghosts at open
+    // endpoints. Without this, the user has no way to select an FB pipe while
+    // an FB preset is armed (armedTool === "pipe").
+    if (armed === "pipe" && store.fbPreset && isFreeBuildPipeSpec(b[e.instanceId].type)) {
       store.selectBlock(b[e.instanceId].pos, e.nativeEvent.shiftKey);
       return;
     }
