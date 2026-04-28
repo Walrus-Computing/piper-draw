@@ -358,6 +358,7 @@ export function ZXPanel({
     result && result.ok
       ? `${result.vertices.length} spider${result.vertices.length === 1 ? "" : "s"}, ${result.edges.length} edge${result.edges.length === 1 ? "" : "s"}`
       : null;
+  const excludedPipes = result?.excludedFreeBuildPipes ?? 0;
 
   return (
     <div
@@ -506,6 +507,20 @@ export function ZXPanel({
             <span style={{ color: "#666", marginLeft: "auto" }}>{stats}</span>
           )}
         </div>
+
+        {excludedPipes > 0 && (
+          <div
+            style={{
+              color: "#666",
+              fontStyle: "italic",
+              marginBottom: 8,
+              fontSize: 11,
+            }}
+            title="Pipes whose face colors don't match their adjacent cubes are not yet supported by TQEC analysis."
+          >
+            {excludedPipes} free-build pipe{excludedPipes === 1 ? "" : "s"} excluded from analysis (color mismatch with adjacent cubes).
+          </div>
+        )}
 
         {loading && !result && (
           <div style={{ color: "#888", padding: "24px 0", textAlign: "center" }}>
