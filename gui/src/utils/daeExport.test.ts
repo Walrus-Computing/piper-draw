@@ -169,7 +169,7 @@ describe("round-trip: export → import", () => {
     blocks.set("0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" as Block["type"] });
     blocks.set("0,0,1", {
       pos: { x: 0, y: 0, z: 1 },
-      type: { kind: "fb-pipe", openAxis: 2, baseAtStart: "Z", baseAtEnd: "X", defectPositions: [0.5] },
+      type: { kind: "fb-pipe", openAxis: 2, defectPositions: [0.5], faces: ["ZX", "ZX", "ZX", "ZX"] },
     });
     blocks.set("0,0,3", { pos: { x: 0, y: 0, z: 3 }, type: "ZXZ" as Block["type"] });
     const xml = exportBlocksToDae(blocks);

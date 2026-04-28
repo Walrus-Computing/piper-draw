@@ -26,9 +26,11 @@ import { SelectionHighlights } from "./components/SelectionHighlights";
 import { BuildCursor } from "./components/BuildCursor";
 import { SelectModePointer, type ThreeState } from "./components/SelectModePointer";
 import { DragGhost } from "./components/DragGhost";
+import { DragShadow } from "./components/DragShadow";
 import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { FlowsPanel } from "./components/FlowsPanel";
+import { FreeBuildPipeVariantsPanel } from "./components/FreeBuildPipeVariantsPanel";
 import { ZXPanel } from "./components/ZXPanel";
 import { PortLabels3D } from "./components/PortLabels3D";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
@@ -51,6 +53,15 @@ import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
 import { downloadPng } from "./utils/photoExport";
 import { downloadDae } from "./utils/daeExport";
+import {
+  applySnapshot,
+  type SceneSnapshotV1,
+} from "./utils/sceneSnapshot";
+import {
+  decodeSnapshotFromHash,
+  parseSceneHashParam,
+} from "./utils/sceneShare";
+import { SharedSceneBanner } from "./components/SharedSceneBanner";
 import { isEditableTarget } from "./utils/editableFocus";
 import {
   ISO_INITIAL_ZOOM,
@@ -496,6 +507,8 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(
     () => typeof localStorage !== 'undefined' && !localStorage.getItem('piperDraw.seenIntro'),
   );
+  const [sharedSceneBanner, setSharedSceneBanner] =
+    useState<{ previousSnapshot: SceneSnapshotV1 } | null>(null);
   const threeStateRef = useRef<ThreeState | null>(null);
   const photoRequest = useBlockStore((s) => s.photoRequest);
   const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
@@ -902,36 +915,69 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(AUTOSAVE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          useBlockStore.getState().hydrateBlocks(new Map<string, Block>(parsed));
+    function readAutosaveSnapshot(): SceneSnapshotV1 {
+      const snapshot: SceneSnapshotV1 = { v: 1, blocks: [], portMeta: [], portPositions: [] };
+      try {
+        const raw = localStorage.getItem(AUTOSAVE_KEY);
+        if (raw) {
+          const parsed: unknown = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            snapshot.blocks = parsed as SceneSnapshotV1["blocks"];
+          }
         }
+      } catch {
+        localStorage.removeItem(AUTOSAVE_KEY);
       }
-    } catch {
-      localStorage.removeItem(AUTOSAVE_KEY);
-    }
-    try {
-      const rawMeta = localStorage.getItem(AUTOSAVE_META_KEY);
-      if (rawMeta) {
-        const parsed = JSON.parse(rawMeta) as {
-          portMeta?: Array<[string, { label: string; io: "in" | "out" }]>;
-          portPositions?: string[];
-        };
-        const store = useBlockStore.getState();
-        if (parsed.portMeta) {
-          useBlockStore.setState({ portMeta: new Map(parsed.portMeta) });
+      try {
+        const rawMeta = localStorage.getItem(AUTOSAVE_META_KEY);
+        if (rawMeta) {
+          const parsed = JSON.parse(rawMeta) as {
+            portMeta?: SceneSnapshotV1["portMeta"];
+            portPositions?: string[];
+          };
+          if (parsed.portMeta) snapshot.portMeta = parsed.portMeta;
+          if (parsed.portPositions) snapshot.portPositions = parsed.portPositions;
         }
-        if (parsed.portPositions) {
-          useBlockStore.setState({ portPositions: new Set(parsed.portPositions) });
-        }
-        store.ensurePortLabels();
+      } catch {
+        localStorage.removeItem(AUTOSAVE_META_KEY);
       }
-    } catch {
-      localStorage.removeItem(AUTOSAVE_META_KEY);
+      return snapshot;
     }
+
+    function clearShareHash() {
+      if (typeof window === "undefined") return;
+      if (parseSceneHashParam(window.location.hash)) {
+        history.replaceState(null, "", window.location.pathname + window.location.search);
+      }
+    }
+
+    const sharedHash = parseSceneHashParam(window.location.hash);
+    if (!sharedHash) {
+      applySnapshot(readAutosaveSnapshot(), "hydrate");
+      return;
+    }
+
+    const autosaveSnapshot = readAutosaveSnapshot();
+    let cancelled = false;
+    void (async () => {
+      const shared = await decodeSnapshotFromHash(window.location.hash);
+      if (cancelled) return;
+      if (shared) {
+        applySnapshot(shared, "hydrate");
+        clearShareHash();
+        const hadAutosave =
+          autosaveSnapshot.blocks.length > 0 || autosaveSnapshot.portPositions.length > 0;
+        if (hadAutosave) {
+          setSharedSceneBanner({ previousSnapshot: autosaveSnapshot });
+        }
+      } else {
+        applySnapshot(autosaveSnapshot, "hydrate");
+        clearShareHash();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -1019,6 +1065,16 @@ export default function App() {
         onOpenKeybindEditor={setKeybindEditorMode}
       />
       <ValidationToast toolbarRef={toolbarRef} controlsRef={controlsRef} />
+      {sharedSceneBanner && (
+        <SharedSceneBanner
+          previousSnapshot={sharedSceneBanner.previousSnapshot}
+          onRestore={(snapshot) => {
+            applySnapshot(snapshot, "load");
+            setSharedSceneBanner(null);
+          }}
+          onDismiss={() => setSharedSceneBanner(null)}
+        />
+      )}
       <button
         onClick={() => setHelpOpen(true)}
         onPointerDown={(e) => e.stopPropagation()}
@@ -1060,6 +1116,7 @@ export default function App() {
       )}
       <FlowsPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
       <ZXPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
+      <FreeBuildPipeVariantsPanel />
       {showHints && <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />}
       {showHints && <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />}
       {keybindEditorMode && (
@@ -1079,6 +1136,7 @@ export default function App() {
         {!photoRequest && <LocatePulseHighlight />}
         {!photoRequest && !flowVizMode && <SelectionHighlights />}
         {!photoRequest && !flowVizMode && <DragGhost />}
+        {!photoRequest && !flowVizMode && <DragShadow />}
         {!photoRequest && !flowVizMode && <BuildCursor />}
         {!photoRequest && !flowVizMode && <OpenPipeGhosts />}
       {!photoRequest && (flowsPanelOpen || zxPanelOpen || flowVizMode) && <PortLabels3D />}

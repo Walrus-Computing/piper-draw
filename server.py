@@ -56,6 +56,10 @@ class BlockInput(BaseModel):
 class PortLabelInput(BaseModel):
     pos: list[float]
     label: str
+    # User-defined display rank from the Ports table. Lower ranks come first.
+    # When provided, the /api/zx endpoint sorts the extracted circuit's qubit
+    # register by this value so it matches the order shown in the GUI.
+    rank: int | None = None
 
 
 class ValidateRequest(BaseModel):
@@ -450,8 +454,26 @@ async def flows(req: FlowsRequest) -> FlowsResponse:
             error="Diagram has no open ports",
         )
 
-    inputs = [p for p in ordered_ports if req.port_io.get(p, "in") == "in"]
-    outputs = [p for p in ordered_ports if req.port_io.get(p, "in") == "out"]
+    # Sort by user-defined rank from the Ports table (matches /api/zx) so the
+    # qubit-register position when this diagram is interpreted as a circuit
+    # follows the GUI order. Unranked ports fall through to TQEC's
+    # alphabetical order.
+    label_to_rank: dict[str, int] = {
+        p.label: p.rank for p in req.port_labels if p.label and p.rank is not None
+    }
+
+    def _flows_sort_key(label: str) -> tuple[int, str]:
+        rank = label_to_rank.get(label)
+        return (rank if rank is not None else 2**31, label)
+
+    inputs = sorted(
+        (p for p in ordered_ports if req.port_io.get(p, "in") == "in"),
+        key=_flows_sort_key,
+    )
+    outputs = sorted(
+        (p for p in ordered_ports if req.port_io.get(p, "in") == "out"),
+        key=_flows_sort_key,
+    )
 
     try:
         surfaces = graph.find_correlation_surfaces()
@@ -535,6 +557,21 @@ async def zx(req: ZXRequest) -> ZXResponse:
             io = req.port_io.get(cube.label, "in")
             (output_vs if io == "out" else input_vs).append(v)
 
+    # Sort input/output vertex lists by user-defined rank from the Ports table
+    # so the extracted circuit's qubit register matches the GUI order.
+    # Unranked ports sort last, then alphabetically by label.
+    label_to_rank: dict[str, int] = {
+        p.label: p.rank for p in req.port_labels if p.label and p.rank is not None
+    }
+
+    def _port_sort_key(v: int) -> tuple[int, str]:
+        label = port_label_by_vertex.get(v, "")
+        rank = label_to_rank.get(label)
+        return (rank if rank is not None else 2**31, label)
+
+    input_vs.sort(key=_port_sort_key)
+    output_vs.sort(key=_port_sort_key)
+
     # Register boundary vertices as pyzx inputs/outputs (required by
     # pyzx.extract_circuit, harmless otherwise).
     if input_vs:
@@ -549,8 +586,13 @@ async def zx(req: ZXRequest) -> ZXResponse:
     if req.simplify:
         pyzx.simplify.full_reduce(pzx.g)
         # normalize() places inputs/outputs at sensible (qubit, row) — required
-        # before extract_circuit and nicer for display.
-        pzx.g.normalize()
+        # before extract_circuit and nicer for display. Skip it when only
+        # outputs are set: pyzx.normalize() invokes auto_detect_io() whenever
+        # num_inputs() == 0, which clobbers our explicit outputs and raises
+        # TypeError on boundary vertices that share a row with their neighbor
+        # (issue #221). Frontend falls back to a circle layout in that case.
+        if pzx.g.num_inputs() > 0 or pzx.g.num_outputs() == 0:
+            pzx.g.normalize()
 
     circuit_info: ZXCircuit | None = None
     circuit_error: str | None = None

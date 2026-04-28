@@ -1,5 +1,7 @@
 # Stage 1: build the Vite/React frontend
 FROM node:22-slim AS frontend
+ARG VITE_UMAMI_WEBSITE_ID
+ENV VITE_UMAMI_WEBSITE_ID=${VITE_UMAMI_WEBSITE_ID}
 WORKDIR /app/gui
 COPY gui/package.json gui/package-lock.json ./
 RUN npm ci

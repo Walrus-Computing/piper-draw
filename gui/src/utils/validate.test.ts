@@ -5,9 +5,8 @@ import type { Block, FreeBuildPipeSpec } from "../types";
 const FB_SPEC: FreeBuildPipeSpec = {
   kind: "fb-pipe",
   openAxis: 2,
-  baseAtStart: "Z",
-  baseAtEnd: "X",
   defectPositions: [0.5],
+  faces: ["XZ", "XZ", "XZ", "XZ"],
 };
 
 describe("validateDiagram", () => {

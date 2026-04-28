@@ -13,6 +13,7 @@ import { isoTopThreeAxis } from "../utils/isoFoldOut";
 import type { ThreeAxis } from "../utils/isoFoldOut";
 import { getCachedGeometry, getCachedEdges, getCachedFullBox } from "./BlockInstances";
 import { FoldOutCubeFaces } from "./FoldOutCube";
+import { GroundShadowAbsolute } from "./GroundShadowAbsolute";
 
 const noRaycast = () => {};
 
@@ -116,16 +117,19 @@ function GhostBlockInner() {
   if (armedTool === "port" && mode === "edit" && !xHeld) {
     const [x, y, z] = tqecToThree(hoveredGridPos, "XZZ");
     return (
-      <group position={[x, y, z]}>
-        <mesh raycast={noRaycast}>
-          <primitive object={portGhostBox} attach="geometry" />
-          <primitive object={portGhostMaterial} attach="material" />
-        </mesh>
-        <lineSegments raycast={noRaycast}>
-          <primitive object={portGhostEdges} attach="geometry" />
-          <primitive object={validLineMaterial} attach="material" />
-        </lineSegments>
-      </group>
+      <>
+        <group position={[x, y, z]}>
+          <mesh raycast={noRaycast}>
+            <primitive object={portGhostBox} attach="geometry" />
+            <primitive object={portGhostMaterial} attach="material" />
+          </mesh>
+          <lineSegments raycast={noRaycast}>
+            <primitive object={portGhostEdges} attach="geometry" />
+            <primitive object={validLineMaterial} attach="material" />
+          </lineSegments>
+        </group>
+        <GroundShadowAbsolute pos={hoveredGridPos} blockType="XZZ" valid />
+      </>
     );
   }
 
@@ -179,39 +183,54 @@ function GhostBlockInner() {
     (CUBE_TYPES as readonly string[]).includes(activeType);
   const foldTopAxis: ThreeAxis = viewMode.kind === "iso" ? isoTopThreeAxis(viewMode.axis) : 0;
 
+  // Shadow position uses the visually-rendered z (logical + Y-cube lift), so
+  // a Y-cube placement preview lifted by an above pipe still gets a shadow
+  // whose projection line reaches the rendered block bottom. No shadow for
+  // delete previews — that's a "remove this" cue, not a "place here" cue.
+  const shadowPos = { ...hoveredGridPos, z: hoveredGridPos.z + zo };
+
   return (
-    <group position={[x, y, z]}>
-      {isDelete ? (
-        <mesh scale={1.01} raycast={noRaycast}>
-          <primitive object={getCachedFullBox(activeType)} attach="geometry" />
-          <primitive object={deleteMaterial} attach="material" />
-        </mesh>
-      ) : (
-        <group scale={scale}>
-          {!showFoldOutCube && (
-            <>
-              <mesh>
-                <primitive object={ghostGeometry} attach="geometry" />
-                <primitive object={meshMat} attach="material" />
-              </mesh>
-              <lineSegments>
-                <primitive object={ghostEdges} attach="geometry" />
-                <primitive object={lineMat} attach="material" />
+    <>
+      <group position={[x, y, z]}>
+        {isDelete ? (
+          <mesh scale={1.01} raycast={noRaycast}>
+            <primitive object={getCachedFullBox(activeType)} attach="geometry" />
+            <primitive object={deleteMaterial} attach="material" />
+          </mesh>
+        ) : (
+          <group scale={scale}>
+            {!showFoldOutCube && (
+              <>
+                <mesh>
+                  <primitive object={ghostGeometry} attach="geometry" />
+                  <primitive object={meshMat} attach="material" />
+                </mesh>
+                <lineSegments>
+                  <primitive object={ghostEdges} attach="geometry" />
+                  <primitive object={lineMat} attach="material" />
+                </lineSegments>
+              </>
+            )}
+            {fullPipeEdges && (
+              <lineSegments scale={1.04} renderOrder={999}>
+                <primitive object={fullPipeEdges} attach="geometry" />
+                <primitive object={depthPipeOutlineMaterial} attach="material" />
               </lineSegments>
-            </>
-          )}
-          {fullPipeEdges && (
-            <lineSegments scale={1.04} renderOrder={999}>
-              <primitive object={fullPipeEdges} attach="geometry" />
-              <primitive object={depthPipeOutlineMaterial} attach="material" />
-            </lineSegments>
-          )}
-          {showFoldOutCube && (
-            <FoldOutCubeFaces blockType={activeType as string} topAxis={foldTopAxis} />
-          )}
-        </group>
+            )}
+            {showFoldOutCube && (
+              <FoldOutCubeFaces blockType={activeType as string} topAxis={foldTopAxis} />
+            )}
+          </group>
+        )}
+      </group>
+      {!isDelete && (
+        <GroundShadowAbsolute
+          pos={shadowPos}
+          blockType={activeType}
+          valid={!isInvalid}
+        />
       )}
-    </group>
+    </>
   );
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { useBlockStore } from "./blockStore";
 import type { Block } from "../types";
-import { buildSpatialIndex } from "../types";
+import { buildSpatialIndex, FB_PRESETS } from "../types";
 
 function reset() {
   useBlockStore.setState({
@@ -13,6 +13,7 @@ function reset() {
     mode: "edit",
     cubeType: "XZZ",
     pipeVariant: null,
+    fbPreset: null,
     armedTool: "cube",
     xHeld: false,
     portWarning: null,
@@ -145,9 +146,8 @@ describe("blockStore", () => {
       const fbX = {
         kind: "fb-pipe" as const,
         openAxis: 0 as const,
-        baseAtStart: "Z" as const,
-        baseAtEnd: "X" as const,
         defectPositions: [0.5],
+        faces: ["ZX", "ZX", "ZX", "ZX"] as ["ZX", "ZX", "ZX", "ZX"],
       };
       const fbY = { ...fbX, openAxis: 1 as const };
       const incoming = new Map<string, Block>([
@@ -168,9 +168,8 @@ describe("blockStore", () => {
       const fbX = {
         kind: "fb-pipe" as const,
         openAxis: 0 as const,
-        baseAtStart: "Z" as const,
-        baseAtEnd: "X" as const,
         defectPositions: [0.5],
+        faces: ["ZX", "ZX", "ZX", "ZX"] as ["ZX", "ZX", "ZX", "ZX"],
       };
       const incoming = new Map<string, Block>([
         ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: fbX }],
@@ -515,9 +514,8 @@ describe("blockStore", () => {
       const fbSpec = {
         kind: "fb-pipe" as const,
         openAxis: 0 as const,
-        baseAtStart: "Z" as const,
-        baseAtEnd: "X" as const,
         defectPositions: [0.5],
+        faces: ["ZX", "ZX", "ZX", "ZX"] as ["ZX", "ZX", "ZX", "ZX"],
       };
       const incoming = new Map<string, Block>([
         ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: fbSpec }],
@@ -532,9 +530,8 @@ describe("blockStore", () => {
       const fbX = {
         kind: "fb-pipe" as const,
         openAxis: 0 as const,
-        baseAtStart: "Z" as const,
-        baseAtEnd: "X" as const,
         defectPositions: [0.5],
+        faces: ["ZX", "ZX", "ZX", "ZX"] as ["ZX", "ZX", "ZX", "ZX"],
       };
       const fbY = { ...fbX, openAxis: 1 as const };
       const incoming = new Map<string, Block>([
@@ -583,6 +580,31 @@ describe("blockStore", () => {
       useBlockStore.getState().setPlacePort(true);
       useBlockStore.getState().setPlacePort(false);
       expect(useBlockStore.getState().armedTool).toBe("pointer");
+    });
+  });
+
+  // cubeType used to be silently rewritten to a PipeType by setPipeVariant
+  // and left untouched by setFBPreset. That asymmetry caused the FB-pipe
+  // snap-to-cube bug: when cubeType was a real CubeType while an FB preset
+  // was armed, the cube-replace branch in BlockInstances fired against the
+  // hovered cube position. The fix is for cubeType to be owned exclusively
+  // by the cube tool and persist across pipe-mode arming.
+  describe("cubeType ownership", () => {
+    it("setPipeVariant does NOT overwrite cubeType (FB snap regression)", () => {
+      useBlockStore.getState().setCubeType("ZXZ");
+      useBlockStore.getState().setPipeVariant("ZX");
+      expect(useBlockStore.getState().cubeType).toBe("ZXZ");
+      expect(useBlockStore.getState().armedTool).toBe("pipe");
+      expect(useBlockStore.getState().pipeVariant).toBe("ZX");
+    });
+
+    it("setFBPreset does NOT overwrite cubeType", () => {
+      useBlockStore.getState().setCubeType("ZXZ");
+      const freePipe = FB_PRESETS[0];
+      useBlockStore.getState().setFBPreset(freePipe);
+      expect(useBlockStore.getState().cubeType).toBe("ZXZ");
+      expect(useBlockStore.getState().armedTool).toBe("pipe");
+      expect(useBlockStore.getState().fbPreset?.id).toBe(freePipe.id);
     });
   });
 
@@ -1360,6 +1382,62 @@ describe("blockStore", () => {
       useBlockStore.getState().setPortIO({ x: 0, y: 0, z: 3 }, "in");
       useBlockStore.getState().ensurePortLabels();
       expect(useBlockStore.getState().portMeta.get("0,0,3")?.io).toBe("in");
+    });
+  });
+
+  describe("reorderPort", () => {
+    function seedFourPorts() {
+      useBlockStore.setState({
+        blocks: new Map(),
+        portPositions: new Set(["0,0,0", "3,0,0", "6,0,0", "9,0,0"]),
+        portMeta: new Map(),
+      });
+      useBlockStore.getState().ensurePortLabels();
+    }
+
+    function ranksByX(): Record<number, number | undefined> {
+      const out: Record<number, number | undefined> = {};
+      for (const [k, m] of useBlockStore.getState().portMeta) {
+        const x = Number(k.split(",")[0]);
+        out[x] = m.rank;
+      }
+      return out;
+    }
+
+    it("ensurePortLabels assigns sequential ranks 0..N-1 in spatial order", () => {
+      seedFourPorts();
+      // Spatial sort is by x ascending → ranks should match the x order.
+      expect(ranksByX()).toEqual({ 0: 0, 3: 1, 6: 2, 9: 3 });
+    });
+
+    it("moves a port forward and rewrites all ranks to 0..N-1", () => {
+      seedFourPorts();
+      // Move the port at index 3 (x=9) to index 0.
+      useBlockStore.getState().reorderPort(3, 0);
+      expect(ranksByX()).toEqual({ 9: 0, 0: 1, 3: 2, 6: 3 });
+    });
+
+    it("moves a port backward and rewrites all ranks", () => {
+      seedFourPorts();
+      // Move the port at index 0 (x=0) to index 2.
+      useBlockStore.getState().reorderPort(0, 2);
+      expect(ranksByX()).toEqual({ 3: 0, 6: 1, 0: 2, 9: 3 });
+    });
+
+    it("is a no-op when from === to", () => {
+      seedFourPorts();
+      const before = useBlockStore.getState().portMeta;
+      useBlockStore.getState().reorderPort(2, 2);
+      // Object identity preserved (set returned `state` unchanged).
+      expect(useBlockStore.getState().portMeta).toBe(before);
+    });
+
+    it("is a no-op when indices are out of range", () => {
+      seedFourPorts();
+      const before = useBlockStore.getState().portMeta;
+      useBlockStore.getState().reorderPort(-1, 2);
+      useBlockStore.getState().reorderPort(0, 99);
+      expect(useBlockStore.getState().portMeta).toBe(before);
     });
   });
 
