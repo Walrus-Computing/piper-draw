@@ -1,5 +1,5 @@
+import { hasPipeColorConflict, isFreeBuildBlock, isPipeType } from "../types";
 import type { Block, Position3D, PortMeta } from "../types";
-import { isFreeBuildBlock } from "../types";
 
 export type ZXVertexKind = "Z" | "X" | "H" | "BOUNDARY";
 
@@ -50,11 +50,37 @@ export interface ZXResult {
   circuit: ZXCircuit | null;
   circuit_error: string | null;
   error: string | null;
+  /** Pipes whose colors don't agree with adjacent cubes — silently dropped
+   *  from the /api/zx payload so TQEC validation can still succeed on the
+   *  rest of the diagram. Zero when none were dropped. */
+  excludedFreeBuildPipes: number;
 }
 
 function posFromKey(key: string): Position3D {
   const [x, y, z] = key.split(",").map(Number);
   return { x, y, z };
+}
+
+/**
+ * Drop pipes that disagree with adjacent cube colors. These are "free build"
+ * pipes — the rest of the diagram is still TQEC-valid, so we ship the subset
+ * to /api/zx and report how many we excluded so the panel can surface a
+ * notice.
+ */
+export function filterFreeBuildPipes(blocks: Map<string, Block>): {
+  kept: Block[];
+  excluded: number;
+} {
+  const kept: Block[] = [];
+  let excluded = 0;
+  for (const b of blocks.values()) {
+    if (isPipeType(b.type) && hasPipeColorConflict(b.type, b.pos, blocks)) {
+      excluded++;
+      continue;
+    }
+    kept.push(b);
+  }
+  return { kept, excluded };
 }
 
 export async function computeZX(
@@ -63,14 +89,19 @@ export async function computeZX(
   simplify: boolean,
   extract: boolean = false,
 ): Promise<ZXResult> {
-  // Defense-in-depth: drop free-build (non-TQEC) blocks before sending to
-  // the backend. ZX requires a TQEC scene; FB pieces don't have a ZX semantic.
-  const blocksPayload = Array.from(blocks.values())
-    .filter((b) => !isFreeBuildBlock(b))
-    .map((b) => ({
-      pos: [b.pos.x, b.pos.y, b.pos.z],
-      type: b.type as string,
-    }));
+  // Two filters compose. First drop free-build (non-TQEC) blocks — they have
+  // no ZX semantic and the backend can't model them. Then run the color-
+  // conflict filter on the TQEC remainder to catch mismatched TQEC pipes
+  // (e.g. placed under "Ignore color rules"); the count surfaces in the panel.
+  const tqecOnly = new Map<string, Block>();
+  for (const [k, b] of blocks) {
+    if (!isFreeBuildBlock(b)) tqecOnly.set(k, b);
+  }
+  const { kept, excluded } = filterFreeBuildPipes(tqecOnly);
+  const blocksPayload = kept.map((b) => ({
+    pos: [b.pos.x, b.pos.y, b.pos.z],
+    type: b.type as string,
+  }));
   const portLabels = Array.from(portMeta.entries()).map(([key, meta]) => {
     const p = posFromKey(key);
     return { pos: [p.x, p.y, p.z], label: meta.label, rank: meta.rank ?? null };
@@ -102,9 +133,11 @@ export async function computeZX(
         circuit: null,
         circuit_error: null,
         error: `Server error: ${res.status}`,
+        excludedFreeBuildPipes: excluded,
       };
     }
-    return (await res.json()) as ZXResult;
+    const json = (await res.json()) as Omit<ZXResult, "excludedFreeBuildPipes">;
+    return { ...json, excludedFreeBuildPipes: excluded };
   } catch {
     return {
       ok: false,
@@ -115,6 +148,7 @@ export async function computeZX(
       circuit: null,
       circuit_error: null,
       error: "ZX server unavailable. Start with: npm run dev:backend",
+      excludedFreeBuildPipes: excluded,
     };
   }
 }
