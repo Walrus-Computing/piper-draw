@@ -15,6 +15,7 @@ import {
   hasCubeColorConflict,
   hasPipeColorConflict,
   hasYCubePipeAxisConflict,
+  isFreeBuildPipeSpec,
   isPipeType,
   isValidPipePos,
   isValidPos,
@@ -113,6 +114,7 @@ function classifyTarget(
     }
     if (
       !isPipeType(type) &&
+      !isFreeBuildPipeSpec(type) &&
       type !== "Y" &&
       hasCubeColorConflict(type as CubeType, pos, state.blocks)
     ) {

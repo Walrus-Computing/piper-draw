@@ -4,6 +4,7 @@ import {
   hasCubeColorConflict,
   hasPipeColorConflict,
   hasYCubePipeAxisConflict,
+  isFreeBuildPipeSpec,
   isPipeType,
   isValidPos,
   posKey,
@@ -86,7 +87,7 @@ export function isMoveValid(state: MoveValidateState, delta: Position3D): boolea
     for (const nb of newBlocks) {
       const t = nb.type;
       if (isPipeType(t) && hasPipeColorConflict(t, nb.pos, lookup)) return false;
-      if (!isPipeType(t) && t !== "Y" && hasCubeColorConflict(t as CubeType, nb.pos, lookup)) return false;
+      if (!isPipeType(t) && !isFreeBuildPipeSpec(t) && t !== "Y" && hasCubeColorConflict(t as CubeType, nb.pos, lookup)) return false;
       if (hasYCubePipeAxisConflict(t, nb.pos, lookup)) return false;
     }
   }
