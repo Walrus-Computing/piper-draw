@@ -100,6 +100,7 @@ export function Toolbar({
   onOpenKeybindEditor: (mode: KeybindMode) => void;
 }) {
   const [userScale, setUserScale] = useState<number>(loadToolbarUserScale);
+  const [recenterTooltip, setRecenterTooltip] = useState(false);
   useEffect(() => {
     window.localStorage.setItem(TOOLBAR_USER_SCALE_KEY, String(userScale));
   }, [userScale]);
@@ -420,8 +421,6 @@ export function Toolbar({
   const setPerspView = useBlockStore((s) => s.setPerspView);
   const setIsoView = useBlockStore((s) => s.setIsoView);
   const stepSlice = useBlockStore((s) => s.stepSlice);
-  const showYDefects = useBlockStore((s) => s.showYDefects);
-  const toggleShowYDefects = useBlockStore((s) => s.toggleShowYDefects);
 
   const previewImg = (key: string) => {
     const src = previewImages.get(key);
@@ -504,16 +503,6 @@ export function Toolbar({
             </button>
           </div>
         )}
-        <button onClick={onResetCamera} style={btnStyle(false)} title="Recenter the camera on the origin">
-          Origin
-        </button>
-        <button
-          onClick={toggleShowYDefects}
-          style={btnStyle(showYDefects)}
-          title="Highlight Y-type defects (twists) along edges where X and Z faces meet"
-        >
-          Y defects
-        </button>
       </div>
 
       {/* History + Analyze */}
@@ -820,6 +809,60 @@ export function Toolbar({
             }
             return <><span>X: {pos.x / 3}</span><span>Y: {pos.y / 3}</span><span>Z: {pos.z / 3}</span></>;
           })()}
+        </div>
+        <div style={{ position: "relative", alignSelf: "center" }}>
+          <button
+            onClick={onResetCamera}
+            onMouseEnter={() => setRecenterTooltip(true)}
+            onMouseLeave={() => setRecenterTooltip(false)}
+            aria-label="Recenter camera on origin"
+            style={{
+              ...btnStyle(false),
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 0,
+              width: 28,
+              height: 22,
+            }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.2"
+              aria-hidden="true"
+            >
+              <circle cx="7" cy="7" r="3.5" />
+              <line x1="7" y1="0.5" x2="7" y2="3" />
+              <line x1="7" y1="11" x2="7" y2="13.5" />
+              <line x1="0.5" y1="7" x2="3" y2="7" />
+              <line x1="11" y1="7" x2="13.5" y2="7" />
+            </svg>
+          </button>
+          {recenterTooltip && (
+            <div
+              role="tooltip"
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                right: 0,
+                background: "rgba(0,0,0,0.85)",
+                color: "#fff",
+                padding: "4px 8px",
+                borderRadius: 4,
+                fontSize: 11,
+                fontFamily: "sans-serif",
+                whiteSpace: "nowrap",
+                pointerEvents: "none",
+                zIndex: 100,
+              }}
+            >
+              Recenter camera on origin (0, 0, 0)
+            </div>
+          )}
         </div>
         <div style={{ textAlign: "center" }}>
           <FpsDisplay spanRef={fpsRef} />
@@ -1585,6 +1628,8 @@ function SettingsMenu({
   const toggleCameraFollowsBuild = useKeybindStore((s) => s.toggleCameraFollowsBuild);
   const axisAbsoluteWasd = useKeybindStore((s) => s.axisAbsoluteWasd);
   const toggleAxisAbsoluteWasd = useKeybindStore((s) => s.toggleAxisAbsoluteWasd);
+  const showYDefects = useBlockStore((s) => s.showYDefects);
+  const toggleShowYDefects = useBlockStore((s) => s.toggleShowYDefects);
 
   useEffect(() => {
     if (!open) return;
@@ -1630,6 +1675,16 @@ function SettingsMenu({
               Ignore color rules
               <div style={{ fontSize: 10, color: "#888", whiteSpace: "nowrap" }}>
                 (“Free Build” — skips color-matching checks)
+              </div>
+            </span>
+          </label>
+
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={showYDefects} onChange={toggleShowYDefects} style={{ marginTop: 2 }} />
+            <span>
+              Highlight Y defects
+              <div style={{ fontSize: 10, color: "#888", whiteSpace: "nowrap" }}>
+                (magenta cylinders along edges where X and Z faces meet)
               </div>
             </span>
           </label>
