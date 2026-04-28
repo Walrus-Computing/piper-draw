@@ -18,6 +18,7 @@ import {
 } from "../types";
 import type { CubeType, Position3D, ViewMode } from "../types";
 import { cameraGroundPoint } from "../utils/groundPlane";
+import { shouldPassThroughGridPlane } from "../utils/gridPlanePassthrough";
 import { snapIsoPos, isoGridMeshTransform } from "../utils/isoView";
 
 const PLANE_SIZE = 1000;
@@ -61,6 +62,21 @@ export function GridPlane() {
   });
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
+    // Pass-through (pointer/paste only): when a block/port is also under the
+    // cursor, return early without stopProp so the block's onPointerMove sets
+    // hoveredGridPos. Done before any setHoveredGridPos call so we don't write
+    // the plane cell and let the block immediately overwrite it (one-frame
+    // flash on stacked hits).
+    if (mode === "edit") {
+      const s = useBlockStore.getState();
+      if (
+        !s.xHeld &&
+        (s.armedTool === "pointer" || s.armedTool === "paste") &&
+        shouldPassThroughGridPlane(e.intersections, meshRef.current)
+      ) {
+        return;
+      }
+    }
     e.stopPropagation();
     if (mode !== "edit") { setHoveredGridPos(null); return; }
 
@@ -120,17 +136,31 @@ export function GridPlane() {
   };
 
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
-    e.stopPropagation();
-    if (e.delta > 2) return; // ignore drags
-    if (mode !== "edit") return;
+    if (e.delta > 2) { e.stopPropagation(); return; } // ignore drags
+    if (mode !== "edit") { e.stopPropagation(); return; }
 
     const store = useBlockStore.getState();
     // X-held delete on empty grid is a no-op.
-    if (store.xHeld) return;
+    if (store.xHeld) { e.stopPropagation(); return; }
+
     if (store.armedTool === "pointer") {
+      // Pass-through: when the click ray also hits a block or port ghost
+      // further along, let that handler own the event so sub-ground blocks
+      // (TQEC z<0) can be selected from above.
+      //
+      // NOTE: this couples deselect-on-empty-click policy to GridPlane. Any
+      // future clickable scene mesh must either opt out of raycast (the
+      // raycast={noRaycast} convention used by decoratives) or call
+      // e.stopPropagation() in its own onClick. Otherwise deselection would
+      // silently stop working through that mesh.
+      if (shouldPassThroughGridPlane(e.intersections, meshRef.current)) return;
+      e.stopPropagation();
       store.clearSelection();
       return;
     }
+    // Paste / port / placement: the plane is the intended target, so we
+    // always consume the click here.
+    e.stopPropagation();
     // Paste tool: commit the clipboard at the snapped hover cell, then
     // return to pointer (commitPaste sets armedTool="pointer").
     if (store.armedTool === "paste") {
