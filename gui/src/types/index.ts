@@ -1469,28 +1469,66 @@ export function hasPipeColorConflict(
 }
 
 /**
- * v1 hardcoded build rule: returns the (single) valid FB face tuple when the
- * FB pipe sits between two XZZ cubes along X (offsets −1 and +2). Returns
- * null in every other configuration (different openAxis, missing neighbour,
- * non-cube neighbour, non-XZZ cube). Future passes will generalise.
+ * Hardcoded build rule: for any FB pipe flanked by two plain TQEC cubes along
+ * its open axis, returns the single valid FB face tuple per the touching-faces
+ * rule. Each closed-axis wall's "below" basis must equal the −openAxis cube's
+ * basis on that closed axis, and its "above" basis must equal the +openAxis
+ * cube's basis. There is always exactly one solution for any cube pair.
  *
- * The single valid variant is `["Z","Z","Z","Z"]` because XZZ has Z on both
- * its Y and Z axes, so every wall of an X-open pipe must be solid Z on both
- * sides of the defect.
+ * Returns null when:
+ *   - the input block isn't an FB pipe,
+ *   - either neighbour at offset −1 / +2 along openAxis is missing, or
+ *   - either neighbour isn't a plain CUBE_TYPES cube (Y, TQEC pipes, FB pipes
+ *     all excluded).
+ *
+ * The result also carries the matched cube types and openAxis so the caller
+ * can label the section header (e.g., "ZXX–XZZ in X") without re-reading the
+ * neighbours.
  */
-export function validFBPipeVariantsXZZXAxis(
+export function validFBPipeVariantsForCubePair(
   block: Block,
   blocks: BlocksLookup,
-): ReadonlyArray<readonly [FaceConfig, FaceConfig, FaceConfig, FaceConfig]> | null {
+): {
+  faces: ReadonlyArray<readonly [FaceConfig, FaceConfig, FaceConfig, FaceConfig]>;
+  negType: CubeType;
+  posType: CubeType;
+  openAxis: 0 | 1 | 2;
+} | null {
   const t = block.type;
-  if (!isFreeBuildPipeSpec(t) || t.openAxis !== 0) return null;
-  const negPos: Position3D = { x: block.pos.x - 1, y: block.pos.y, z: block.pos.z };
-  const posPos: Position3D = { x: block.pos.x + 2, y: block.pos.y, z: block.pos.z };
-  const neg = blocks.get(posKey(negPos));
-  const pos = blocks.get(posKey(posPos));
+  if (!isFreeBuildPipeSpec(t)) return null;
+  const openAxis = t.openAxis;
+  const negCoords: [number, number, number] = [block.pos.x, block.pos.y, block.pos.z];
+  const posCoords: [number, number, number] = [block.pos.x, block.pos.y, block.pos.z];
+  negCoords[openAxis] -= 1;
+  posCoords[openAxis] += 2;
+  const neg = blocks.get(posKey({ x: negCoords[0], y: negCoords[1], z: negCoords[2] }));
+  const pos = blocks.get(posKey({ x: posCoords[0], y: posCoords[1], z: posCoords[2] }));
   if (!neg || !pos) return null;
-  if (neg.type !== "XZZ" || pos.type !== "XZZ") return null;
-  return [["Z", "Z", "Z", "Z"]];
+  const isCube = (bt: BlockType): bt is CubeType =>
+    typeof bt === "string" && (CUBE_TYPES as readonly string[]).includes(bt);
+  if (!isCube(neg.type) || !isCube(pos.type)) return null;
+  const negType: CubeType = neg.type;
+  const posType: CubeType = pos.type;
+  // Map ca0 / ca1 (Three.js closed-axis indices, ascending) back to TQEC axis
+  // indices so we can read cube basis chars at the right positions in the type string.
+  const threeOpen = TQEC_TO_THREE_AXIS[openAxis];
+  const threeClosed = ([0, 1, 2] as const).filter((a) => a !== threeOpen);
+  const tqecCa0 = THREE_TO_TQEC_AXIS[threeClosed[0]];
+  const tqecCa1 = THREE_TO_TQEC_AXIS[threeClosed[1]];
+  const fcFor = (tqecAxis: number): FaceConfig => {
+    const below = negType[tqecAxis] as "X" | "Z";
+    const above = posType[tqecAxis] as "X" | "Z";
+    if (below === above) return below;
+    return below === "X" ? "XZ" : "ZX";
+  };
+  const fc0 = fcFor(tqecCa0);
+  const fc1 = fcFor(tqecCa1);
+  return {
+    faces: [[fc0, fc0, fc1, fc1]],
+    negType,
+    posType,
+    openAxis,
+  };
 }
 
 /**
