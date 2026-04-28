@@ -8,7 +8,7 @@ import {
   faceAboveBasis,
   faceBelowBasis,
   isFreeBuildPipeSpec,
-  validFBPipeVariantsXZZXAxis,
+  validFBPipeVariantsForCubePair,
 } from "../types";
 import type { FaceConfig } from "../types";
 import { useFloatingPanel } from "../hooks/useFloatingPanel";
@@ -116,16 +116,18 @@ export function FreeBuildPipeVariantsPanel() {
 
   const partitioned = useMemo(() => {
     if (!block) return null;
-    const valid = validFBPipeVariantsXZZXAxis(block, blocks);
-    if (!valid) return null;
-    const validKeys = new Set(valid.map((v) => v.join("|")));
+    const result = validFBPipeVariantsForCubePair(block, blocks);
+    if (!result) return null;
+    const axisName = ["X", "Y", "Z"][result.openAxis];
+    const label = `${result.negType}–${result.posType} in ${axisName}`;
+    const validKeys = new Set(result.faces.map((v) => v.join("|")));
     const validList: typeof variants = [];
     const invalidList: typeof variants = [];
     for (const v of variants) {
       if (validKeys.has(v.join("|"))) validList.push(v);
       else invalidList.push(v);
     }
-    return { validList, invalidList };
+    return { validList, invalidList, label };
   }, [block, blocks, variants]);
 
   if (!open || !block || !isFreeBuildPipeSpec(block.type)) return null;
@@ -222,7 +224,7 @@ export function FreeBuildPipeVariantsPanel() {
       >
         {partitioned ? (
           <>
-            <div style={sectionHeaderStyle}>Valid for XZZ–XZZ in X</div>
+            <div style={sectionHeaderStyle}>Valid for {partitioned.label}</div>
             {partitioned.validList.map(renderCell)}
             <div
               style={{
@@ -232,7 +234,7 @@ export function FreeBuildPipeVariantsPanel() {
                 paddingTop: 8,
               }}
             >
-              Other variants (not valid for XZZ–XZZ in X)
+              Other variants (not valid for {partitioned.label})
             </div>
             {partitioned.invalidList.map(renderCell)}
           </>
