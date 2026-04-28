@@ -8,6 +8,7 @@ import {
   faceAboveBasis,
   faceBelowBasis,
   isFreeBuildPipeSpec,
+  validFBPipeVariantsXZZXAxis,
 } from "../types";
 import type { FaceConfig } from "../types";
 import { useFloatingPanel } from "../hooks/useFloatingPanel";
@@ -113,8 +114,54 @@ export function FreeBuildPipeVariantsPanel() {
 
   const variants = useMemo(() => enumerateVariants(), []);
 
+  const partitioned = useMemo(() => {
+    if (!block) return null;
+    const valid = validFBPipeVariantsXZZXAxis(block, blocks);
+    if (!valid) return null;
+    const validKeys = new Set(valid.map((v) => v.join("|")));
+    const validList: typeof variants = [];
+    const invalidList: typeof variants = [];
+    for (const v of variants) {
+      if (validKeys.has(v.join("|"))) validList.push(v);
+      else invalidList.push(v);
+    }
+    return { validList, invalidList };
+  }, [block, blocks, variants]);
+
   if (!open || !block || !isFreeBuildPipeSpec(block.type)) return null;
   const currentFaces = block.type.faces;
+
+  const renderCell = (faces: [FaceConfig, FaceConfig, FaceConfig, FaceConfig]) => {
+    const isCurrent = facesEqual(faces, currentFaces);
+    const key = faces.join("|");
+    return (
+      <button
+        key={key}
+        type="button"
+        onClick={() => setFBPipeFaces(block.pos, faces)}
+        title={faces.join(" ")}
+        style={{
+          padding: 4,
+          background: isCurrent ? "#e8f1ff" : "#fafafa",
+          border: `1px solid ${isCurrent ? "#4a9eff" : "#e0e0e0"}`,
+          borderRadius: 4,
+          cursor: "pointer",
+          display: "flex",
+          justifyContent: "center",
+        }}
+      >
+        <VariantSprite faces={faces} />
+      </button>
+    );
+  };
+
+  const sectionHeaderStyle = {
+    gridColumn: "1 / -1",
+    color: "#666",
+    fontSize: 11,
+    fontWeight: 600,
+    padding: "4px 2px 2px",
+  } as const;
 
   return (
     <div
@@ -173,28 +220,25 @@ export function FreeBuildPipeVariantsPanel() {
           gap: 6,
         }}
       >
-        {variants.map((faces, idx) => {
-          const isCurrent = facesEqual(faces, currentFaces);
-          return (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => setFBPipeFaces(block.pos, faces)}
-              title={faces.join(" ")}
+        {partitioned ? (
+          <>
+            <div style={sectionHeaderStyle}>Valid for XZZ–XZZ in X</div>
+            {partitioned.validList.map(renderCell)}
+            <div
               style={{
-                padding: 4,
-                background: isCurrent ? "#e8f1ff" : "#fafafa",
-                border: `1px solid ${isCurrent ? "#4a9eff" : "#e0e0e0"}`,
-                borderRadius: 4,
-                cursor: "pointer",
-                display: "flex",
-                justifyContent: "center",
+                ...sectionHeaderStyle,
+                borderTop: "1px solid #eee",
+                marginTop: 6,
+                paddingTop: 8,
               }}
             >
-              <VariantSprite faces={faces} />
-            </button>
-          );
-        })}
+              Other variants (not valid for XZZ–XZZ in X)
+            </div>
+            {partitioned.invalidList.map(renderCell)}
+          </>
+        ) : (
+          variants.map(renderCell)
+        )}
       </div>
 
       <ResizeGrip {...resizeGripProps} />

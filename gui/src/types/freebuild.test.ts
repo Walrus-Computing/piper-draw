@@ -24,6 +24,7 @@ import {
   FB_DEFAULT_FACES,
   migrateLegacyFBSpec,
   normalizeFBSpec,
+  validFBPipeVariantsXZZXAxis,
 } from "./index";
 import type { Block, BlockType, FBPreset, FreeBuildPipeSpec, Position3D } from "./index";
 import { resolveFBSpecFromFace, resolvePipeTypeFromFace } from "../components/BlockInstances.logic";
@@ -467,5 +468,88 @@ describe("attached-pipe accounting recognizes FB pipes", () => {
       { pos: { x: 1, y: 0, z: 0 }, type: Y_OPEN_SPEC },
     ]);
     expect(countAttachedPipes({ x: 0, y: 0, z: 0 }, blocks)).toBe(0);
+  });
+});
+
+describe("validFBPipeVariantsXZZXAxis", () => {
+  function makeBlocks(entries: Block[]): Map<string, Block> {
+    const map = new Map<string, Block>();
+    for (const b of entries) map.set(posKey(b.pos), b);
+    return map;
+  }
+
+  const PIPE_POS: Position3D = { x: 1, y: 0, z: 0 };
+  const NEG_POS: Position3D = { x: 0, y: 0, z: 0 };
+  const POS_POS: Position3D = { x: 3, y: 0, z: 0 };
+  const FB_X_PIPE: Block = { pos: PIPE_POS, type: X_OPEN_SPEC };
+
+  it("returns the all-Z tuple for the canonical XZZ–FB–XZZ X-axis sandwich", () => {
+    const blocks = makeBlocks([
+      { pos: NEG_POS, type: "XZZ" },
+      FB_X_PIPE,
+      { pos: POS_POS, type: "XZZ" },
+    ]);
+    const result = validFBPipeVariantsXZZXAxis(FB_X_PIPE, blocks);
+    expect(result).toEqual([["Z", "Z", "Z", "Z"]]);
+  });
+
+  it("returns null when the FB pipe is Y-open", () => {
+    const fbY: Block = { pos: { x: 0, y: 1, z: 0 }, type: Y_OPEN_SPEC };
+    const blocks = makeBlocks([
+      { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" },
+      fbY,
+      { pos: { x: 0, y: 3, z: 0 }, type: "XZZ" },
+    ]);
+    expect(validFBPipeVariantsXZZXAxis(fbY, blocks)).toBeNull();
+  });
+
+  it("returns null when the FB pipe is Z-open", () => {
+    const fbZ: Block = { pos: { x: 0, y: 0, z: 1 }, type: Z_OPEN_SPEC };
+    const blocks = makeBlocks([
+      { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" },
+      fbZ,
+      { pos: { x: 0, y: 0, z: 3 }, type: "XZZ" },
+    ]);
+    expect(validFBPipeVariantsXZZXAxis(fbZ, blocks)).toBeNull();
+  });
+
+  it("returns null when the −X neighbour is missing", () => {
+    const blocks = makeBlocks([
+      FB_X_PIPE,
+      { pos: POS_POS, type: "XZZ" },
+    ]);
+    expect(validFBPipeVariantsXZZXAxis(FB_X_PIPE, blocks)).toBeNull();
+  });
+
+  it("returns null when the +X neighbour is missing", () => {
+    const blocks = makeBlocks([
+      { pos: NEG_POS, type: "XZZ" },
+      FB_X_PIPE,
+    ]);
+    expect(validFBPipeVariantsXZZXAxis(FB_X_PIPE, blocks)).toBeNull();
+  });
+
+  it("returns null when an X-axis neighbour is a non-XZZ cube", () => {
+    const blocks = makeBlocks([
+      { pos: NEG_POS, type: "XZZ" },
+      FB_X_PIPE,
+      { pos: POS_POS, type: "ZXZ" },
+    ]);
+    expect(validFBPipeVariantsXZZXAxis(FB_X_PIPE, blocks)).toBeNull();
+  });
+
+  it("returns null when an X-axis neighbour is a Y block", () => {
+    const blocks = makeBlocks([
+      { pos: NEG_POS, type: "XZZ" },
+      FB_X_PIPE,
+      { pos: POS_POS, type: "Y" },
+    ]);
+    expect(validFBPipeVariantsXZZXAxis(FB_X_PIPE, blocks)).toBeNull();
+  });
+
+  it("returns null when the input block is not an FB pipe", () => {
+    const cube: Block = { pos: NEG_POS, type: "XZZ" };
+    const blocks = makeBlocks([cube]);
+    expect(validFBPipeVariantsXZZXAxis(cube, blocks)).toBeNull();
   });
 });

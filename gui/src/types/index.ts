@@ -1469,6 +1469,31 @@ export function hasPipeColorConflict(
 }
 
 /**
+ * v1 hardcoded build rule: returns the (single) valid FB face tuple when the
+ * FB pipe sits between two XZZ cubes along X (offsets −1 and +2). Returns
+ * null in every other configuration (different openAxis, missing neighbour,
+ * non-cube neighbour, non-XZZ cube). Future passes will generalise.
+ *
+ * The single valid variant is `["Z","Z","Z","Z"]` because XZZ has Z on both
+ * its Y and Z axes, so every wall of an X-open pipe must be solid Z on both
+ * sides of the defect.
+ */
+export function validFBPipeVariantsXZZXAxis(
+  block: Block,
+  blocks: BlocksLookup,
+): ReadonlyArray<readonly [FaceConfig, FaceConfig, FaceConfig, FaceConfig]> | null {
+  const t = block.type;
+  if (!isFreeBuildPipeSpec(t) || t.openAxis !== 0) return null;
+  const negPos: Position3D = { x: block.pos.x - 1, y: block.pos.y, z: block.pos.z };
+  const posPos: Position3D = { x: block.pos.x + 2, y: block.pos.y, z: block.pos.z };
+  const neg = blocks.get(posKey(negPos));
+  const pos = blocks.get(posKey(posPos));
+  if (!neg || !pos) return null;
+  if (neg.type !== "XZZ" || pos.type !== "XZZ") return null;
+  return [["Z", "Z", "Z", "Z"]];
+}
+
+/**
  * Check whether a cube placement conflicts with adjacent pipe colors.
  * For each of the 3 TQEC axes, checks both possible neighboring pipe positions.
  * For Hadamard pipes, determines which end faces the cube and uses the right colors.
