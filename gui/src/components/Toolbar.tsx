@@ -636,7 +636,7 @@ export function Toolbar({
               onPointerDown={() => {
                 if (mode !== "edit") return;
                 if (selectedCubeSlotInfo != null) return;
-                setCubeType(ct as BlockType);
+                setCubeType(ct);
                 setPaletteDragging(true);
               }}
               onClick={() => {
@@ -648,7 +648,7 @@ export function Toolbar({
                   cycleSelectedType(1, { kind: "cube", type: ct });
                   return;
                 }
-                setCubeType(ct as BlockType);
+                setCubeType(ct);
               }}
               style={blockBtnStyle(
                 (mode === "edit" && armedTool === "cube" && cubeType === ct) ||

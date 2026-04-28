@@ -118,7 +118,7 @@ export const FB_PRESETS: ReadonlyArray<FBPreset> = [
   },
   {
     id: "half-zx",
-    label: "Z→X½",
+    label: "Z→X½ⱽ",
     spec: {
       kind: "fb-pipe",
       openAxis: 2,
@@ -130,7 +130,7 @@ export const FB_PRESETS: ReadonlyArray<FBPreset> = [
   },
   {
     id: "half-xz",
-    label: "X→Z½",
+    label: "X→Z½ⱽ",
     spec: {
       kind: "fb-pipe",
       openAxis: 2,
@@ -138,6 +138,30 @@ export const FB_PRESETS: ReadonlyArray<FBPreset> = [
       baseAtEnd: "Z",
       defectPositions: [0.5],
       swapAxes: "first",
+    },
+  },
+  {
+    id: "half-zx-h",
+    label: "Z→X½ʰ",
+    spec: {
+      kind: "fb-pipe",
+      openAxis: 2,
+      baseAtStart: "Z",
+      baseAtEnd: "X",
+      defectPositions: [0.5],
+      swapAxes: "second",
+    },
+  },
+  {
+    id: "half-xz-h",
+    label: "X→Z½ʰ",
+    spec: {
+      kind: "fb-pipe",
+      openAxis: 2,
+      baseAtStart: "X",
+      baseAtEnd: "Z",
+      defectPositions: [0.5],
+      swapAxes: "second",
     },
   },
 ];
@@ -149,13 +173,13 @@ export const FB_PRESETS: ReadonlyArray<FBPreset> = [
  */
 export type Placeable =
   | { kind: "port" }
-  | { kind: "cube"; cubeType: BlockType }
+  | { kind: "cube"; cubeType: CubeType | "Y" }
   | { kind: "pipe"; variant: PipeVariant };
 
 export const PLACEABLE_ORDER: ReadonlyArray<Placeable> = [
   { kind: "port" },
-  ...CUBE_TYPES.map((t) => ({ kind: "cube" as const, cubeType: t as BlockType })),
-  { kind: "cube" as const, cubeType: "Y" as BlockType },
+  ...CUBE_TYPES.map((t) => ({ kind: "cube" as const, cubeType: t })),
+  { kind: "cube" as const, cubeType: "Y" as const },
   ...PIPE_VARIANTS.map((v) => ({ kind: "pipe" as const, variant: v })),
 ];
 
@@ -165,7 +189,7 @@ export const PLACEABLE_ORDER: ReadonlyArray<Placeable> = [
  */
 export function currentPlaceableIndex(
   armedTool: "pointer" | "cube" | "pipe" | "port" | "paste",
-  cubeType: BlockType,
+  cubeType: CubeType | "Y",
   pipeVariant: PipeVariant | null,
 ): number {
   if (armedTool === "pointer" || armedTool === "paste") return -1;

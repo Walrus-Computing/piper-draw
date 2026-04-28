@@ -53,11 +53,6 @@ export type ArmedTool = "pointer" | "cube" | "pipe" | "port" | "paste";
 
 const MAX_HISTORY = 100;
 
-/** Canonical X-open PipeType for each variant, used as cubeType fallback. */
-const PIPE_VARIANT_CANONICAL: Record<PipeVariant, BlockType> = {
-  ZX: "OZX", XZ: "OXZ", ZXH: "OZXH", XZH: "OXZH",
-};
-
 // ---------------------------------------------------------------------------
 // Command-based undo — stores the operation, not a full state snapshot.
 // Add/remove commands are O(1) memory; clear saves the full map (rare).
@@ -143,7 +138,7 @@ interface BlockStore {
    * Drag / Drop mode, regardless of the currently armed tool.
    */
   xHeld: boolean;
-  cubeType: BlockType;
+  cubeType: CubeType | "Y";
   pipeVariant: PipeVariant | null;
   /**
    * Currently selected free-build pipe preset. When non-null, placement
@@ -228,7 +223,7 @@ interface BlockStore {
   setMode: (mode: Mode) => void;
   setArmedTool: (tool: ArmedTool) => void;
   setXHeld: (held: boolean) => void;
-  setCubeType: (cubeType: BlockType) => void;
+  setCubeType: (cubeType: CubeType | "Y") => void;
   setPipeVariant: (variant: PipeVariant) => void;
   setFBPreset: (preset: FBPreset | null) => void;
   setPlacePort: (on: boolean) => void;
@@ -792,7 +787,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   }),
   setXHeld: (held) => set({ xHeld: held, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false }),
   setCubeType: (cubeType) => set({ cubeType, armedTool: "cube", pipeVariant: null, fbPreset: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
-  setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], armedTool: "pipe", fbPreset: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
+  setPipeVariant: (variant) => set({ pipeVariant: variant, armedTool: "pipe", fbPreset: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
   setFBPreset: (preset) => set({
     fbPreset: preset,
     pipeVariant: null,

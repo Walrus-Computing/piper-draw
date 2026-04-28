@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { useBlockStore } from "./blockStore";
 import type { Block } from "../types";
-import { buildSpatialIndex } from "../types";
+import { buildSpatialIndex, FB_PRESETS } from "../types";
 
 function reset() {
   useBlockStore.setState({
@@ -13,6 +13,7 @@ function reset() {
     mode: "edit",
     cubeType: "XZZ",
     pipeVariant: null,
+    fbPreset: null,
     armedTool: "cube",
     xHeld: false,
     portWarning: null,
@@ -583,6 +584,31 @@ describe("blockStore", () => {
       useBlockStore.getState().setPlacePort(true);
       useBlockStore.getState().setPlacePort(false);
       expect(useBlockStore.getState().armedTool).toBe("pointer");
+    });
+  });
+
+  // cubeType used to be silently rewritten to a PipeType by setPipeVariant
+  // and left untouched by setFBPreset. That asymmetry caused the FB-pipe
+  // snap-to-cube bug: when cubeType was a real CubeType while an FB preset
+  // was armed, the cube-replace branch in BlockInstances fired against the
+  // hovered cube position. The fix is for cubeType to be owned exclusively
+  // by the cube tool and persist across pipe-mode arming.
+  describe("cubeType ownership", () => {
+    it("setPipeVariant does NOT overwrite cubeType (FB snap regression)", () => {
+      useBlockStore.getState().setCubeType("ZXZ");
+      useBlockStore.getState().setPipeVariant("ZX");
+      expect(useBlockStore.getState().cubeType).toBe("ZXZ");
+      expect(useBlockStore.getState().armedTool).toBe("pipe");
+      expect(useBlockStore.getState().pipeVariant).toBe("ZX");
+    });
+
+    it("setFBPreset does NOT overwrite cubeType", () => {
+      useBlockStore.getState().setCubeType("ZXZ");
+      const swapZx = FB_PRESETS.find((p) => p.id === "swap-zx")!;
+      useBlockStore.getState().setFBPreset(swapZx);
+      expect(useBlockStore.getState().cubeType).toBe("ZXZ");
+      expect(useBlockStore.getState().armedTool).toBe("pipe");
+      expect(useBlockStore.getState().fbPreset?.id).toBe("swap-zx");
     });
   });
 

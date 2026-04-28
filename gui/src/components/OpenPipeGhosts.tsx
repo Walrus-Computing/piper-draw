@@ -15,7 +15,7 @@ import {
   getAdjacentPos,
   getAllPortPositions,
 } from "../types";
-import { resolveFBSpecFromFace, resolvePipeTypeFromFace } from "./BlockInstances";
+import { resolveFBSpecFromFace, resolvePipeTypeFromFace } from "./BlockInstances.logic";
 import type { Position3D, BlockType, CubeType } from "../types";
 
 // Sentinel cube type for sizing/face-normal calculations on a port (which has

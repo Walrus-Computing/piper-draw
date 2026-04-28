@@ -23,7 +23,7 @@ import {
   FB_PRESETS,
 } from "./index";
 import type { Block, BlockType, FBPreset, FreeBuildPipeSpec, Position3D } from "./index";
-import { resolveFBSpecFromFace, resolvePipeTypeFromFace } from "../components/BlockInstances";
+import { resolveFBSpecFromFace, resolvePipeTypeFromFace } from "../components/BlockInstances.logic";
 
 const Z_OPEN_SPEC: FreeBuildPipeSpec = {
   kind: "fb-pipe",
@@ -242,6 +242,19 @@ describe("FB_PRESETS", () => {
     expect(halfZx!.spec.baseAtEnd).toBe("X");
     expect(halfXz!.spec.baseAtStart).toBe("X");
     expect(halfXz!.spec.baseAtEnd).toBe("Z");
+  });
+
+  it("ships the mirror half-swap presets (the 'other' face pair flips)", () => {
+    const halfZxH = FB_PRESETS.find((p) => p.id === "half-zx-h");
+    const halfXzH = FB_PRESETS.find((p) => p.id === "half-xz-h");
+    expect(halfZxH).toBeDefined();
+    expect(halfXzH).toBeDefined();
+    expect(halfZxH!.spec.swapAxes).toBe("second");
+    expect(halfXzH!.spec.swapAxes).toBe("second");
+    expect(halfZxH!.spec.baseAtStart).toBe("Z");
+    expect(halfZxH!.spec.baseAtEnd).toBe("X");
+    expect(halfXzH!.spec.baseAtStart).toBe("X");
+    expect(halfXzH!.spec.baseAtEnd).toBe("Z");
   });
 });
 

@@ -8,23 +8,30 @@ import {
   createBlockGeometry,
   createBlockEdges,
   blockThreeSize,
-  hasBlockOverlap,
-  hasCubeColorConflict,
-  hasPipeColorConflict,
-  hasYCubePipeAxisConflict,
-  isValidPipePos,
-  isValidPos,
   isPipeType,
   isFreeBuildPipeSpec,
-  pipeAxisFromPos,
-  resolvePipeType,
-  getAdjacentPos,
-  posKey,
   blockTypeCacheKey,
-  VARIANT_AXIS_MAP,
+  posKey,
 } from "../types";
-import type { BlockType, CubeType, Block, FaceMask, Position3D, PipeVariant, FBPreset, FreeBuildPipeSpec } from "../types";
+import type { Block, BlockType, FaceMask } from "../types";
+import {
+  decidePlaceModeClick,
+  decidePlaceModeHover,
+  type PlaceModeState,
+} from "./BlockInstances.logic";
 import { posInActiveSlice } from "../utils/isoView";
+
+function snapshotPlaceMode(store: ReturnType<typeof useBlockStore.getState>): PlaceModeState {
+  return {
+    armedTool: store.armedTool,
+    cubeType: store.cubeType,
+    pipeVariant: store.pipeVariant,
+    fbPreset: store.fbPreset,
+    freeBuild: store.freeBuild,
+    blocks: store.blocks,
+    spatialIndex: store.spatialIndex,
+  };
+}
 
 const DIMMED_OPACITY = 0.18;
 const DIMMED_EDGE_OPACITY = 0.25;
@@ -45,45 +52,6 @@ const dimmedEdgeLineMaterial = new THREE.LineBasicMaterial({
   opacity: DIMMED_EDGE_OPACITY,
   depthWrite: false,
 });
-
-// eslint-disable-next-line react-refresh/only-export-components
-export function resolvePipeTypeFromFace(
-  srcPos: Position3D,
-  srcType: BlockType,
-  normal: THREE.Vector3,
-  variant: PipeVariant,
-): BlockType | null {
-  for (const candidateType of VARIANT_AXIS_MAP[variant]) {
-    const probe = getAdjacentPos(srcPos, srcType, normal, candidateType);
-    if (!isValidPipePos(probe)) continue;
-    const resolved = resolvePipeType(variant, probe);
-    if (resolved) return resolved;
-  }
-  return null;
-}
-
-// FB analogue of resolvePipeTypeFromFace. Iterates candidate open-axis values
-// to find a face-adjacent slot that lands on a valid pipe position, then sets
-// the spec's openAxis to match the slot's TQEC axis. Mirrors the placement
-// invariant in addBlock — the preset's template openAxis is overridden by
-// pipeAxisFromPos at placement time.
-// eslint-disable-next-line react-refresh/only-export-components
-export function resolveFBSpecFromFace(
-  srcPos: Position3D,
-  srcType: BlockType,
-  normal: THREE.Vector3,
-  preset: FBPreset,
-): { adj: Position3D; spec: FreeBuildPipeSpec } | null {
-  for (const ax of [0, 1, 2] as const) {
-    const candidate: FreeBuildPipeSpec = { ...preset.spec, openAxis: ax };
-    const adj = getAdjacentPos(srcPos, srcType, normal, candidate);
-    if (!isValidPipePos(adj)) continue;
-    const tqecAxis = pipeAxisFromPos(adj);
-    if (tqecAxis === null) continue;
-    return { adj, spec: { ...preset.spec, openAxis: tqecAxis } };
-  }
-  return null;
-}
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function getCachedGeometry(blockType: BlockType, hiddenFaces: FaceMask): THREE.BufferGeometry {
@@ -267,71 +235,13 @@ function TypedInstances({
       // either removes the cube or does nothing (and sets a warning).
       store.setHoveredGridPos(null);
     } else {
-      // Place mode: check if we can replace the hovered block itself
-      const hovered = b[e.instanceId];
-      let replaceType: BlockType = store.cubeType;
-      if (store.pipeVariant) {
-        const resolved = resolvePipeType(store.pipeVariant, hovered.pos);
-        if (resolved) replaceType = resolved;
-      }
-      if (isValidPos(hovered.pos, replaceType) && replaceType !== hovered.type) {
-        const hovKey = posKey(hovered.pos);
-        if (hasBlockOverlap(hovered.pos, replaceType, store.blocks, store.spatialIndex, hovKey)) {
-          store.setHoveredGridPos(hovered.pos, replaceType, true, undefined, true);
-        } else if (!store.freeBuild && isPipeType(replaceType) && hasPipeColorConflict(replaceType, hovered.pos, store.blocks)) {
-          store.setHoveredGridPos(hovered.pos, replaceType, true, "Pipe colors don't match the adjacent cube", true);
-        } else if (!store.freeBuild && !isPipeType(replaceType) && replaceType !== "Y" && hasCubeColorConflict(replaceType as CubeType, hovered.pos, store.blocks)) {
-          store.setHoveredGridPos(hovered.pos, replaceType, true, "Cube colors don't match the adjacent pipe", true);
-        } else if (!store.freeBuild && hasYCubePipeAxisConflict(replaceType, hovered.pos, store.blocks)) {
-          store.setHoveredGridPos(hovered.pos, replaceType, true, "Y cube cannot be next to an X-open or Y-open pipe", true);
-        } else {
-          store.setHoveredGridPos(hovered.pos, replaceType, false, undefined, true);
-        }
-        return;
-      }
-
-      if (!e.face) return;
-
-      // Determine the destination block type for adjacent placement
-      let dstType: BlockType = store.cubeType;
-      if (store.fbPreset) {
-        const r = resolveFBSpecFromFace(hovered.pos, hovered.type, e.face.normal, store.fbPreset);
-        if (!r) {
-          store.setHoveredGridPos(null);
-          return;
-        }
-        dstType = r.spec;
-      } else if (store.pipeVariant) {
-        const resolved = resolvePipeTypeFromFace(hovered.pos, hovered.type, e.face.normal, store.pipeVariant);
-        if (!resolved) {
-          store.setHoveredGridPos(null);
-          return;
-        }
-        dstType = resolved;
-      }
-
-      const adj = getAdjacentPos(hovered.pos, hovered.type, e.face.normal, dstType);
-
-      if (!isValidPos(adj, dstType)) {
+      // Place mode: pure decision logic lives in BlockInstances.logic.ts so
+      // the cube-replace gate and FB/TQEC pipe paths are unit-testable.
+      const intent = decidePlaceModeHover(snapshotPlaceMode(store), b[e.instanceId], e.face?.normal ?? null);
+      if (intent.kind === "clear") {
         store.setHoveredGridPos(null);
-        return;
-      }
-      const adjKey = posKey(adj);
-      const existingKey = store.blocks.has(adjKey) ? adjKey : undefined;
-      const adjReplace = !!(existingKey && store.blocks.get(existingKey)!.type !== dstType);
-      if (hasBlockOverlap(adj, dstType, store.blocks, store.spatialIndex, existingKey)) {
-        store.setHoveredGridPos(adj, dstType, true, undefined, adjReplace);
-      } else if (existingKey && store.blocks.get(existingKey)!.type === dstType) {
-        // Same type — no replacement needed, hide ghost
-        store.setHoveredGridPos(null);
-      } else if (!store.freeBuild && isPipeType(dstType) && hasPipeColorConflict(dstType, adj, store.blocks)) {
-        store.setHoveredGridPos(adj, dstType, true, "Pipe colors don't match the adjacent cube", adjReplace);
-      } else if (!store.freeBuild && !isPipeType(dstType) && dstType !== "Y" && hasCubeColorConflict(dstType as CubeType, adj, store.blocks)) {
-        store.setHoveredGridPos(adj, dstType, true, "Cube colors don't match the adjacent pipe", adjReplace);
-      } else if (!store.freeBuild && hasYCubePipeAxisConflict(dstType, adj, store.blocks)) {
-        store.setHoveredGridPos(adj, dstType, true, "Y cube cannot be next to an X-open or Y-open pipe", adjReplace);
       } else {
-        store.setHoveredGridPos(adj, dstType, false, undefined, adjReplace);
+        store.setHoveredGridPos(intent.pos, intent.type, intent.invalid, intent.reason, intent.replace);
       }
     }
   };
@@ -366,42 +276,14 @@ function TypedInstances({
       store.commitPaste();
       return;
     }
-    {
-      // Port-conversion tool: click on a cube to remove it (leaving a port
-      // if a pipe was attached). Never falls through to pipe-placement.
-      if (armed === "port") {
-        store.convertBlockToPort(b[e.instanceId].pos);
-        return;
-      }
-      // Place mode: try replacing the clicked block if the selected type
-      // is valid at the clicked block's position
-      const clicked = b[e.instanceId];
-      let replaceType: BlockType = store.cubeType;
-      if (store.pipeVariant) {
-        const resolved = resolvePipeType(store.pipeVariant, clicked.pos);
-        if (resolved) replaceType = resolved;
-      }
-      if (isValidPos(clicked.pos, replaceType) && replaceType !== clicked.type) {
-        store.addBlock(clicked.pos);
-        return;
-      }
-
-      if (!e.face) return;
-
-      let dstType: BlockType = store.cubeType;
-      if (store.fbPreset) {
-        const r = resolveFBSpecFromFace(clicked.pos, clicked.type, e.face.normal, store.fbPreset);
-        if (!r) return;
-        dstType = r.spec;
-      } else if (store.pipeVariant) {
-        const resolved = resolvePipeTypeFromFace(clicked.pos, clicked.type, e.face.normal, store.pipeVariant);
-        if (!resolved) return;
-        dstType = resolved;
-      }
-
-      const adj = getAdjacentPos(clicked.pos, clicked.type, e.face.normal, dstType);
-      store.addBlock(adj);
+    // Port-conversion tool: click on a cube to remove it (leaving a port
+    // if a pipe was attached). Never falls through to pipe-placement.
+    if (armed === "port") {
+      store.convertBlockToPort(b[e.instanceId].pos);
+      return;
     }
+    const action = decidePlaceModeClick(snapshotPlaceMode(store), b[e.instanceId], e.face?.normal ?? null);
+    if (action.kind === "place-at") store.addBlock(action.pos);
   };
 
   if (blocks.length === 0) return null;
