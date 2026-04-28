@@ -38,9 +38,11 @@ import {
   countAttachedPipes,
   getAttachedPipeKeys,
   CUBE_TYPES,
+  FACE_CONFIGS,
   PIPE_VARIANTS,
   VARIANT_AXIS_MAP,
   PIPE_TYPE_TO_VARIANT,
+  validFBPipeVariantsXZZXAxis,
   toggleHadamard,
   swapPipeVariant,
   traversedPipeKey,
@@ -846,6 +848,42 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     if (state.selectedKeys.size === 1 && state.selectedPortPositions.size === 0) {
       const pipeKey = state.selectedKeys.values().next().value as string;
       const pipeBlock = state.blocks.get(pipeKey);
+      if (pipeBlock && isFreeBuildPipeSpec(pipeBlock.type)) {
+        if (target !== undefined) return;
+        set((s) => {
+          const fb = pipeBlock.type as FreeBuildPipeSpec;
+          const valid = validFBPipeVariantsXZZXAxis(pipeBlock, s.blocks);
+          const curKey = fb.faces.join("|");
+          let cycle: Array<[FaceConfig, FaceConfig, FaceConfig, FaceConfig]>;
+          if (valid) {
+            cycle = valid.map((v) => [...v] as [FaceConfig, FaceConfig, FaceConfig, FaceConfig]);
+            if (!cycle.some((v) => v.join("|") === curKey)) cycle.unshift([...fb.faces]);
+          } else {
+            cycle = [];
+            for (const f0 of FACE_CONFIGS) for (const f1 of FACE_CONFIGS)
+              for (const f2 of FACE_CONFIGS) for (const f3 of FACE_CONFIGS)
+                cycle.push([f0, f1, f2, f3]);
+          }
+          if (cycle.length <= 1) return s;
+          const curIdx = cycle.findIndex((v) => v.join("|") === curKey);
+          if (curIdx === -1) return s;
+          const nextIdx = (((curIdx + dir) % cycle.length) + cycle.length) % cycle.length;
+          const nextFaces = cycle[nextIdx];
+          if (nextFaces.join("|") === curKey) return s;
+          const newType: FreeBuildPipeSpec = { ...fb, faces: nextFaces };
+          const newBlock: Block = { pos: pipeBlock.pos, type: newType };
+          const removed = doRemove(s.blocks, s.spatialIndex, s.hiddenFaces, pipeKey, pipeBlock);
+          const added = doAdd(removed.blocks, s.spatialIndex, removed.hiddenFaces, pipeKey, newBlock);
+          const cmd: UndoCommand = { kind: "replace", key: pipeKey, oldBlock: pipeBlock, newBlock };
+          return {
+            blocks: added.blocks,
+            hiddenFaces: added.hiddenFaces,
+            history: [...s.history, cmd].slice(-MAX_HISTORY),
+            future: [],
+          };
+        });
+        return;
+      }
       if (pipeBlock && isPipeType(pipeBlock.type)) {
         set((s) => {
           const oldType = pipeBlock.type as PipeType;
