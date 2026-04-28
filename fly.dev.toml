@@ -5,6 +5,8 @@ app = "piper-draw-dev"
 primary_region = "ams"
 
 [build]
+  [build.args]
+    VITE_UMAMI_WEBSITE_ID = "0d67b9da-dff1-45c2-844d-06b45ff00ff8"
 
 [http_service]
   internal_port = 8000
