@@ -1,0 +1,35 @@
+name: Dev Deploy
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency: deploy-dev-group
+    steps:
+      - uses: actions/checkout@v6
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only --config fly.dev.toml
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_DEV }}
+
+  smoke-test:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe dev for HTTP 200
+        run: |
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -sS -o /dev/null -w "%{http_code}" https://piper-draw-dev.fly.dev/)
+            if [ "$code" = "200" ]; then
+              echo "OK: got 200"
+              exit 0
+            fi
+            echo "attempt $i: got $code, retrying in 10s..."
+            sleep 10
+          done
+          echo "FAIL: dev never returned 200"
+          exit 1
