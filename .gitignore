@@ -22,3 +22,6 @@ gui/dist/
 
 # Security reports
 .gstack/
+
+# Claude Code harness state
+.claude/scheduled_tasks.lock
