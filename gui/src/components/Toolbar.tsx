@@ -747,40 +747,35 @@ export function Toolbar({
         </div>
       </div>
 
-      {/* Free Build group — only visible when freeBuild is enabled.
-         Single generic Free Pipe; the per-face variant is picked from the
-         side panel that opens after placement. */}
-      {freeBuild && (
-        <>
-          <div style={{ width: 1, background: "#ddd" }} />
-          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-            <span style={groupLabelStyle}>Free Build</span>
-            <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
-              {FB_PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  onPointerDown={() => {
-                    if (mode !== "edit") return;
-                    setFBPreset(preset);
-                    setPaletteDragging(true);
-                  }}
-                  onClick={() => {
-                    setFBPreset(preset);
-                  }}
-                  title="Free-build pipe — drop to place, then pick a color/swap variant from the side panel"
-                  style={blockBtnStyle(
-                    mode === "edit" && armedTool === "pipe" && fbPreset?.id === preset.id,
-                    false,
-                  )}
-                >
-                  {preset.label}
-                  <div style={previewWrapStyle}>{previewImg(preset.id)}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
+      {/* Free Build group — single generic Free Pipe; the per-face variant
+         is picked from the side panel that opens after placement. */}
+      <div style={{ width: 1, background: "#ddd" }} />
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+        <span style={groupLabelStyle}>Free Build</span>
+        <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
+          {FB_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              onPointerDown={() => {
+                if (mode !== "edit") return;
+                setFBPreset(preset);
+                setPaletteDragging(true);
+              }}
+              onClick={() => {
+                setFBPreset(preset);
+              }}
+              title="Free-build pipe — drop to place, then pick a color/swap variant from the side panel"
+              style={blockBtnStyle(
+                mode === "edit" && armedTool === "pipe" && fbPreset?.id === preset.id,
+                false,
+              )}
+            >
+              {preset.label}
+              <div style={previewWrapStyle}>{previewImg(preset.id)}</div>
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Position display */}
       <div style={{ width: 1, background: "#ddd" }} />
@@ -1674,7 +1669,7 @@ function SettingsMenu({
             <span>
               Ignore color rules
               <div style={{ fontSize: 10, color: "#888", whiteSpace: "nowrap" }}>
-                (“Free Build” — skips color-matching checks)
+                (relaxes cube/pipe color-matching checks)
               </div>
             </span>
           </label>

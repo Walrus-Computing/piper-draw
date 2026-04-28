@@ -42,7 +42,7 @@ import {
   PIPE_VARIANTS,
   VARIANT_AXIS_MAP,
   PIPE_TYPE_TO_VARIANT,
-  validFBPipeVariantsXZZXAxis,
+  validFBPipeVariantsForCubePair,
   toggleHadamard,
   swapPipeVariant,
   traversedPipeKey,
@@ -852,11 +852,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (target !== undefined) return;
         set((s) => {
           const fb = pipeBlock.type as FreeBuildPipeSpec;
-          const valid = validFBPipeVariantsXZZXAxis(pipeBlock, s.blocks);
+          const valid = validFBPipeVariantsForCubePair(pipeBlock, s.blocks);
           const curKey = fb.faces.join("|");
           let cycle: Array<[FaceConfig, FaceConfig, FaceConfig, FaceConfig]>;
           if (valid) {
-            cycle = valid.map((v) => [...v] as [FaceConfig, FaceConfig, FaceConfig, FaceConfig]);
+            cycle = valid.faces.map((v) => [...v] as [FaceConfig, FaceConfig, FaceConfig, FaceConfig]);
             if (!cycle.some((v) => v.join("|") === curKey)) cycle.unshift([...fb.faces]);
           } else {
             cycle = [];
@@ -1209,8 +1209,6 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         return state;
       }
       if (hasBlockOverlap(pos, blockType, state.blocks, state.spatialIndex, existing ? key : undefined)) return state;
-      // Free-build pieces must only be placed when Free Build is on.
-      if (isFreeBuildPipeSpec(blockType) && !store.freeBuild) return state;
       if (!store.freeBuild) {
         if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, state.blocks)) return state;
         if (!isPipeType(blockType) && !isFreeBuildPipeSpec(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
@@ -2421,7 +2419,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
             if (hasPipeColorConflict(type, pos, proposed)) {
               return { hoveredInvalidReason: flipBlocked };
             }
-          } else if (type !== "Y") {
+          } else if (!isFreeBuildPipeSpec(type) && type !== "Y") {
             if (hasCubeColorConflict(type as CubeType, pos, proposed)) {
               return { hoveredInvalidReason: flipBlocked };
             }
@@ -2688,7 +2686,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const t = e.newBlock.type;
           const fails =
             (isPipeType(t) && hasPipeColorConflict(t, e.newBlock.pos, blocks)) ||
-            (!isPipeType(t) && t !== "Y" && hasCubeColorConflict(t as CubeType, e.newBlock.pos, blocks)) ||
+            (!isPipeType(t) && !isFreeBuildPipeSpec(t) && t !== "Y" && hasCubeColorConflict(t as CubeType, e.newBlock.pos, blocks)) ||
             hasYCubePipeAxisConflict(t, e.newBlock.pos, blocks);
           if (fails) {
             for (const r of entries) {
