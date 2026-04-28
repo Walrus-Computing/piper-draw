@@ -211,6 +211,13 @@ export type PortIO = "in" | "out";
 export interface PortMeta {
   label: string;
   io: PortIO;
+  /**
+   * User-defined display order, used by the Ports table and Stabilizer Flows
+   * panel to determine the qubit-register position of each port. Lower ranks
+   * sort first; ports without a rank fall back to spatial sort and appear
+   * after ranked ports.
+   */
+  rank?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -1771,6 +1778,28 @@ export function getAllPortPositions(
 
   result.sort((a, b) => a.x - b.x || a.y - b.y || a.z - b.z);
   return result;
+}
+
+/**
+ * Like `getAllPortPositions`, but ordered by user-defined `PortMeta.rank`
+ * with spatial sort as fallback for any port without a rank. This is the
+ * order shown in the Ports table and used to position qubits in the
+ * Stabilizer Flows table when interpreted as a circuit.
+ */
+export function getOrderedPortPositions(
+  blocks: Map<string, Block>,
+  explicitPorts: Set<string>,
+  portMeta: Map<string, PortMeta>,
+): Position3D[] {
+  const positions = getAllPortPositions(blocks, explicitPorts);
+  return positions.slice().sort((a, b) => {
+    const ra = portMeta.get(posKey(a))?.rank;
+    const rb = portMeta.get(posKey(b))?.rank;
+    const ka = ra ?? Number.POSITIVE_INFINITY;
+    const kb = rb ?? Number.POSITIVE_INFINITY;
+    if (ka !== kb) return ka - kb;
+    return a.x - b.x || a.y - b.y || a.z - b.z;
+  });
 }
 
 /**

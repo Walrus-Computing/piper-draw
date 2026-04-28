@@ -221,19 +221,52 @@ export function FlowsPanel({
     if (stale && flowVizMode) setFlowVizMode(false);
   }, [stale, flowVizMode, setFlowVizMode]);
 
+  // Order port labels by user-defined rank (PortMeta.rank). Labels without a
+  // rank fall back to the server's order. This drives the column order in the
+  // generator and membership tables, i.e. the qubit-register position when
+  // the diagram is interpreted as a circuit.
+  const labelRank = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const meta of portMeta.values()) {
+      if (meta.rank !== undefined) m.set(meta.label, meta.rank);
+    }
+    return m;
+  }, [portMeta]);
+  const sortByRank = useCallback(
+    (labels: string[]): string[] => {
+      const indexed = labels.map((l, i) => ({ l, i }));
+      indexed.sort((a, b) => {
+        const ra = labelRank.get(a.l) ?? Number.POSITIVE_INFINITY;
+        const rb = labelRank.get(b.l) ?? Number.POSITIVE_INFINITY;
+        if (ra !== rb) return ra - rb;
+        return a.i - b.i;
+      });
+      return indexed.map(({ l }) => l);
+    },
+    [labelRank],
+  );
+  const orderedInputs = useMemo(
+    () => (result?.ok ? sortByRank(result.inputs) : []),
+    [result, sortByRank],
+  );
+  const orderedOutputs = useMemo(
+    () => (result?.ok ? sortByRank(result.outputs) : []),
+    [result, sortByRank],
+  );
+
   const generatorSpan = useMemo(() => {
     if (!result || !result.ok) return null;
-    const labels = [...result.inputs, ...result.outputs];
+    const labels = [...orderedInputs, ...orderedOutputs];
     const vecs = result.flows.map((flow) => {
       const pauliStr = labels
         .map((l, i) =>
-          i < result.inputs.length ? flow.inputs[l] ?? "I" : flow.outputs[l] ?? "I",
+          i < orderedInputs.length ? flow.inputs[l] ?? "I" : flow.outputs[l] ?? "I",
         )
         .join("");
       return pauliToSymplectic(pauliStr);
     });
-    return { labels, vecs, inputCount: result.inputs.length };
-  }, [result]);
+    return { labels, vecs, inputCount: orderedInputs.length };
+  }, [result, orderedInputs, orderedOutputs]);
 
   const addQuery = useCallback(() => {
     if (!generatorSpan) return;
@@ -475,7 +508,7 @@ export function FlowsPanel({
               <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
                   <tr>
-                    {result.inputs.map((label) => (
+                    {orderedInputs.map((label) => (
                       <th
                         key={`in-${label}`}
                         style={{
@@ -489,7 +522,7 @@ export function FlowsPanel({
                       </th>
                     ))}
                     <th style={{ padding: "0 4px", borderBottom: "1px solid #ddd" }}>→</th>
-                    {result.outputs.map((label) => (
+                    {orderedOutputs.map((label) => (
                       <th
                         key={`out-${label}`}
                         style={{
@@ -521,7 +554,7 @@ export function FlowsPanel({
                           outline: isActive ? "2px solid #4a9eff" : undefined,
                         }}
                       >
-                        {result.inputs.map((label) => (
+                        {orderedInputs.map((label) => (
                           <td
                             key={`in-${label}`}
                             style={{ padding: "3px 6px", textAlign: "center" }}
@@ -530,7 +563,7 @@ export function FlowsPanel({
                           </td>
                         ))}
                         <td style={{ padding: "0 4px", color: "#888" }}>→</td>
-                        {result.outputs.map((label) => (
+                        {orderedOutputs.map((label) => (
                           <td
                             key={`out-${label}`}
                             style={{ padding: "3px 6px", textAlign: "center" }}
@@ -610,7 +643,7 @@ export function FlowsPanel({
                   <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
                     <thead>
                       <tr>
-                        {result.inputs.map((label) => (
+                        {orderedInputs.map((label) => (
                           <th
                             key={`qin-${label}`}
                             style={{
@@ -626,7 +659,7 @@ export function FlowsPanel({
                         <th style={{ padding: "0 4px", borderBottom: "1px solid #ddd" }}>
                           →
                         </th>
-                        {result.outputs.map((label) => (
+                        {orderedOutputs.map((label) => (
                           <th
                             key={`qout-${label}`}
                             style={{
@@ -648,7 +681,7 @@ export function FlowsPanel({
                         const inSpan = isQueryInSpan(q);
                         return (
                           <tr key={q.id}>
-                            {result.inputs.map((label) => (
+                            {orderedInputs.map((label) => (
                               <td
                                 key={`qin-${label}`}
                                 style={{ padding: "3px 6px", textAlign: "center" }}
@@ -660,7 +693,7 @@ export function FlowsPanel({
                               </td>
                             ))}
                             <td style={{ padding: "0 4px", color: "#888" }}>→</td>
-                            {result.outputs.map((label) => (
+                            {orderedOutputs.map((label) => (
                               <td
                                 key={`qout-${label}`}
                                 style={{ padding: "3px 6px", textAlign: "center" }}

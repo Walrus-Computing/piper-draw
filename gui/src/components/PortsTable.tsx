@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
 import { useLocateStore } from "../stores/locateStore";
-import { getAllPortPositions, posKey, tqecToThree, type Position3D } from "../types";
+import { getOrderedPortPositions, posKey, tqecToThree, type Position3D } from "../types";
 import { animateCamera } from "../utils/cameraAnim";
 
 function PortLabelInput({
@@ -72,6 +72,19 @@ function LocateIcon() {
   );
 }
 
+function GripIcon() {
+  return (
+    <svg width="10" height="14" viewBox="0 0 10 14" aria-hidden="true">
+      <circle cx="3" cy="3" r="1.1" fill="currentColor" />
+      <circle cx="7" cy="3" r="1.1" fill="currentColor" />
+      <circle cx="3" cy="7" r="1.1" fill="currentColor" />
+      <circle cx="7" cy="7" r="1.1" fill="currentColor" />
+      <circle cx="3" cy="11" r="1.1" fill="currentColor" />
+      <circle cx="7" cy="11" r="1.1" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function PortsTable({
   controlsRef,
 }: {
@@ -83,9 +96,13 @@ export function PortsTable({
   const portPositions = useBlockStore((s) => s.portPositions);
   const setPortLabel = useBlockStore((s) => s.setPortLabel);
   const setPortIO = useBlockStore((s) => s.setPortIO);
+  const reorderPort = useBlockStore((s) => s.reorderPort);
+
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
 
   const portList = useMemo(() => {
-    const positions = getAllPortPositions(blocks, portPositions);
+    const positions = getOrderedPortPositions(blocks, portPositions, portMeta);
     return positions.map((pos) => {
       const key = posKey(pos);
       const meta = portMeta.get(key);
@@ -119,56 +136,105 @@ export function PortsTable({
           No open ports. Add open pipes or place port markers.
         </div>
       )}
-      {portList.map(({ pos, key, meta }) => (
-        <div
-          key={key}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            marginBottom: 4,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => handleLocate(pos)}
-            aria-label="Locate port"
-            title="Locate port"
+      {portList.map(({ pos, key, meta }, index) => {
+        const isDragging = dragIndex === index;
+        const showDropAbove =
+          dragIndex !== null && overIndex === index && index < dragIndex;
+        const showDropBelow =
+          dragIndex !== null && overIndex === index && index > dragIndex;
+        return (
+          <div
+            key={key}
+            onDragOver={(e) => {
+              if (dragIndex === null) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              if (overIndex !== index) setOverIndex(index);
+            }}
+            onDrop={(e) => {
+              if (dragIndex === null) return;
+              e.preventDefault();
+              if (dragIndex !== index) reorderPort(dragIndex, index);
+              setDragIndex(null);
+              setOverIndex(null);
+            }}
             style={{
-              background: "none",
-              border: "none",
-              padding: 2,
-              cursor: "pointer",
-              color: "#666",
-              display: "inline-flex",
+              display: "flex",
               alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
+              gap: 6,
+              marginBottom: 4,
+              padding: "2px 0",
+              opacity: isDragging ? 0.4 : 1,
+              borderTop: showDropAbove ? "2px solid #4a9eff" : "2px solid transparent",
+              borderBottom: showDropBelow ? "2px solid #4a9eff" : "2px solid transparent",
             }}
           >
-            <LocateIcon />
-          </button>
-          <PortLabelInput
-            pos={pos}
-            label={meta?.label ?? ""}
-            onCommit={setPortLabel}
-          />
-          <select
-            value={meta?.io ?? "in"}
-            onChange={(e) => setPortIO(pos, e.target.value as "in" | "out")}
-            style={{ fontSize: 12, padding: "2px 4px" }}
-          >
-            <option value="in">in</option>
-            <option value="out">out</option>
-          </select>
-          <span
-            title={`(${pos.x / 3}, ${pos.y / 3}, ${pos.z / 3})`}
-            style={{ color: "#aaa", fontFamily: "monospace", fontSize: 10 }}
-          >
-            {pos.x / 3},{pos.y / 3},{pos.z / 3}
-          </span>
-        </div>
-      ))}
+            <span
+              draggable
+              onDragStart={(e) => {
+                setDragIndex(index);
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", String(index));
+              }}
+              onDragEnd={() => {
+                setDragIndex(null);
+                setOverIndex(null);
+              }}
+              aria-label="Drag to reorder"
+              title="Drag to reorder"
+              style={{
+                cursor: "grab",
+                color: "#aaa",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                padding: "0 2px",
+              }}
+            >
+              <GripIcon />
+            </span>
+            <button
+              type="button"
+              onClick={() => handleLocate(pos)}
+              aria-label="Locate port"
+              title="Locate port"
+              style={{
+                background: "none",
+                border: "none",
+                padding: 2,
+                cursor: "pointer",
+                color: "#666",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <LocateIcon />
+            </button>
+            <PortLabelInput
+              pos={pos}
+              label={meta?.label ?? ""}
+              onCommit={setPortLabel}
+            />
+            <select
+              value={meta?.io ?? "in"}
+              onChange={(e) => setPortIO(pos, e.target.value as "in" | "out")}
+              style={{ fontSize: 12, padding: "2px 4px" }}
+            >
+              <option value="in">in</option>
+              <option value="out">out</option>
+            </select>
+            <span
+              title={`(${pos.x / 3}, ${pos.y / 3}, ${pos.z / 3})`}
+              style={{ color: "#aaa", fontFamily: "monospace", fontSize: 10 }}
+            >
+              {pos.x / 3},{pos.y / 3},{pos.z / 3}
+            </span>
+          </div>
+        );
+      })}
     </section>
   );
 }

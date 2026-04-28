@@ -3,7 +3,10 @@
 ## Branching strategy
 
 - **`dev`** is the integration branch. All pull requests should target `dev`.
-- **`main`** is the stable/release branch. Changes are merged from `dev` into `main` for releases.
+  Merges to `dev` auto-deploy to <https://piper-draw-dev.walruscomputing.com>.
+- **`main`** is the stable/release branch. Changes are merged from `dev` into
+  `main` for releases. Merges to `main` auto-deploy to
+  <https://piper-draw.walruscomputing.com>.
 
 ## How to contribute
 

@@ -9,6 +9,7 @@ import type {
 import {
   posKey,
   getAllPortPositions,
+  getOrderedPortPositions,
   defaultPortIO,
   hasBlockOverlap,
   hasCubeColorConflict,
@@ -299,6 +300,12 @@ interface BlockStore {
   ensurePortLabels: () => void;
   setPortLabel: (pos: Position3D, label: string) => void;
   setPortIO: (pos: Position3D, io: PortIO) => void;
+  /**
+   * Reorder ports by moving the port at `fromIndex` (in the current
+   * user-ordered port list) to `toIndex`, then rewriting all ranks
+   * 0..N-1 so the array indices match the stored ranks.
+   */
+  reorderPort: (fromIndex: number, toIndex: number) => void;
   setFlowsPanelOpen: (open: boolean) => void;
   toggleFlowsPanel: () => void;
 
@@ -3488,7 +3495,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       for (const k of stale) next.delete(k);
 
       const used = new Set<string>();
-      for (const meta of next.values()) used.add(meta.label);
+      let maxRank = -1;
+      for (const meta of next.values()) {
+        used.add(meta.label);
+        if (meta.rank !== undefined && meta.rank > maxRank) maxRank = meta.rank;
+      }
       let nextId = 1;
       const allocLabel = (): string => {
         while (used.has(`P${nextId}`)) nextId++;
@@ -3498,9 +3509,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       };
 
       for (const pos of missing) {
+        maxRank += 1;
         next.set(posKey(pos), {
           label: allocLabel(),
           io: defaultPortIO(pos, state.blocks),
+          rank: maxRank,
         });
       }
       return { portMeta: next };
@@ -3542,6 +3555,34 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       if (!existing || existing.io === io) return state;
       const next = new Map(state.portMeta);
       next.set(key, { ...existing, io });
+      return { portMeta: next };
+    }),
+
+  reorderPort: (fromIndex, toIndex) =>
+    set((state) => {
+      const ordered = getOrderedPortPositions(
+        state.blocks,
+        state.portPositions,
+        state.portMeta,
+      );
+      if (
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= ordered.length ||
+        toIndex >= ordered.length
+      ) {
+        return state;
+      }
+      const keys = ordered.map(posKey);
+      const [moved] = keys.splice(fromIndex, 1);
+      keys.splice(toIndex, 0, moved);
+
+      const next = new Map(state.portMeta);
+      keys.forEach((k, i) => {
+        const m = next.get(k);
+        if (m && m.rank !== i) next.set(k, { ...m, rank: i });
+      });
       return { portMeta: next };
     }),
 

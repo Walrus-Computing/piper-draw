@@ -1389,6 +1389,62 @@ describe("blockStore", () => {
     });
   });
 
+  describe("reorderPort", () => {
+    function seedFourPorts() {
+      useBlockStore.setState({
+        blocks: new Map(),
+        portPositions: new Set(["0,0,0", "3,0,0", "6,0,0", "9,0,0"]),
+        portMeta: new Map(),
+      });
+      useBlockStore.getState().ensurePortLabels();
+    }
+
+    function ranksByX(): Record<number, number | undefined> {
+      const out: Record<number, number | undefined> = {};
+      for (const [k, m] of useBlockStore.getState().portMeta) {
+        const x = Number(k.split(",")[0]);
+        out[x] = m.rank;
+      }
+      return out;
+    }
+
+    it("ensurePortLabels assigns sequential ranks 0..N-1 in spatial order", () => {
+      seedFourPorts();
+      // Spatial sort is by x ascending → ranks should match the x order.
+      expect(ranksByX()).toEqual({ 0: 0, 3: 1, 6: 2, 9: 3 });
+    });
+
+    it("moves a port forward and rewrites all ranks to 0..N-1", () => {
+      seedFourPorts();
+      // Move the port at index 3 (x=9) to index 0.
+      useBlockStore.getState().reorderPort(3, 0);
+      expect(ranksByX()).toEqual({ 9: 0, 0: 1, 3: 2, 6: 3 });
+    });
+
+    it("moves a port backward and rewrites all ranks", () => {
+      seedFourPorts();
+      // Move the port at index 0 (x=0) to index 2.
+      useBlockStore.getState().reorderPort(0, 2);
+      expect(ranksByX()).toEqual({ 3: 0, 6: 1, 0: 2, 9: 3 });
+    });
+
+    it("is a no-op when from === to", () => {
+      seedFourPorts();
+      const before = useBlockStore.getState().portMeta;
+      useBlockStore.getState().reorderPort(2, 2);
+      // Object identity preserved (set returned `state` unchanged).
+      expect(useBlockStore.getState().portMeta).toBe(before);
+    });
+
+    it("is a no-op when indices are out of range", () => {
+      seedFourPorts();
+      const before = useBlockStore.getState().portMeta;
+      useBlockStore.getState().reorderPort(-1, 2);
+      useBlockStore.getState().reorderPort(0, 99);
+      expect(useBlockStore.getState().portMeta).toBe(before);
+    });
+  });
+
   describe("copy / paste", () => {
     it("copySelection snapshots selected blocks normalized to origin", () => {
       useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
