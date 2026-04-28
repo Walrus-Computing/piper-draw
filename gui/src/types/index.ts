@@ -42,29 +42,53 @@ export const PIPE_TYPES = ["OZX", "OXZ", "OZXH", "OXZH", "ZOX", "XOZ", "ZOXH", "
 export type PipeType = (typeof PIPE_TYPES)[number];
 
 /**
- * Free-build pipe spec — a non-TQEC pipe parameterized by Y-defect positions.
- * `defectPositions` are normalized 0..1 along the open axis; physical defects
- * sit strictly inside (0,1). One defect at 0.5 = today's color-swap pipe.
- * Two defects = a future 3-color pipe. Zero defects = a future solid pipe.
+ * Per-face state for a free-build pipe wall.
+ *   "X"  = solid X (red) all the way along the open axis
+ *   "Z"  = solid Z (blue)
+ *   "XZ" = swap X→Z at the defect (red below, blue above)
+ *   "ZX" = swap Z→X at the defect (blue below, red above)
+ */
+export type FaceConfig = "X" | "Z" | "XZ" | "ZX";
+export const FACE_CONFIGS: ReadonlyArray<FaceConfig> = ["X", "Z", "XZ", "ZX"];
+
+/** Basis of a face's strip. Below-strip is left of the defect along open axis. */
+export function faceBelowBasis(fc: FaceConfig): "X" | "Z" {
+  return fc === "X" || fc === "XZ" ? "X" : "Z";
+}
+export function faceAboveBasis(fc: FaceConfig): "X" | "Z" {
+  return fc === "X" || fc === "ZX" ? "X" : "Z";
+}
+
+/**
+ * Free-build pipe spec — a non-TQEC pipe with independently-colored walls.
  *
- * `swapAxes` controls which closed-axis wall pairs participate in the basis
- * swap at each defect position. "all" (default) flips both pairs — all 4 walls
- * change color. "first" / "second" flip only one pair (2 opposite faces); the
- * other pair shows its baseAtStart-derived color as a solid throughout.
- * "first" / "second" index the closedAxes array in Three.js axis order.
+ * Each of the 4 closed-axis walls carries its own `FaceConfig`, so the user
+ * can cycle through every visual variant (256 per open axis) from the
+ * variants panel after placement.
  *
- * FB blocks ride the existing Y-defect overlay for boundary visualization
- * (magenta cylinders at each defect position) and are excluded from `.dae`
- * export and TQEC validation.
+ * `faces` index order is **Three.js closed-axis order**:
+ *   [0] = +ca0, [1] = −ca0, [2] = +ca1, [3] = −ca1
+ * where `closedAxes = [0,1,2].filter(a => a !== TQEC_TO_THREE_AXIS[openAxis])`
+ * in ascending order. The geometry and Y-defect overlay both consume this
+ * tuple directly.
+ *
+ * `defectPositions` are normalized 0..1 along the open axis; v1 always uses
+ * `[0.5]` (single midpoint defect). Faces marked `XZ`/`ZX` flip color at the
+ * defect; `X`/`Z` faces stay solid through it.
+ *
+ * FB blocks are excluded from `.dae` export and TQEC validation.
  */
 export interface FreeBuildPipeSpec {
   kind: "fb-pipe";
   openAxis: 0 | 1 | 2;          // TQEC axis (0=x, 1=y, 2=z)
-  baseAtStart: "X" | "Z";       // closed-axis bases at the open-axis START end
-  baseAtEnd: "X" | "Z";         // ...at the END end
   defectPositions: number[];    // 0..1 along the open axis
-  swapAxes?: "all" | "first" | "second"; // which closed-axis pair(s) swap; default "all"
+  faces: [FaceConfig, FaceConfig, FaceConfig, FaceConfig];
 }
+
+/** Default config for the toolbar's generic Free Pipe — solid X (red) tube. */
+export const FB_DEFAULT_FACES: [FaceConfig, FaceConfig, FaceConfig, FaceConfig] = [
+  "X", "X", "X", "X",
+];
 
 export type BlockType = CubeType | "Y" | PipeType | FreeBuildPipeSpec;
 export type FaceMask = number;
@@ -101,67 +125,20 @@ export interface FBPreset {
 }
 
 /**
- * FB presets: color-swap pipes with one Y defect at the midpoint.
- * Full presets swap all 4 walls; half presets swap only one closed-axis pair
- * (the other pair shows its baseAtStart-derived color as a solid).
+ * FB presets: a single generic Free Pipe entry whose 256 visual variants are
+ * reached by clicking cells in the variants panel that opens after placement.
+ * The default `faces` here just gives the ghost a recognizable shape — the
+ * user picks a real config from the panel.
  */
 export const FB_PRESETS: ReadonlyArray<FBPreset> = [
   {
-    id: "swap-zx",
-    label: "Z→X",
-    spec: { kind: "fb-pipe", openAxis: 2, baseAtStart: "Z", baseAtEnd: "X", defectPositions: [0.5] },
-  },
-  {
-    id: "swap-xz",
-    label: "X→Z",
-    spec: { kind: "fb-pipe", openAxis: 2, baseAtStart: "X", baseAtEnd: "Z", defectPositions: [0.5] },
-  },
-  {
-    id: "half-zx",
-    label: "Z→X½ⱽ",
+    id: "free-pipe",
+    label: "Free Pipe",
     spec: {
       kind: "fb-pipe",
       openAxis: 2,
-      baseAtStart: "Z",
-      baseAtEnd: "X",
       defectPositions: [0.5],
-      swapAxes: "first",
-    },
-  },
-  {
-    id: "half-xz",
-    label: "X→Z½ⱽ",
-    spec: {
-      kind: "fb-pipe",
-      openAxis: 2,
-      baseAtStart: "X",
-      baseAtEnd: "Z",
-      defectPositions: [0.5],
-      swapAxes: "first",
-    },
-  },
-  {
-    id: "half-zx-h",
-    label: "Z→X½ʰ",
-    spec: {
-      kind: "fb-pipe",
-      openAxis: 2,
-      baseAtStart: "Z",
-      baseAtEnd: "X",
-      defectPositions: [0.5],
-      swapAxes: "second",
-    },
-  },
-  {
-    id: "half-xz-h",
-    label: "X→Z½ʰ",
-    spec: {
-      kind: "fb-pipe",
-      openAxis: 2,
-      baseAtStart: "X",
-      baseAtEnd: "Z",
-      defectPositions: [0.5],
-      swapAxes: "second",
+      faces: [...FB_DEFAULT_FACES],
     },
   },
 ];
@@ -273,8 +250,67 @@ export function isAnyPipeBlock(b: Block): boolean {
  */
 export function blockTypeCacheKey(bt: BlockType): string {
   if (typeof bt === "string") return bt;
-  const sw = bt.swapAxes ?? "all";
-  return `fb:${bt.openAxis}|${bt.baseAtStart}|${bt.baseAtEnd}|${bt.defectPositions.join(",")}|${sw}`;
+  return `fb:${bt.openAxis}|${bt.faces.join("")}|${bt.defectPositions.join(",")}`;
+}
+
+/**
+ * Legacy FB spec (pre-faces): defined as `{ openAxis, baseAtStart, baseAtEnd,
+ * swapAxes?, defectPositions }`. Convert to the new per-face shape on read so
+ * old `.dae` files and old URL-hashed scenes keep loading without surprise.
+ */
+type LegacyFBSpec = {
+  kind: "fb-pipe";
+  openAxis: 0 | 1 | 2;
+  baseAtStart: "X" | "Z";
+  baseAtEnd: "X" | "Z";
+  defectPositions: number[];
+  swapAxes?: "all" | "first" | "second";
+};
+
+function isLegacyFBSpec(o: unknown): o is LegacyFBSpec {
+  if (typeof o !== "object" || o === null) return false;
+  const r = o as { kind?: unknown; faces?: unknown; baseAtStart?: unknown };
+  return r.kind === "fb-pipe" && r.faces === undefined && typeof r.baseAtStart === "string";
+}
+
+/**
+ * Migrate a legacy FB spec (baseAtStart/baseAtEnd/swapAxes) to the new
+ * per-face shape. Pure: same in → same out.
+ *
+ * The legacy convention picked wall colors via:
+ *   wallColors[0] = baseAtStart, wallColors[1] = opposite(baseAtStart)
+ * with a Y-open swap that flips the pair (mirroring the geometry's
+ * tail-orientation flip for TQEC openAxis === 1). swapAxes "first"/"second"
+ * select which pair flips at the defect; both faces of a pair shared a config.
+ */
+export function migrateLegacyFBSpec(legacy: LegacyFBSpec): FreeBuildPipeSpec {
+  const startBase = legacy.baseAtStart;
+  const otherStart: "X" | "Z" = startBase === "X" ? "Z" : "X";
+  const isYOpen = legacy.openAxis === 1;
+  const ca0Below: "X" | "Z" = isYOpen ? otherStart : startBase;
+  const ca1Below: "X" | "Z" = isYOpen ? startBase : otherStart;
+  const swap = legacy.swapAxes ?? "all";
+  const swapsCa0 = swap === "all" || swap === "first";
+  const swapsCa1 = swap === "all" || swap === "second";
+  const ca0: FaceConfig = swapsCa0 ? (ca0Below === "X" ? "XZ" : "ZX") : ca0Below;
+  const ca1: FaceConfig = swapsCa1 ? (ca1Below === "X" ? "XZ" : "ZX") : ca1Below;
+  return {
+    kind: "fb-pipe",
+    openAxis: legacy.openAxis,
+    defectPositions: [...legacy.defectPositions],
+    faces: [ca0, ca0, ca1, ca1],
+  };
+}
+
+/** Apply migration if needed; pass-through otherwise. */
+export function normalizeFBSpec(o: unknown): FreeBuildPipeSpec | null {
+  if (typeof o !== "object" || o === null) return null;
+  if (isLegacyFBSpec(o)) return migrateLegacyFBSpec(o);
+  const r = o as Partial<FreeBuildPipeSpec> & { kind?: unknown };
+  if (r.kind === "fb-pipe" && Array.isArray(r.faces) && r.faces.length === 4) {
+    return r as FreeBuildPipeSpec;
+  }
+  return null;
 }
 
 /** Map a TQEC basis character ('X' or 'Z') to its THREE.Color. */
@@ -497,7 +533,13 @@ function createPipeGeometry(
   bandColor: THREE.Color | null = null,
   hiddenFaces: FaceMask = 0,
   hBandHalfHeight?: number,
-  swapAxes: "all" | "first" | "second" = "all",
+  /**
+   * Optional per-face overrides for "split" mode (free-build pipes). When
+   * provided, each of the 4 walls reads its own (below, above) colors from
+   * `faceConfigs` instead of the shared `wallColors` + `swapAxes` rule.
+   * Index order: [+ca0, −ca0, +ca1, −ca1] in Three.js closed-axis order.
+   */
+  faceConfigs?: [FaceConfig, FaceConfig, FaceConfig, FaceConfig],
 ): THREE.BufferGeometry {
   const closedAxes = [0, 1, 2].filter(a => a !== openAxis) as [number, number];
 
@@ -610,16 +652,18 @@ function createPipeGeometry(
 
       // Strips along the open axis. In "band" mode: below / band / above.
       // In "split" mode: below / above only (bh = 0, middle has zero extent).
-      // For FB pipes, swapAxes can suppress the swap on a specific wall pair:
-      // when this wall is on the non-swapping closed axis, the above strip
-      // reuses the below color so the wall is visually solid.
-      const swapsThisWall =
-        swapAxes === "all" ||
-        (swapAxes === "first" && i === 0) ||
-        (swapAxes === "second" && i === 1);
-      const aboveColor = swapsThisWall ? wallColorsAbove[i] : wallColors[i];
+      // For FB pipes, faceConfigs gives each face an independent (below,
+      // above) basis. Index: i=closed-axis pair, sign=+1/-1 → faces tuple
+      // entry `i*2 + (sign>0?0:1)` ([+ca0,-ca0,+ca1,-ca1]).
+      let belowColor = wallColors[i];
+      let aboveColor = wallColorsAbove[i];
+      if (faceConfigs) {
+        const fc = faceConfigs[i * 2 + (sign > 0 ? 0 : 1)];
+        belowColor = basisColor(faceBelowBasis(fc));
+        aboveColor = basisColor(faceAboveBasis(fc));
+      }
       const [b0, b1, b2, b3] = quad(-1, -bh);
-      addQuad(b0, b1, b2, b3, n, wallColors[i]);
+      addQuad(b0, b1, b2, b3, n, belowColor);
       if (splitMode === "band" && bandColor) {
         const [m0, m1, m2, m3] = quad(-bh, bh);
         addQuad(m0, m1, m2, m3, n, bandColor);
@@ -646,33 +690,18 @@ function createPipeGeometry(
  */
 export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask = 0, hBandHalfHeight?: number): THREE.BufferGeometry {
   if (isFreeBuildPipeSpec(blockType)) {
-    // Free-build color-swap pipe: same wall geometry as a Hadamard pipe but
-    // without the yellow band. Wall colors swap at each defect position.
-    // v1: only one defect at 0.5 is rendered correctly; multi-defect support
-    // is future work.
-    const tqecOpenAxis = blockType.openAxis;
-    const threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpenAxis];
-    const closedAxes = [0, 1, 2].filter(a => a !== threeOpenAxis) as [number, number];
-    // Below-split colors: bases-at-start mapped to the two closed-axis walls.
-    // Walls are ordered by Three.js axis number (closedAxes[0] then [1]).
-    // Per the TQEC convention used by string-typed pipes, the FIRST closed
-    // wall takes baseAtStart and the SECOND takes its opposite.
-    const startBase = blockType.baseAtStart;
-    const otherStart = startBase === "X" ? "Z" : "X";
-    let wallColors: [THREE.Color, THREE.Color] = [basisColor(startBase), basisColor(otherStart)];
-    // Y-open pipes: same orientation pre-swap as Hadamard (tail at -Z in Three.js).
-    if (tqecOpenAxis === 1) {
-      wallColors = [wallColors[1], wallColors[0]];
-    }
-    void closedAxes; // closedAxes computed for symmetry with TQEC branch; unused here.
+    // Free-build pipe: per-face configs drive each wall's below/above colors.
+    // wallColors here is a placeholder (overridden by faceConfigs in the
+    // geometry constructor); pass red/blue so any unknown face still reads.
+    const threeOpenAxis = TQEC_TO_THREE_AXIS[blockType.openAxis];
     return createPipeGeometry(
       threeOpenAxis,
-      wallColors,
+      [X_COLOR, Z_COLOR],
       "split",
       null,
       hiddenFaces,
       hBandHalfHeight,
-      blockType.swapAxes ?? "all",
+      blockType.faces,
     );
   }
 
@@ -1001,110 +1030,96 @@ export function createYDefectEdges(blockType: BlockType, hiddenFaces: FaceMask =
 }
 
 /**
- * FB-specific Y-defect edges. Walks the open axis as a sequence of segments
- * separated by `defectPositions`, tracking the basis on each closed-axis wall
- * pair (which flips at every defect according to `swapAxes`). A corner edge is
- * a Y defect only on segments where the two closed-axis walls hold different
- * bases. Ring segments at a defect cover only the walls whose axis flipped
- * there.
+ * FB-specific Y-defect edges (per-face configs).
+ *
+ * For each of the 4 open-axis corners (ca0±, ca1±), the two adjacent walls'
+ * bases are checked separately on the below-defect strip and the above-defect
+ * strip. A corner cylinder is drawn for whichever strips show an X/Z mismatch.
+ *
+ * Ring segments at the defect are emitted around any wall whose `FaceConfig`
+ * is `XZ` or `ZX` — those are the walls where the basis itself flips at the
+ * defect, which is exactly where the wall acquires a Y-defect ring.
+ *
+ * v1 only honours the first defect position; multi-defect FB pipes are future
+ * work and the current code base never produces them.
  */
 function createFBYDefectEdges(
   blockType: FreeBuildPipeSpec,
   hiddenFaces: FaceMask,
   halfExts: [number, number, number],
 ): THREE.BufferGeometry {
-  const tqecOpen = blockType.openAxis;
-  const threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpen];
+  const threeOpenAxis = TQEC_TO_THREE_AXIS[blockType.openAxis];
   const closed = [0, 1, 2].filter(a => a !== threeOpenAxis) as [number, number];
-  const swapAxes = blockType.swapAxes ?? "all";
-  const swapsCa0 = swapAxes === "all" || swapAxes === "first";
-  const swapsCa1 = swapAxes === "all" || swapAxes === "second";
+  const faces = blockType.faces;
+  // faces tuple is [+ca0, -ca0, +ca1, -ca1] in Three.js closed-axis order.
+  const faceAt = (caIdx: 0 | 1, sign: 1 | -1): FaceConfig =>
+    faces[caIdx * 2 + (sign > 0 ? 0 : 1)];
 
-  const startBase = blockType.baseAtStart;
-  const otherStart: "X" | "Z" = startBase === "X" ? "Z" : "X";
-  // Match the wall-color assignment used by createBlockGeometry: the first
-  // closed Three.js axis takes baseAtStart, the second takes its opposite,
-  // with a Y-open swap (mirrors the geometry's tail-orientation flip).
-  let curCa0: "X" | "Z" = tqecOpen === 1 ? otherStart : startBase;
-  let curCa1: "X" | "Z" = tqecOpen === 1 ? startBase : otherStart;
-
-  // Build segments along the open axis. Defects (sorted) split [-1, +1] into
-  // N+1 segments; `bases` records (ca0, ca1) on each one.
   const sortedDefects = [...blockType.defectPositions].sort((a, b) => a - b);
-  const breakpoints = [0, ...sortedDefects, 1].map(p => -1 + 2 * p);
-  type Seg = { start: number; end: number; ca0: "X" | "Z"; ca1: "X" | "Z" };
-  const segments: Seg[] = [];
-  for (let s = 0; s < breakpoints.length - 1; s++) {
-    segments.push({ start: breakpoints[s], end: breakpoints[s + 1], ca0: curCa0, ca1: curCa1 });
-    if (s < sortedDefects.length) {
-      if (swapsCa0) curCa0 = curCa0 === "X" ? "Z" : "X";
-      if (swapsCa1) curCa1 = curCa1 === "X" ? "Z" : "X";
-    }
-  }
-
-  // Coalesce adjacent Y-defect segments so a fully-swapping pipe still emits
-  // one corner edge per corner instead of one per inter-defect segment.
-  const yDefectRuns: Array<{ start: number; end: number }> = [];
-  let runStart: number | null = null;
-  for (let s = 0; s < segments.length; s++) {
-    const isYDefect = segments[s].ca0 !== segments[s].ca1;
-    if (isYDefect && runStart === null) runStart = segments[s].start;
-    if (!isYDefect && runStart !== null) {
-      yDefectRuns.push({ start: runStart, end: segments[s - 1].end });
-      runStart = null;
-    }
-  }
-  if (runStart !== null) {
-    yDefectRuns.push({ start: runStart, end: segments[segments.length - 1].end });
-  }
+  const hasDefect = sortedDefects.length > 0;
+  const defectOaVal = hasDefect ? -1 + 2 * sortedDefects[0] : 0;
 
   const linePoints: number[] = [];
 
-  // Corner edges along the open axis, one per (ca0-sign, ca1-sign) pair per
-  // Y-defect run. Skipped if either adjacent wall face is hidden.
-  for (const run of yDefectRuns) {
-    for (const [s1, s2] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+  // ---- Corner edges (one per corner, possibly split into below/above runs)
+  // Each corner sits where two adjacent walls meet. We compare bases on each
+  // strip; emit a cylinder along the strips where the bases differ.
+  for (const s1 of [-1, 1] as const) {
+    for (const s2 of [-1, 1] as const) {
       const faceA = FACE_BIT_BY_INDEX[closed[0] * 2 + (s1 > 0 ? 0 : 1)];
       const faceB = FACE_BIT_BY_INDEX[closed[1] * 2 + (s2 > 0 ? 0 : 1)];
       if ((hiddenFaces & faceA) || (hiddenFaces & faceB)) continue;
-      const v0: [number, number, number] = [0, 0, 0];
-      const v1: [number, number, number] = [0, 0, 0];
-      v0[closed[0]] = s1 * halfExts[closed[0]];
-      v0[closed[1]] = s2 * halfExts[closed[1]];
-      v0[threeOpenAxis] = run.start * halfExts[threeOpenAxis];
-      v1[closed[0]] = s1 * halfExts[closed[0]];
-      v1[closed[1]] = s2 * halfExts[closed[1]];
-      v1[threeOpenAxis] = run.end * halfExts[threeOpenAxis];
-      linePoints.push(...v0, ...v1);
+
+      const fcA = faceAt(0, s1);
+      const fcB = faceAt(1, s2);
+      const belowDiff = faceBelowBasis(fcA) !== faceBelowBasis(fcB);
+      const aboveDiff = faceAboveBasis(fcA) !== faceAboveBasis(fcB);
+
+      const cornerPoint = (oa: number): [number, number, number] => {
+        const v: [number, number, number] = [0, 0, 0];
+        v[closed[0]] = s1 * halfExts[closed[0]];
+        v[closed[1]] = s2 * halfExts[closed[1]];
+        v[threeOpenAxis] = oa * halfExts[threeOpenAxis];
+        return v;
+      };
+
+      if (!hasDefect) {
+        if (belowDiff) linePoints.push(...cornerPoint(-1), ...cornerPoint(1));
+        continue;
+      }
+      // Coalesce when both strips share the mismatch, so a fully-mismatched
+      // corner emits a single cylinder spanning [-1, +1] instead of two
+      // butt-joined ones at the defect.
+      if (belowDiff && aboveDiff) {
+        linePoints.push(...cornerPoint(-1), ...cornerPoint(1));
+      } else if (belowDiff) {
+        linePoints.push(...cornerPoint(-1), ...cornerPoint(defectOaVal));
+      } else if (aboveDiff) {
+        linePoints.push(...cornerPoint(defectOaVal), ...cornerPoint(1));
+      }
     }
   }
 
-  // Ring segments at each defect, restricted to the walls whose closed axis
-  // actually swaps there. A ring edge running along ca1 lies on a ca0=± wall
-  // and is a Y defect iff ca0 swaps; symmetrically for the other direction.
-  for (const p of sortedDefects) {
-    const oaVal = -1 + 2 * p;
-    const corner = (s1: -1 | 1, s2: -1 | 1): [number, number, number] => {
-      const v: [number, number, number] = [0, 0, 0];
-      v[threeOpenAxis] = oaVal;
-      v[closed[0]] = s1 * halfExts[closed[0]];
-      v[closed[1]] = s2 * halfExts[closed[1]];
-      return v;
-    };
-    if (swapsCa0) {
-      // 2 segments on ca0=± walls (run along ca1).
-      for (const s1 of [1, -1] as const) {
-        const faceBit = FACE_BIT_BY_INDEX[closed[0] * 2 + (s1 > 0 ? 0 : 1)];
+  // ---- Ring segments around any swapping wall at the defect.
+  if (hasDefect) {
+    const oaVal = defectOaVal;
+    for (let i = 0; i < 2; i++) {
+      const ca = closed[i];
+      const oc = closed[1 - i];
+      for (const sign of [1, -1] as const) {
+        const fc = faceAt(i as 0 | 1, sign);
+        if (fc !== "XZ" && fc !== "ZX") continue;
+        const faceBit = FACE_BIT_BY_INDEX[ca * 2 + (sign > 0 ? 0 : 1)];
         if (hiddenFaces & faceBit) continue;
-        linePoints.push(...corner(s1, -1), ...corner(s1, 1));
-      }
-    }
-    if (swapsCa1) {
-      // 2 segments on ca1=± walls (run along ca0).
-      for (const s2 of [1, -1] as const) {
-        const faceBit = FACE_BIT_BY_INDEX[closed[1] * 2 + (s2 > 0 ? 0 : 1)];
-        if (hiddenFaces & faceBit) continue;
-        linePoints.push(...corner(-1, s2), ...corner(1, s2));
+        const v0: [number, number, number] = [0, 0, 0];
+        const v1: [number, number, number] = [0, 0, 0];
+        v0[threeOpenAxis] = oaVal;
+        v1[threeOpenAxis] = oaVal;
+        v0[ca] = sign * halfExts[ca];
+        v1[ca] = sign * halfExts[ca];
+        v0[oc] = -halfExts[oc];
+        v1[oc] = halfExts[oc];
+        linePoints.push(...v0, ...v1);
       }
     }
   }
@@ -1616,10 +1631,16 @@ export function swapPipeVariant(pipeBase: string): string {
 export function flipBlockType(type: BlockType): BlockType {
   if (type === "Y") return type;
   if (isFreeBuildPipeSpec(type)) {
+    const flipFace = (fc: FaceConfig): FaceConfig =>
+      fc === "X" ? "Z" : fc === "Z" ? "X" : fc === "XZ" ? "ZX" : "XZ";
     return {
       ...type,
-      baseAtStart: type.baseAtStart === "X" ? "Z" : "X",
-      baseAtEnd: type.baseAtEnd === "X" ? "Z" : "X",
+      faces: [
+        flipFace(type.faces[0]),
+        flipFace(type.faces[1]),
+        flipFace(type.faces[2]),
+        flipFace(type.faces[3]),
+      ],
     };
   }
   let out = "";

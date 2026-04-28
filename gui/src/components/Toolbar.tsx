@@ -759,7 +759,8 @@ export function Toolbar({
       </div>
 
       {/* Free Build group — only visible when freeBuild is enabled.
-         Non-TQEC pipes parameterized by Y-defect positions. */}
+         Single generic Free Pipe; the per-face variant is picked from the
+         side panel that opens after placement. */}
       {freeBuild && (
         <>
           <div style={{ width: 1, background: "#ddd" }} />
@@ -777,11 +778,7 @@ export function Toolbar({
                   onClick={() => {
                     setFBPreset(preset);
                   }}
-                  title={
-                    preset.spec.swapAxes && preset.spec.swapAxes !== "all"
-                      ? `Free-build half color-swap pipe (${preset.label}) — only one wall pair flips at the midpoint`
-                      : `Free-build color-swap pipe (${preset.label}) with a Y defect at the midpoint`
-                  }
+                  title="Free-build pipe — drop to place, then pick a color/swap variant from the side panel"
                   style={blockBtnStyle(
                     mode === "edit" && armedTool === "pipe" && fbPreset?.id === preset.id,
                     false,

@@ -146,9 +146,8 @@ describe("blockStore", () => {
       const fbX = {
         kind: "fb-pipe" as const,
         openAxis: 0 as const,
-        baseAtStart: "Z" as const,
-        baseAtEnd: "X" as const,
         defectPositions: [0.5],
+        faces: ["ZX", "ZX", "ZX", "ZX"] as ["ZX", "ZX", "ZX", "ZX"],
       };
       const fbY = { ...fbX, openAxis: 1 as const };
       const incoming = new Map<string, Block>([
@@ -169,9 +168,8 @@ describe("blockStore", () => {
       const fbX = {
         kind: "fb-pipe" as const,
         openAxis: 0 as const,
-        baseAtStart: "Z" as const,
-        baseAtEnd: "X" as const,
         defectPositions: [0.5],
+        faces: ["ZX", "ZX", "ZX", "ZX"] as ["ZX", "ZX", "ZX", "ZX"],
       };
       const incoming = new Map<string, Block>([
         ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: fbX }],
@@ -516,9 +514,8 @@ describe("blockStore", () => {
       const fbSpec = {
         kind: "fb-pipe" as const,
         openAxis: 0 as const,
-        baseAtStart: "Z" as const,
-        baseAtEnd: "X" as const,
         defectPositions: [0.5],
+        faces: ["ZX", "ZX", "ZX", "ZX"] as ["ZX", "ZX", "ZX", "ZX"],
       };
       const incoming = new Map<string, Block>([
         ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: fbSpec }],
@@ -533,9 +530,8 @@ describe("blockStore", () => {
       const fbX = {
         kind: "fb-pipe" as const,
         openAxis: 0 as const,
-        baseAtStart: "Z" as const,
-        baseAtEnd: "X" as const,
         defectPositions: [0.5],
+        faces: ["ZX", "ZX", "ZX", "ZX"] as ["ZX", "ZX", "ZX", "ZX"],
       };
       const fbY = { ...fbX, openAxis: 1 as const };
       const incoming = new Map<string, Block>([
@@ -604,11 +600,11 @@ describe("blockStore", () => {
 
     it("setFBPreset does NOT overwrite cubeType", () => {
       useBlockStore.getState().setCubeType("ZXZ");
-      const swapZx = FB_PRESETS.find((p) => p.id === "swap-zx")!;
-      useBlockStore.getState().setFBPreset(swapZx);
+      const freePipe = FB_PRESETS[0];
+      useBlockStore.getState().setFBPreset(freePipe);
       expect(useBlockStore.getState().cubeType).toBe("ZXZ");
       expect(useBlockStore.getState().armedTool).toBe("pipe");
-      expect(useBlockStore.getState().fbPreset?.id).toBe("swap-zx");
+      expect(useBlockStore.getState().fbPreset?.id).toBe(freePipe.id);
     });
   });
 

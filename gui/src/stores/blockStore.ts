@@ -4,6 +4,7 @@ import type { Flow } from "../utils/flows";
 import type {
   Position3D, Block, BlockType, CubeType, PipeVariant, PipeType, SpatialIndex, FaceMask,
   BuildDirection, UndeterminedCubeInfo, ViewMode, IsoAxis, PortMeta, PortIO, FBPreset,
+  FaceConfig,
   FreeBuildPipeSpec,
 } from "../types";
 import {
@@ -198,6 +199,13 @@ interface BlockStore {
   /** Whether the right-docked ZX-diagram panel is visible. */
   zxPanelOpen: boolean;
 
+  /**
+   * Position (posKey) of the free-build pipe currently being edited via the
+   * variants panel. Auto-set when an FB pipe is placed or selected; clears
+   * when the user closes the panel or selection changes off it.
+   */
+  fbVariantsPos: string | null;
+
   /** Last-computed flows (with surface geometry), published by FlowsPanel. */
   flows: Flow[];
   /** Signature of the diagram when `flows` was last computed; used to detect stale data. */
@@ -308,6 +316,11 @@ interface BlockStore {
   reorderPort: (fromIndex: number, toIndex: number) => void;
   setFlowsPanelOpen: (open: boolean) => void;
   toggleFlowsPanel: () => void;
+
+  /** Open the FB variant picker for the given block, or close it (pos=null). */
+  setFBVariantsPos: (pos: Position3D | null) => void;
+  /** Replace an FB pipe block's `faces` tuple in place. Used by the variant picker. */
+  setFBPipeFaces: (pos: Position3D, faces: [FaceConfig, FaceConfig, FaceConfig, FaceConfig]) => void;
 
   /** Publish computed flows (with surface geometry) for the 3D overlay to read. */
   setFlows: (flows: Flow[], signature: string) => void;
@@ -640,6 +653,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   portMeta: new Map(),
   flowsPanelOpen: false,
   zxPanelOpen: false,
+  fbVariantsPos: null,
   flows: [],
   flowsSignature: null,
   selectedFlowIndex: null,
@@ -1166,6 +1180,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
 
       const block: Block = { pos, type: blockType };
+      // Auto-open the FB variant picker for a freshly-placed FB pipe so the
+      // user immediately sees the 256 candidate variants. Placing any other
+      // block type clears the panel — the user is no longer focused on a
+      // specific FB pipe.
+      const fbVariantsPos = isFreeBuildPipeSpec(blockType) ? key : null;
 
       if (existing) {
         // Skip if same type — nothing to replace
@@ -1181,6 +1200,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           history: [...state.history, cmd].slice(-MAX_HISTORY),
           future: [],
           undeterminedCubes: newUndetermined,
+          fbVariantsPos,
         };
       }
 
@@ -1209,6 +1229,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
             history: [...state.history, cmd].slice(-MAX_HISTORY),
             future: [],
             portPositions: newPorts,
+            fbVariantsPos,
           };
         }
       }
@@ -1223,6 +1244,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           history: [...state.history, cmd].slice(-MAX_HISTORY),
           future: [],
           portPositions: newPorts,
+          fbVariantsPos,
         };
       }
 
@@ -1231,6 +1253,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         hiddenFaces,
         history: [...state.history, cmd].slice(-MAX_HISTORY),
         future: [],
+        fbVariantsPos,
       };
     }),
 
@@ -2212,17 +2235,30 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       } else {
         next.add(key);
       }
+      // Surface the FB variants picker iff exactly one FB pipe is now selected.
+      let fbVariantsPos: string | null = null;
+      if (next.size === 1) {
+        const onlyKey = next.values().next().value as string;
+        const onlyBlock = state.blocks.get(onlyKey);
+        if (onlyBlock && isFreeBuildPipeSpec(onlyBlock.type)) fbVariantsPos = onlyKey;
+      }
       return {
         selectedKeys: next,
         selectedPortPositions: additive ? state.selectedPortPositions : new Set<string>(),
         selectionPivot: null,
+        fbVariantsPos,
       };
     }),
 
   clearSelection: () =>
     set((state) => {
       if (state.selectedKeys.size === 0 && state.selectedPortPositions.size === 0) return state;
-      return { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null };
+      return {
+        selectedKeys: new Set<string>(),
+        selectedPortPositions: new Set<string>(),
+        selectionPivot: null,
+        fbVariantsPos: null,
+      };
     }),
 
   togglePortSelection: (pos, additive) =>
@@ -3594,6 +3630,25 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         ? { flowsPanelOpen: false, flowVizMode: false }
         : { flowsPanelOpen: true },
     ),
+
+  setFBVariantsPos: (pos) => set({ fbVariantsPos: pos ? posKey(pos) : null }),
+  setFBPipeFaces: (pos, faces) =>
+    set((state) => {
+      const key = posKey(pos);
+      const block = state.blocks.get(key);
+      if (!block || !isFreeBuildPipeSpec(block.type)) return state;
+      const newType: FreeBuildPipeSpec = { ...block.type, faces };
+      const newBlock: Block = { pos: block.pos, type: newType };
+      const removed = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, key, block);
+      const { blocks, hiddenFaces } = doAdd(removed.blocks, state.spatialIndex, removed.hiddenFaces, key, newBlock);
+      const cmd: UndoCommand = { kind: "replace", key, oldBlock: block, newBlock };
+      return {
+        blocks,
+        hiddenFaces,
+        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+      };
+    }),
 
   setFlows: (flows, signature) =>
     set({

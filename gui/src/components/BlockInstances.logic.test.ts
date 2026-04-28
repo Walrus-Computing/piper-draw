@@ -16,7 +16,7 @@ import {
 import type { Block, BlockType, CubeType, FBPreset, PipeVariant, Position3D } from "../types";
 import type { ArmedTool } from "../stores/blockStore";
 
-const FB_SWAP_ZX: FBPreset = FB_PRESETS.find((p) => p.id === "swap-zx")!;
+const FB_FREE_PIPE: FBPreset = FB_PRESETS[0];
 
 function block(pos: Position3D, type: BlockType): Block {
   return { pos, type };
@@ -73,7 +73,7 @@ describe("decidePlaceModeHover — armedTool === 'pipe' + fbPreset (FB snap regr
     const state = makeState({
       armedTool: "pipe",
       cubeType: "XZZ", // different from hovered.type — would have triggered cube-replace
-      fbPreset: FB_SWAP_ZX,
+      fbPreset: FB_FREE_PIPE,
       freeBuild: true,
       blocks: [cube],
     });
@@ -90,7 +90,7 @@ describe("decidePlaceModeHover — armedTool === 'pipe' + fbPreset (FB snap regr
     const state = makeState({
       armedTool: "pipe",
       cubeType: "XZZ",
-      fbPreset: FB_SWAP_ZX,
+      fbPreset: FB_FREE_PIPE,
       freeBuild: true,
       blocks: [cube],
     });
@@ -114,7 +114,7 @@ describe("decidePlaceModeHover — armedTool === 'pipe' + fbPreset (FB snap regr
     const state = makeState({
       armedTool: "pipe",
       cubeType: "XZZ",
-      fbPreset: FB_SWAP_ZX,
+      fbPreset: FB_FREE_PIPE,
       freeBuild: true,
       blocks: [cube],
     });
@@ -151,7 +151,7 @@ describe("decidePlaceModeHover — armedTool === 'pipe' + pipeVariant (TQEC)", (
     const fbState = makeState({
       armedTool: "pipe",
       cubeType: "XZZ",
-      fbPreset: FB_SWAP_ZX,
+      fbPreset: FB_FREE_PIPE,
       freeBuild: true,
       blocks: [cube],
     });
@@ -184,7 +184,7 @@ describe("decidePlaceModeClick", () => {
     const state = makeState({
       armedTool: "pipe",
       cubeType: "XZZ",
-      fbPreset: FB_SWAP_ZX,
+      fbPreset: FB_FREE_PIPE,
       freeBuild: true,
       blocks: [cube],
     });
@@ -197,7 +197,7 @@ describe("decidePlaceModeClick", () => {
     const state = makeState({
       armedTool: "pipe",
       cubeType: "XZZ",
-      fbPreset: FB_SWAP_ZX,
+      fbPreset: FB_FREE_PIPE,
       freeBuild: true,
       blocks: [cube],
     });
@@ -216,7 +216,7 @@ describe("decidePlaceModeClick", () => {
     const fbState = makeState({
       armedTool: "pipe",
       cubeType: "XZZ",
-      fbPreset: FB_SWAP_ZX,
+      fbPreset: FB_FREE_PIPE,
       freeBuild: true,
       blocks: [cube],
     });
@@ -241,7 +241,7 @@ describe("decidePlaceModeClick", () => {
 // re-exports so the surface is stable.
 describe("resolution helpers (sanity)", () => {
   it("resolveFBSpecFromFace returns a valid pipe slot", () => {
-    const r = resolveFBSpecFromFace({ x: 0, y: 0, z: 0 }, "XZZ", new Vector3(1, 0, 0), FB_SWAP_ZX);
+    const r = resolveFBSpecFromFace({ x: 0, y: 0, z: 0 }, "XZZ", new Vector3(1, 0, 0), FB_FREE_PIPE);
     expect(r).not.toBeNull();
     expect(r!.adj).toEqual({ x: 1, y: 0, z: 0 });
     expect(r!.spec.openAxis).toBe(0);

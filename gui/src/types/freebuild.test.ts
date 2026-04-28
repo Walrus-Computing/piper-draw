@@ -21,32 +21,36 @@ import {
   X_COLOR,
   Z_COLOR,
   FB_PRESETS,
+  FB_DEFAULT_FACES,
+  migrateLegacyFBSpec,
+  normalizeFBSpec,
 } from "./index";
 import type { Block, BlockType, FBPreset, FreeBuildPipeSpec, Position3D } from "./index";
 import { resolveFBSpecFromFace, resolvePipeTypeFromFace } from "../components/BlockInstances.logic";
 
+// Z-open full-swap reference (matches legacy `baseAtStart:Z, baseAtEnd:X` semantics
+// for Z-open pipes: ca0=X-axis takes Z-below + X-above; ca1=Z-axis takes X-below + Z-above).
 const Z_OPEN_SPEC: FreeBuildPipeSpec = {
   kind: "fb-pipe",
   openAxis: 2,
-  baseAtStart: "Z",
-  baseAtEnd: "X",
   defectPositions: [0.5],
+  faces: ["ZX", "ZX", "XZ", "XZ"],
 };
 
 const X_OPEN_SPEC: FreeBuildPipeSpec = {
   kind: "fb-pipe",
   openAxis: 0,
-  baseAtStart: "Z",
-  baseAtEnd: "X",
   defectPositions: [0.5],
+  faces: ["ZX", "ZX", "XZ", "XZ"],
 };
 
+// Legacy Y-open spec mirrored the start/end pair (tail-orientation flip), so the
+// equivalent new spec puts XZ on ca0 (X-axis Three.js) and ZX on ca1 (Y-axis Three.js).
 const Y_OPEN_SPEC: FreeBuildPipeSpec = {
   kind: "fb-pipe",
   openAxis: 1,
-  baseAtStart: "Z",
-  baseAtEnd: "X",
   defectPositions: [0.5],
+  faces: ["XZ", "XZ", "ZX", "ZX"],
 };
 
 describe("isFreeBuildBlock / isFreeBuildPipeSpec", () => {
@@ -95,12 +99,14 @@ describe("createBlockGeometry for FB pipes", () => {
     for (let i = 0; i < arr.length; i += 3) out.push({ r: arr[i], g: arr[i + 1], b: arr[i + 2] });
     return out;
   }
+  function colorEq(a: { r: number; g: number; b: number }, c: typeof X_COLOR): boolean {
+    return Math.abs(a.r - c.r) < 1e-6 && Math.abs(a.g - c.g) < 1e-6 && Math.abs(a.b - c.b) < 1e-6;
+  }
 
   it("emits no yellow (H_COLOR) vertices — FB has no Hadamard band", () => {
     const geo = createBlockGeometry(Z_OPEN_SPEC);
     const colors = vertexColors(geo);
     for (const c of colors) {
-      // Yellow Hadamard band would be (H_COLOR.r, H_COLOR.g, H_COLOR.b).
       const isYellow =
         Math.abs(c.r - H_COLOR.r) < 1e-6 &&
         Math.abs(c.g - H_COLOR.g) < 1e-6 &&
@@ -109,80 +115,128 @@ describe("createBlockGeometry for FB pipes", () => {
     }
   });
 
-  it("contains both X_COLOR and Z_COLOR vertices (color swap at midpoint)", () => {
+  it("contains both X_COLOR and Z_COLOR vertices when a wall swaps", () => {
     const geo = createBlockGeometry(Z_OPEN_SPEC);
     const colors = vertexColors(geo);
-    const sameAs = (a: { r: number; g: number; b: number }, c: typeof X_COLOR) =>
-      Math.abs(a.r - c.r) < 1e-6 && Math.abs(a.g - c.g) < 1e-6 && Math.abs(a.b - c.b) < 1e-6;
-    expect(colors.some((c) => sameAs(c, X_COLOR))).toBe(true);
-    expect(colors.some((c) => sameAs(c, Z_COLOR))).toBe(true);
+    expect(colors.some((c) => colorEq(c, X_COLOR))).toBe(true);
+    expect(colors.some((c) => colorEq(c, Z_COLOR))).toBe(true);
+  });
+
+  it("solid-X pipe has only X_COLOR vertices on every wall", () => {
+    const solid: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, faces: ["X", "X", "X", "X"] };
+    const colors = vertexColors(createBlockGeometry(solid));
+    for (const c of colors) {
+      // All non-zero color verts must be red (X) — open-axis faces are stripped.
+      if (c.r === 0 && c.g === 0 && c.b === 0) continue;
+      expect(colorEq(c, X_COLOR)).toBe(true);
+    }
+  });
+
+  it("each FaceConfig produces the expected (below, above) basis pair", () => {
+    // Each wall has 2 strips × 4 verts = 8 colored verts. Build a single-wall
+    // probe: vary one face at a time, leave the other 3 as solid X.
+    const cases: Array<{ fc: "XZ" | "ZX" | "X" | "Z"; below: typeof X_COLOR; above: typeof X_COLOR }> = [
+      { fc: "X", below: X_COLOR, above: X_COLOR },
+      { fc: "Z", below: Z_COLOR, above: Z_COLOR },
+      { fc: "XZ", below: X_COLOR, above: Z_COLOR },
+      { fc: "ZX", below: Z_COLOR, above: X_COLOR },
+    ];
+    for (const { fc, below, above } of cases) {
+      const spec: FreeBuildPipeSpec = {
+        ...Z_OPEN_SPEC,
+        faces: [fc, "X", "X", "X"],
+      };
+      const colors = vertexColors(createBlockGeometry(spec));
+      // The first wall (face 0 = +ca0) emits 2 strips × 4 verts. With ca0 = X
+      // (Three.js axis 0), the +ca0 wall verts can be identified by x-coord
+      // > 0. Below-strip verts have y < 0; above-strip verts have y > 0
+      // (Three.js openAxis = 1 for Z-open). We pull both strips and check.
+      const positions = createBlockGeometry(spec).getAttribute("position").array as Float32Array;
+      let belowFound = false;
+      let aboveFound = false;
+      for (let i = 0; i < positions.length / 3; i++) {
+        const px = positions[i * 3];
+        const py = positions[i * 3 + 1];
+        if (px <= 0) continue;
+        const c = colors[i];
+        if (py < 0 && colorEq(c, below)) belowFound = true;
+        if (py > 0 && colorEq(c, above)) aboveFound = true;
+      }
+      expect(belowFound).toBe(true);
+      expect(aboveFound).toBe(true);
+    }
   });
 });
 
-describe("createYDefectEdges for FB pipes", () => {
+describe("createYDefectEdges for FB pipes (per-face)", () => {
   function edgeCount(geo: ReturnType<typeof createYDefectEdges>): number {
     const arr = geo.getAttribute("position").array as Float32Array;
     return arr.length / 6;
   }
 
-  it("FB pipe with one defect emits 4 corner edges + 4 ring segments = 8", () => {
+  it("full-swap pipe (all 4 walls swap) emits 4 corner edges + 4 ring segments = 8", () => {
     expect(edgeCount(createYDefectEdges(Z_OPEN_SPEC))).toBe(8);
     expect(edgeCount(createYDefectEdges(X_OPEN_SPEC))).toBe(8);
     expect(edgeCount(createYDefectEdges(Y_OPEN_SPEC))).toBe(8);
   });
 
-  it("FB pipe with no defects emits only the 4 corner edges (no ring)", () => {
-    const noDefects: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, defectPositions: [] };
-    expect(edgeCount(createYDefectEdges(noDefects))).toBe(4);
+  it("solid pipe (every face same basis) emits no Y-defect edges", () => {
+    const solid: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, faces: ["X", "X", "X", "X"] };
+    expect(edgeCount(createYDefectEdges(solid))).toBe(0);
   });
 
-  it("FB pipe with two defects emits 4 corners + 2 rings × 4 = 12", () => {
-    const twoDefects: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, defectPositions: [0.33, 0.67] };
-    expect(edgeCount(createYDefectEdges(twoDefects))).toBe(12);
+  it("one swapping face puts a ring on that face plus corner cylinders on its 2 adjacent corners", () => {
+    // Faces: [+ca0=XZ, -ca0=X, +ca1=X, -ca1=X]. Below: +ca0 X = -ca0 X = +ca1 X = -ca1 X (no diff).
+    // Above: +ca0 Z, others X — corners (+ca0,±ca1) light up above. So 2 above-half corners
+    // + 1 ring on the swapping face = 3 edges total.
+    const spec: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, faces: ["XZ", "X", "X", "X"] };
+    expect(edgeCount(createYDefectEdges(spec))).toBe(3);
   });
 
-  it("half-swap FB pipe emits 4 half-length corners + 2 ring segments = 6", () => {
-    // swapAxes "first": below midpoint, ca0/ca1 differ → 4 corners on the
-    // lower half. Above midpoint, both walls share the same basis → no
-    // corners. Ring at the defect only crosses the swapping (ca0) walls,
-    // contributing 2 segments instead of 4.
-    const halfSpec: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, swapAxes: "first" };
+  it("half-swap pipe (one pair swaps, the other stays solid X) emits 4 half-corners + 2 rings = 6", () => {
+    // Migrating the legacy {baseAtStart:Z, swapAxes:"first"} → faces=["ZX","ZX","X","X"].
+    const halfSpec: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, faces: ["ZX", "ZX", "X", "X"] };
     expect(edgeCount(createYDefectEdges(halfSpec))).toBe(6);
   });
 
-  it("half-swap FB pipe corner segments span only the lower half of the open axis", () => {
-    const halfSpec: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, swapAxes: "first" };
-    const arr = createYDefectEdges(halfSpec).getAttribute("position").array as Float32Array;
-    // Z_OPEN_SPEC has Three.js openAxis = 1 (Y). Corner edges are the first 4
-    // line segments; ring segments come last. Each segment is two 3-vec verts.
-    // For a half-swap pipe, corner segments must run from the negative-Y end
-    // to the midpoint (Y = 0), not all the way across.
-    for (let i = 0; i < 4; i++) {
-      const y0 = arr[i * 6 + 1];
-      const y1 = arr[i * 6 + 4];
-      const yMin = Math.min(y0, y1);
-      const yMax = Math.max(y0, y1);
-      expect(yMin).toBeLessThan(0);
-      expect(yMax).toBeCloseTo(0, 6);
-    }
+  it("pipe with no defects: corner cylinder appears iff bases differ across the whole length", () => {
+    // Solid faces only — different colors on opposite walls give 4 corners (no rings, no defect).
+    const noDefects: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, defectPositions: [], faces: ["X", "X", "Z", "Z"] };
+    expect(edgeCount(createYDefectEdges(noDefects))).toBe(4);
+  });
+
+  it("opposite-direction swaps on a pair (XZ vs ZX) light up Y-defects on both halves", () => {
+    // ca0 +face XZ (X→Z), ca0 -face ZX (Z→X). At the corner with the orthogonal wall (X solid):
+    //   below: +ca0 = X vs ca1 = X — no diff
+    //   above: +ca0 = Z vs ca1 = X — diff → cylinder above
+    //   below: -ca0 = Z vs ca1 = X — diff → cylinder below
+    //   above: -ca0 = X vs ca1 = X — no diff
+    // Both ca0 walls swap → 2 ring segments. Total: 2 above-corners + 2 below-corners + 2 rings = 6.
+    const spec: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, faces: ["XZ", "ZX", "X", "X"] };
+    expect(edgeCount(createYDefectEdges(spec))).toBe(6);
   });
 });
 
 describe("flipBlockType on FB pipes", () => {
-  it("swaps baseAtStart and baseAtEnd between X and Z, leaving defects unchanged", () => {
+  it("flips X↔Z on every face config (X↔Z, XZ↔ZX), leaving openAxis/defects unchanged", () => {
     const flipped = flipBlockType(Z_OPEN_SPEC) as FreeBuildPipeSpec;
     expect(flipped.kind).toBe("fb-pipe");
-    expect(flipped.baseAtStart).toBe("X");
-    expect(flipped.baseAtEnd).toBe("Z");
-    expect(flipped.defectPositions).toEqual([0.5]);
     expect(flipped.openAxis).toBe(2);
+    expect(flipped.defectPositions).toEqual([0.5]);
+    // Z_OPEN_SPEC.faces = ["ZX","ZX","XZ","XZ"] → ["XZ","XZ","ZX","ZX"]
+    expect(flipped.faces).toEqual(["XZ", "XZ", "ZX", "ZX"]);
   });
 
   it("is an involution on FB pipes (flip twice = original)", () => {
     const once = flipBlockType(Z_OPEN_SPEC) as FreeBuildPipeSpec;
     const twice = flipBlockType(once) as FreeBuildPipeSpec;
-    expect(twice.baseAtStart).toBe(Z_OPEN_SPEC.baseAtStart);
-    expect(twice.baseAtEnd).toBe(Z_OPEN_SPEC.baseAtEnd);
+    expect(twice.faces).toEqual(Z_OPEN_SPEC.faces);
+  });
+
+  it("solid faces flip too: X→Z, Z→X", () => {
+    const solid: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, faces: ["X", "Z", "X", "Z"] };
+    const flipped = flipBlockType(solid) as FreeBuildPipeSpec;
+    expect(flipped.faces).toEqual(["Z", "X", "Z", "X"]);
   });
 });
 
@@ -193,8 +247,8 @@ describe("blockTypeCacheKey", () => {
   });
 
   it("returns a deterministic content-based key for FB specs", () => {
-    expect(blockTypeCacheKey(Z_OPEN_SPEC)).toBe("fb:2|Z|X|0.5|all");
-    expect(blockTypeCacheKey(X_OPEN_SPEC)).toBe("fb:0|Z|X|0.5|all");
+    expect(blockTypeCacheKey(Z_OPEN_SPEC)).toBe("fb:2|ZXZXXZXZ|0.5");
+    expect(blockTypeCacheKey(X_OPEN_SPEC)).toBe("fb:0|ZXZXXZXZ|0.5");
   });
 
   it("two structurally equal specs produce the same key", () => {
@@ -203,126 +257,99 @@ describe("blockTypeCacheKey", () => {
     expect(blockTypeCacheKey(a)).toBe(blockTypeCacheKey(b));
   });
 
-  it("specs that differ only in swapAxes produce different keys", () => {
-    const full: FreeBuildPipeSpec = { ...Z_OPEN_SPEC };
-    const half: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, swapAxes: "first" };
-    expect(blockTypeCacheKey(full)).not.toBe(blockTypeCacheKey(half));
+  it("specs that differ in any face produce different keys", () => {
+    const a: FreeBuildPipeSpec = { ...Z_OPEN_SPEC };
+    const b: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, faces: ["X", "X", "X", "X"] };
+    expect(blockTypeCacheKey(a)).not.toBe(blockTypeCacheKey(b));
   });
 });
 
 describe("FB_PRESETS", () => {
-  it("all presets have a single Y defect at 0.5", () => {
-    for (const p of FB_PRESETS) {
-      expect(p.spec.kind).toBe("fb-pipe");
-      expect(p.spec.defectPositions).toEqual([0.5]);
-    }
-  });
-
-  it("the full presets are color-swap mirrors of each other (Z→X and X→Z)", () => {
-    const zx = FB_PRESETS.find((p) => p.id === "swap-zx");
-    const xz = FB_PRESETS.find((p) => p.id === "swap-xz");
-    expect(zx).toBeDefined();
-    expect(xz).toBeDefined();
-    expect(zx!.spec.baseAtStart).toBe("Z");
-    expect(zx!.spec.baseAtEnd).toBe("X");
-    expect(xz!.spec.baseAtStart).toBe("X");
-    expect(xz!.spec.baseAtEnd).toBe("Z");
-    expect(zx!.spec.swapAxes ?? "all").toBe("all");
-    expect(xz!.spec.swapAxes ?? "all").toBe("all");
-  });
-
-  it("ships half-swap presets that change only 2 opposite faces", () => {
-    const halfZx = FB_PRESETS.find((p) => p.id === "half-zx");
-    const halfXz = FB_PRESETS.find((p) => p.id === "half-xz");
-    expect(halfZx).toBeDefined();
-    expect(halfXz).toBeDefined();
-    expect(halfZx!.spec.swapAxes).toBe("first");
-    expect(halfXz!.spec.swapAxes).toBe("first");
-    expect(halfZx!.spec.baseAtStart).toBe("Z");
-    expect(halfZx!.spec.baseAtEnd).toBe("X");
-    expect(halfXz!.spec.baseAtStart).toBe("X");
-    expect(halfXz!.spec.baseAtEnd).toBe("Z");
-  });
-
-  it("ships the mirror half-swap presets (the 'other' face pair flips)", () => {
-    const halfZxH = FB_PRESETS.find((p) => p.id === "half-zx-h");
-    const halfXzH = FB_PRESETS.find((p) => p.id === "half-xz-h");
-    expect(halfZxH).toBeDefined();
-    expect(halfXzH).toBeDefined();
-    expect(halfZxH!.spec.swapAxes).toBe("second");
-    expect(halfXzH!.spec.swapAxes).toBe("second");
-    expect(halfZxH!.spec.baseAtStart).toBe("Z");
-    expect(halfZxH!.spec.baseAtEnd).toBe("X");
-    expect(halfXzH!.spec.baseAtStart).toBe("X");
-    expect(halfXzH!.spec.baseAtEnd).toBe("Z");
+  it("ships a single Free Pipe preset (variants are picked from the side panel)", () => {
+    expect(FB_PRESETS).toHaveLength(1);
+    const fp = FB_PRESETS[0];
+    expect(fp.id).toBe("free-pipe");
+    expect(fp.spec.kind).toBe("fb-pipe");
+    expect(fp.spec.defectPositions).toEqual([0.5]);
+    expect(fp.spec.faces).toEqual(FB_DEFAULT_FACES);
   });
 });
 
-describe("FB pipe geometry honors swapAxes", () => {
-  function vertexColors(geo: ReturnType<typeof createBlockGeometry>): { r: number; g: number; b: number }[] {
-    const arr = geo.getAttribute("color").array as Float32Array;
-    const out: { r: number; g: number; b: number }[] = [];
-    for (let i = 0; i < arr.length; i += 3) out.push({ r: arr[i], g: arr[i + 1], b: arr[i + 2] });
-    return out;
-  }
-  function colorEq(a: { r: number; g: number; b: number }, c: typeof X_COLOR): boolean {
-    return Math.abs(a.r - c.r) < 1e-6 && Math.abs(a.g - c.g) < 1e-6 && Math.abs(a.b - c.b) < 1e-6;
-  }
-
-  it("full-swap pipe has each base color count balanced (all 4 walls swap)", () => {
-    const colors = vertexColors(createBlockGeometry(Z_OPEN_SPEC));
-    const xCount = colors.filter((c) => colorEq(c, X_COLOR)).length;
-    const zCount = colors.filter((c) => colorEq(c, Z_COLOR)).length;
-    // 4 walls × 2 strips × 4 verts = 32 colored verts; each base appears on
-    // 4 strips (2 below + 2 above per axis pair), so counts are equal.
-    expect(xCount).toBe(zCount);
-    expect(xCount + zCount).toBe(32);
+describe("legacy FB spec migration", () => {
+  it("converts {baseAtStart:Z, baseAtEnd:X, swapAxes:'all'} to per-face equivalent", () => {
+    const legacy = {
+      kind: "fb-pipe" as const,
+      openAxis: 2 as const,
+      baseAtStart: "Z" as const,
+      baseAtEnd: "X" as const,
+      defectPositions: [0.5],
+    };
+    const migrated = migrateLegacyFBSpec(legacy);
+    expect(migrated.faces).toEqual(["ZX", "ZX", "XZ", "XZ"]);
+    expect(migrated.openAxis).toBe(2);
+    expect(migrated.defectPositions).toEqual([0.5]);
   });
 
-  it("half-swap pipe biases toward the start-side base (3 strips of one color, 1 of the other)", () => {
-    // Z→X half: closed axis 0 wall pair shows Z below + X above.
-    //           closed axis 1 wall pair shows X below AND X above (no swap).
-    // Total Z verts: 1 strip × 2 walls × 4 verts = 8.
-    // Total X verts: 3 strips × 2 walls × 4 verts = 24.
-    const halfSpec: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, swapAxes: "first" };
-    const colors = vertexColors(createBlockGeometry(halfSpec));
-    const xCount = colors.filter((c) => colorEq(c, X_COLOR)).length;
-    const zCount = colors.filter((c) => colorEq(c, Z_COLOR)).length;
-    expect(xCount).toBe(24);
-    expect(zCount).toBe(8);
+  it("converts swapAxes:'first' (only ca0 pair flips)", () => {
+    const legacy = {
+      kind: "fb-pipe" as const,
+      openAxis: 2 as const,
+      baseAtStart: "Z" as const,
+      baseAtEnd: "X" as const,
+      defectPositions: [0.5],
+      swapAxes: "first" as const,
+    };
+    const migrated = migrateLegacyFBSpec(legacy);
+    expect(migrated.faces).toEqual(["ZX", "ZX", "X", "X"]);
   });
 
-  it("swapAxes 'second' mirrors 'first' on the other closed-axis pair", () => {
-    // Z→X second-axis half: closed axis 0 wall pair stays Z (no swap).
-    //                       closed axis 1 wall pair shows X below + Z above.
-    // Total Z verts: 3 strips × 2 walls × 4 verts = 24.
-    // Total X verts: 1 strip × 2 walls × 4 verts = 8.
-    // Mirror of the "first" case above (swap on the opposite axis pair).
-    const halfSpec: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, swapAxes: "second" };
-    const colors = vertexColors(createBlockGeometry(halfSpec));
-    const xCount = colors.filter((c) => colorEq(c, X_COLOR)).length;
-    const zCount = colors.filter((c) => colorEq(c, Z_COLOR)).length;
-    expect(xCount).toBe(8);
-    expect(zCount).toBe(24);
+  it("converts swapAxes:'second' (only ca1 pair flips)", () => {
+    const legacy = {
+      kind: "fb-pipe" as const,
+      openAxis: 2 as const,
+      baseAtStart: "Z" as const,
+      baseAtEnd: "X" as const,
+      defectPositions: [0.5],
+      swapAxes: "second" as const,
+    };
+    const migrated = migrateLegacyFBSpec(legacy);
+    expect(migrated.faces).toEqual(["Z", "Z", "XZ", "XZ"]);
   });
 
-  it("swapAxes 'second' Y-defect ring lies on the second closed-axis wall pair", () => {
-    // Z_OPEN_SPEC has Three.js openAxis=1 (Y), closedAxes=[0,2]=[X,Z].
-    // swapAxes "second" → only the Z-axis wall pair (closed[1]) swaps. The
-    // ring segments at the defect must therefore vary in X (i.e., run along
-    // the X axis, lying on the Z-walls), not in Z. Total: 4 corners (lower
-    // half) + 2 ring segments = 6 edges, mirroring the "first" case.
-    const halfSpec: FreeBuildPipeSpec = { ...Z_OPEN_SPEC, swapAxes: "second" };
-    const arr = createYDefectEdges(halfSpec).getAttribute("position").array as Float32Array;
-    expect(arr.length / 6).toBe(6);
-    // Last 2 segments are the ring; verify they vary in X (Three.js axis 0)
-    // and stay constant in Z (Three.js axis 2).
-    for (let i = 4; i < 6; i++) {
-      const x0 = arr[i * 6 + 0], x1 = arr[i * 6 + 3];
-      const z0 = arr[i * 6 + 2], z1 = arr[i * 6 + 5];
-      expect(Math.abs(x1 - x0)).toBeGreaterThan(0.5);
-      expect(z0).toBeCloseTo(z1, 6);
-    }
+  it("Y-open mirror: legacy code flipped wallColors, so migration applies the same flip", () => {
+    const legacy = {
+      kind: "fb-pipe" as const,
+      openAxis: 1 as const,
+      baseAtStart: "Z" as const,
+      baseAtEnd: "X" as const,
+      defectPositions: [0.5],
+    };
+    const migrated = migrateLegacyFBSpec(legacy);
+    expect(migrated.faces).toEqual(["XZ", "XZ", "ZX", "ZX"]);
+  });
+
+  it("normalizeFBSpec passes through new-shape specs untouched", () => {
+    const newSpec: FreeBuildPipeSpec = { ...Z_OPEN_SPEC };
+    expect(normalizeFBSpec(newSpec)).toBe(newSpec);
+  });
+
+  it("normalizeFBSpec migrates a legacy spec", () => {
+    const legacy = {
+      kind: "fb-pipe",
+      openAxis: 2,
+      baseAtStart: "Z",
+      baseAtEnd: "X",
+      defectPositions: [0.5],
+    };
+    const out = normalizeFBSpec(legacy);
+    expect(out).not.toBeNull();
+    expect(out!.faces).toEqual(["ZX", "ZX", "XZ", "XZ"]);
+  });
+
+  it("normalizeFBSpec rejects non-FB inputs", () => {
+    expect(normalizeFBSpec(null)).toBeNull();
+    expect(normalizeFBSpec({ kind: "other" })).toBeNull();
+    expect(normalizeFBSpec("OZX")).toBeNull();
   });
 });
 
@@ -333,7 +360,7 @@ describe("FB pipe geometry honors swapAxes", () => {
 // resolvePipeTypeFromFace and gives back BOTH the snapped slot and the spec
 // with openAxis matching that slot's TQEC axis.
 describe("resolveFBSpecFromFace (port-adjacent FB pipe snapping)", () => {
-  const PRESET: FBPreset = FB_PRESETS[0]; // swap-zx, openAxis=2 in template
+  const PRESET: FBPreset = FB_PRESETS[0];
   const PORT: Position3D = { x: 0, y: 0, z: 0 };
 
   it("snaps to the +X pipe slot with +X face normal", () => {
@@ -367,18 +394,14 @@ describe("resolveFBSpecFromFace (port-adjacent FB pipe snapping)", () => {
     expect(r!.spec.openAxis).toBe(1);
   });
 
-  it("preserves the preset's color/defect template, only overriding openAxis", () => {
+  it("preserves the preset's faces/defects template, only overriding openAxis", () => {
     const r = resolveFBSpecFromFace(PORT, "XZZ", new Vector3(1, 0, 0), PRESET);
     expect(r).not.toBeNull();
-    expect(r!.spec.baseAtStart).toBe(PRESET.spec.baseAtStart);
-    expect(r!.spec.baseAtEnd).toBe(PRESET.spec.baseAtEnd);
+    expect(r!.spec.faces).toEqual(PRESET.spec.faces);
     expect(r!.spec.defectPositions).toEqual(PRESET.spec.defectPositions);
   });
 
   it("computes the same adj position as resolvePipeTypeFromFace for every face direction", () => {
-    // Snap parity: an FB preset hovering a port should land on the same grid slot
-    // as a regular pipe variant — the only thing that differs is the resulting
-    // block type (FB spec vs concrete PipeType).
     const port: Position3D = { x: 3, y: 6, z: 0 };
     const normals = [
       new Vector3(1, 0, 0),
@@ -420,7 +443,6 @@ describe("attached-pipe accounting recognizes FB pipes", () => {
   });
 
   it("countAttachedPipes counts FB pipes alongside TQEC pipes", () => {
-    // Cube at origin with one TQEC pipe on +X and one FB pipe on +Y.
     const blocks = makeBlocks([
       { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" },
       { pos: { x: 1, y: 0, z: 0 }, type: "OZX" },
@@ -440,12 +462,8 @@ describe("attached-pipe accounting recognizes FB pipes", () => {
   });
 
   it("does not count an FB pipe whose open axis doesn't point at the cube", () => {
-    // A Z-open FB pipe at (1,0,0) is NOT a +X-attached pipe of the cube at origin
-    // (it occupies a Z-axis slot, but its position isn't even a valid pipe slot).
-    // This is a parity check: regular pipes are filtered the same way.
     const blocks = makeBlocks([
       { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" },
-      // Wrong-axis FB pipe at +X slot — open along Y, not X.
       { pos: { x: 1, y: 0, z: 0 }, type: Y_OPEN_SPEC },
     ]);
     expect(countAttachedPipes({ x: 0, y: 0, z: 0 }, blocks)).toBe(0);

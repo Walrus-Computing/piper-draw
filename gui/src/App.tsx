@@ -30,6 +30,7 @@ import { DragShadow } from "./components/DragShadow";
 import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { FlowsPanel } from "./components/FlowsPanel";
+import { FreeBuildPipeVariantsPanel } from "./components/FreeBuildPipeVariantsPanel";
 import { ZXPanel } from "./components/ZXPanel";
 import { PortLabels3D } from "./components/PortLabels3D";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
@@ -1115,6 +1116,7 @@ export default function App() {
       )}
       <FlowsPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
       <ZXPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
+      <FreeBuildPipeVariantsPanel />
       {showHints && <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />}
       {showHints && <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />}
       {keybindEditorMode && (
