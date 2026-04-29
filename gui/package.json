@@ -44,7 +44,7 @@
     "slop-scan": "^0.3.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.1",
-    "vite": "^8.0.4",
+    "vite": "^8.0.10",
     "vitest": "^3.2.4"
   }
 }
