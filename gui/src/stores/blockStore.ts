@@ -15,6 +15,7 @@ import {
   hasPipeColorConflict,
   hasYCubePipeAxisConflict,
   isPipeType,
+  isSlabType,
   isValidBlockPos,
   isValidPos,
   resolvePipeType,
@@ -45,7 +46,7 @@ import {
 import { rotateBlockAroundZ } from "../utils/blockRotation";
 
 export type Mode = "edit" | "build";
-export type ArmedTool = "pointer" | "cube" | "pipe" | "port" | "paste";
+export type ArmedTool = "pointer" | "cube" | "pipe" | "port" | "paste" | "slab";
 
 const MAX_HISTORY = 100;
 
@@ -220,6 +221,7 @@ interface BlockStore {
   setCubeType: (cubeType: BlockType) => void;
   setPipeVariant: (variant: PipeVariant) => void;
   setPlacePort: (on: boolean) => void;
+  setArmedSlab: (on: boolean) => void;
   /** Cycle the armed placeable by ±1 within PLACEABLE_ORDER (Drag / Drop mode only). */
   cycleArmedType: (dir: -1 | 1) => void;
   /**
@@ -651,7 +653,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   lastBuildAxis: null,
 
   freeBuild: false,
-  toggleFreeBuild: () => set((s) => ({ freeBuild: !s.freeBuild })),
+  toggleFreeBuild: () => set((s) => {
+    const next = !s.freeBuild;
+    // Disarm slab when leaving free-build, since the toolbar button hides.
+    if (!next && s.armedTool === "slab") {
+      return { freeBuild: next, armedTool: "pointer" as ArmedTool };
+    }
+    return { freeBuild: next };
+  }),
 
   showGrid: true,
   showHints: true,
@@ -780,18 +789,26 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   setCubeType: (cubeType) => set({ cubeType, armedTool: "cube", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
   setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], armedTool: "pipe", portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
   setPlacePort: (on) => set({ armedTool: on ? "port" : "pointer", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, ...(on ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null } : {}) }),
+  setArmedSlab: (on) => set({ armedTool: on ? "slab" : "pointer", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, ...(on ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null } : {}) }),
   cycleArmedType: (dir) => {
     const s = get();
     if (s.mode !== "edit") return;
     const cur = currentPlaceableIndex(s.armedTool, s.cubeType, s.pipeVariant);
     const N = PLACEABLE_ORDER.length;
-    const next = cur === -1
+    let next = cur === -1
       ? (dir === 1 ? 0 : N - 1)
       : (((cur + dir) % N) + N) % N;
+    // Skip slab when not in free-build mode — it's the only kind that's
+    // gated, so a single re-step in the same direction always lands on a
+    // legal placeable.
+    if (!s.freeBuild && PLACEABLE_ORDER[next].kind === "slab") {
+      next = (((next + dir) % N) + N) % N;
+    }
     const target = PLACEABLE_ORDER[next];
     if (target.kind === "port") s.setPlacePort(true);
     else if (target.kind === "cube") s.setCubeType(target.cubeType);
-    else s.setPipeVariant(target.variant);
+    else if (target.kind === "pipe") s.setPipeVariant(target.variant);
+    else s.setArmedSlab(true);
   },
   cycleSelectedType: (dir, target) => {
     const state = get();
@@ -1105,6 +1122,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (!resolved) return state;
         blockType = resolved;
       }
+      // Slab tool overrides cubeType — armed-tool dictates the placed kind.
+      if (store.armedTool === "slab") {
+        blockType = "slab";
+      }
 
       const key = posKey(pos);
       const existing = state.blocks.get(key);
@@ -1120,9 +1141,11 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         return state;
       }
       if (hasBlockOverlap(pos, blockType, state.blocks, state.spatialIndex, existing ? key : undefined)) return state;
+      // Slabs are free-build only; reject if the gate is off.
+      if (isSlabType(blockType) && !store.freeBuild) return state;
       if (!store.freeBuild) {
         if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, state.blocks)) return state;
-        if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
+        if (!isPipeType(blockType) && blockType !== "Y" && !isSlabType(blockType) && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
         if (hasYCubePipeAxisConflict(blockType, pos, state.blocks)) return state;
       }
 

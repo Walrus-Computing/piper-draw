@@ -239,6 +239,10 @@ function TypedInstances({
       // Port-conversion tool: no ghost preview on existing blocks — the click
       // either removes the cube or does nothing (and sets a warning).
       store.setHoveredGridPos(null);
+    } else if (store.mode === "edit" && armed === "slab") {
+      // Slab tool: never face-adjacent — the placement target is the gap
+      // between pipes on the ground plane, handled by GridPlane.
+      store.setHoveredGridPos(null);
     } else {
       // Place mode: check if we can replace the hovered block itself
       const hovered = b[e.instanceId];
@@ -339,6 +343,9 @@ function TypedInstances({
         store.convertBlockToPort(b[e.instanceId].pos);
         return;
       }
+      // Slab tool: clicking an existing block is a no-op — slabs only go in
+      // the gap between 4 pipes on the ground plane.
+      if (armed === "slab") return;
       // Place mode: try replacing the clicked block if the selected type
       // is valid at the clicked block's position
       const clicked = b[e.instanceId];

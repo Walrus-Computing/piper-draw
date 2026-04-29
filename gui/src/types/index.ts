@@ -41,7 +41,13 @@ export type CubeType = (typeof CUBE_TYPES)[number];
 export const PIPE_TYPES = ["OZX", "OXZ", "OZXH", "OXZH", "ZOX", "XOZ", "ZOXH", "XOZH", "ZXO", "XZO", "ZXOH", "XZOH"] as const;
 export type PipeType = (typeof PIPE_TYPES)[number];
 
-export type BlockType = CubeType | "Y" | PipeType;
+/** Slab: a free-build-only element sitting in the gap between 4 horizontal pipes
+ * forming a square on the XY plane. Renders as two solid horizontal squares at
+ * the top and bottom of pipe height. Position has both x and y ≡ 1 (mod 3). */
+export const SLAB_TYPE = "slab" as const;
+export type SlabType = typeof SLAB_TYPE;
+
+export type BlockType = CubeType | "Y" | PipeType | SlabType;
 export type FaceMask = number;
 
 export const FACE_POS_X = 1 << 0; // +X face in Three.js box geometry order
@@ -72,13 +78,15 @@ export const PIPE_VARIANTS: PipeVariant[] = ["ZX", "XZ", "ZXH", "XZH"];
 export type Placeable =
   | { kind: "port" }
   | { kind: "cube"; cubeType: BlockType }
-  | { kind: "pipe"; variant: PipeVariant };
+  | { kind: "pipe"; variant: PipeVariant }
+  | { kind: "slab" };
 
 export const PLACEABLE_ORDER: ReadonlyArray<Placeable> = [
   { kind: "port" },
   ...CUBE_TYPES.map((t) => ({ kind: "cube" as const, cubeType: t as BlockType })),
   { kind: "cube" as const, cubeType: "Y" as BlockType },
   ...PIPE_VARIANTS.map((v) => ({ kind: "pipe" as const, variant: v })),
+  { kind: "slab" as const },
 ];
 
 /**
@@ -86,12 +94,13 @@ export const PLACEABLE_ORDER: ReadonlyArray<Placeable> = [
  * pointer tool is armed (no placeable selected).
  */
 export function currentPlaceableIndex(
-  armedTool: "pointer" | "cube" | "pipe" | "port" | "paste",
+  armedTool: "pointer" | "cube" | "pipe" | "port" | "paste" | "slab",
   cubeType: BlockType,
   pipeVariant: PipeVariant | null,
 ): number {
   if (armedTool === "pointer" || armedTool === "paste") return -1;
   if (armedTool === "port") return 0;
+  if (armedTool === "slab") return PLACEABLE_ORDER.findIndex((p) => p.kind === "slab");
   if (armedTool === "pipe") {
     if (!pipeVariant) return -1;
     return PLACEABLE_ORDER.findIndex((p) => p.kind === "pipe" && p.variant === pipeVariant);
@@ -129,12 +138,14 @@ export const H_COLOR = new THREE.Color("#ffff65"); // yellow
 // Y-type defect ("twist") edges per Gidney's defect-diagram convention.
 // Distinct from Y_COLOR so Y blocks (green) and Y defects (magenta) read apart.
 export const Y_DEFECT_COLOR = new THREE.Color("#ff39c2");
+export const SLAB_COLOR = new THREE.Color("#cccccc"); // free-build slab fill
 
 export const X_HEX = "#ff7f7f";
 export const Z_HEX = "#7396ff";
 export const Y_HEX = "#63c676";
 export const H_HEX = "#ffff65";
 export const Y_DEFECT_HEX = "#ff39c2";
+export const SLAB_HEX = "#cccccc";
 
 const H_BAND_HALF_HEIGHT = 0.08;
 /** Inset so pipe walls are never coplanar with adjacent blocks/pipes. */
@@ -147,6 +158,10 @@ const FACE_MASK_EPS = 1e-9;
 
 export function isPipeType(bt: BlockType): bt is PipeType {
   return (PIPE_TYPES as readonly string[]).includes(bt);
+}
+
+export function isSlabType(bt: BlockType): bt is SlabType {
+  return bt === SLAB_TYPE;
 }
 
 /** Map a TQEC basis character ('X' or 'Z') to its THREE.Color. */
@@ -183,8 +198,18 @@ export function isValidPipePos(pos: Position3D): boolean {
   return slots === 1 && zeros === 2;
 }
 
+/**
+ * Slab positions sit in the gap centred between 4 horizontal pipes on the XY
+ * plane: both x and y are pipe-slot coords (≡ 1 mod 3) and z is a block coord
+ * (≡ 0 mod 3). XY plane only — no XZ / YZ / temporal-face slabs in v1.
+ */
+export function isValidSlabPos(pos: Position3D): boolean {
+  return mod(pos.x, 3) === 1 && mod(pos.y, 3) === 1 && mod(pos.z, 3) === 0;
+}
+
 export function isValidPos(pos: Position3D, blockType: BlockType): boolean {
   if (isPipeType(blockType)) return isValidPipePos(pos);
+  if (isSlabType(blockType)) return isValidSlabPos(pos);
   return isValidBlockPos(pos);
 }
 
@@ -259,6 +284,12 @@ export function snapGroundPos(rawX: number, rawY: number, forPipe: boolean): Pos
   return { x: a, y: b, z: 0 };
 }
 
+/** Snap to the nearest valid slab position on the XY ground plane: both
+ *  coordinates round to nearest 3k+1 (the gap centre between 4 pipes). */
+export function snapGroundPosSlab(rawX: number, rawY: number): Position3D {
+  return { x: nearest3kPipeCoord(rawX), y: nearest3kPipeCoord(rawY), z: 0 };
+}
+
 // ---------------------------------------------------------------------------
 // Sizes and coordinate mapping
 // ---------------------------------------------------------------------------
@@ -270,6 +301,9 @@ export function blockTqecSize(blockType: BlockType): [number, number, number] {
     case "ZXO": case "XZO": case "ZXOH": case "XZOH": return [1, 1, 2];
     case "ZOX": case "XOZ": case "ZOXH": case "XOZH": return [1, 2, 1];
     case "OZX": case "OXZ": case "OZXH": case "OXZH": return [2, 1, 1];
+    // Slab fills the 2×2 inner gap between 4 pipes that form a square,
+    // anchored at its lower-left corner (x ≡ 1, y ≡ 1, z ≡ 0 mod 3).
+    case SLAB_TYPE: return [2, 2, 1];
     default: return [1, 1, 1];
   }
 }
@@ -485,12 +519,42 @@ function createPipeGeometry(
 }
 
 /**
+ * Slab geometry: a 2×1×2 box (Three.js x,y,z) keeping only the top (+Y) and
+ * bottom (-Y) faces, so two solid horizontal squares are visible at the top
+ * and bottom heights of the surrounding pipes. The four vertical side faces
+ * are stripped. The 2-unit horizontal extent fills the inner gap between the
+ * 4 pipes that form a square in TQEC X/Y.
+ */
+function createSlabGeometry(): THREE.BufferGeometry {
+  const e = WALL_EPS;
+  const geo = new THREE.BoxGeometry(2 - 2 * e, 1 - 2 * e, 2 - 2 * e);
+  const colors = new Float32Array(24 * 3);
+  for (let i = 0; i < 24; i++) {
+    colors[i * 3] = SLAB_COLOR.r;
+    colors[i * 3 + 1] = SLAB_COLOR.g;
+    colors[i * 3 + 2] = SLAB_COLOR.b;
+  }
+  // Keep only +Y (face 2) and -Y (face 3) — Three.js box face order is
+  // +X, -X, +Y, -Y, +Z, -Z. Drop side faces so the slab reads as two plates.
+  const oldIndex = geo.index!;
+  const newIndices: number[] = [];
+  for (const face of [2, 3]) {
+    for (let i = 0; i < 6; i++) newIndices.push(oldIndex.getX(face * 6 + i));
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geo.setIndex(newIndices);
+  geo.clearGroups();
+  return geo;
+}
+
+/**
  * Create colored geometry for any block type.
  *
  * Pipe types are parsed from the type name: each character gives the basis
  * for that TQEC axis ('X', 'Z', or 'O' for open). Hadamard variants end in 'H'.
  */
 export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask = 0, hBandHalfHeight?: number): THREE.BufferGeometry {
+  if (isSlabType(blockType)) return createSlabGeometry();
   if (isPipeType(blockType)) {
     const base = blockType.replace("H", "");
     const hadamard = blockType.length > 3;
@@ -566,9 +630,13 @@ export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask 
 
 /** Edge line segments for a block type, including Hadamard band edges for H pipes. */
 export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0, hBandHalfHeight?: number): THREE.BufferGeometry {
+  // Slabs render only top + bottom face edges (no vertical sides).
+  if (isSlabType(blockType)) {
+    hiddenFaces = (hiddenFaces | FACE_POS_X | FACE_NEG_X | FACE_POS_Z | FACE_NEG_Z) as FaceMask;
+  }
   const [bx, by, bz] = blockThreeSize(blockType);
   const pipe = isPipeType(blockType);
-  const e2 = pipe ? 2 * WALL_EPS : 0;
+  const e2 = pipe || isSlabType(blockType) ? 2 * WALL_EPS : 0;
   const hx = bx / 2 - e2 / 2;
   const hy = by / 2 - e2 / 2;
   const hz = bz / 2 - e2 / 2;
@@ -677,6 +745,7 @@ export function createYDefectEdges(blockType: BlockType, hiddenFaces: FaceMask =
   };
 
   if (blockType === "Y") return empty();
+  if (isSlabType(blockType)) return empty();
 
   const [bx, by, bz] = blockThreeSize(blockType);
   const pipe = isPipeType(blockType);
@@ -1261,6 +1330,7 @@ export function swapPipeVariant(pipeBase: string): string {
  */
 export function flipBlockType(type: BlockType): BlockType {
   if (type === "Y") return type;
+  if (isSlabType(type)) return type;
   let out = "";
   for (const ch of type) {
     if (ch === "X") out += "Z";
