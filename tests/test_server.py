@@ -816,7 +816,6 @@ class TestZXEndpoint:
         assert "output" in (result["circuit_error"] or "").lower()
 
 
-
 class TestPortLabelRenameTranslation:
     """C7: when convert_blocks silently renames a duplicate/empty port label,
     callers' per-label dicts (port_io, ranks) must propagate to the renamed
