@@ -98,7 +98,9 @@ type UndoCommand =
   | { kind: "bulk-move"; entries: Array<{ oldKey: string; oldBlock: Block; newKey: string; newBlock: Block }> }
   | { kind: "clear"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask>; savedUndetermined: Map<string, UndeterminedCubeInfo> }
   | { kind: "load"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask>; savedUndetermined: Map<string, UndeterminedCubeInfo>;
-      newBlocks: Map<string, Block>; newIndex: SpatialIndex; newHiddenFaces: Map<string, FaceMask> }
+      savedPortMeta: Map<string, PortMeta>; savedPortPositions: Set<string>;
+      newBlocks: Map<string, Block>; newIndex: SpatialIndex; newHiddenFaces: Map<string, FaceMask>;
+      newPortMeta: Map<string, PortMeta>; newPortPositions: Set<string> }
   | { kind: "build-step"; step: BuildStep }
   | { kind: "pipe-cycle"; pipeKey: string; oldType: PipeType; newType: PipeType;
       retyped?: Array<{ cubeKey: string; oldType: CubeType; newType: CubeType;
@@ -247,7 +249,10 @@ interface BlockStore {
   removeBlock: (pos: Position3D) => void;
   undo: () => void;
   redo: () => void;
-  loadBlocks: (blocks: Map<string, Block>) => void;
+  loadBlocks: (
+    blocks: Map<string, Block>,
+    ports?: { portMeta: Map<string, PortMeta>; portPositions: Set<string> },
+  ) => void;
   /**
    * Merge `blocks` into the current scene, auto-offset along +X so there's no
    * overlap, and leave every inserted block selected so the user can drag the
@@ -1379,7 +1384,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
 
       if (cmd.kind === "load") {
-        // Undo a load — restore the state before the import
+        // Undo a load — restore the state before the import. Includes the
+        // port state so a shared-scene "load" round-trips cleanly.
         const newIndex = buildSpatialIndex(cmd.savedBlocks);
         return {
           blocks: cmd.savedBlocks,
@@ -1389,6 +1395,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           future: [cmd, ...state.future].slice(0, MAX_HISTORY),
           hoveredGridPos: null,
           undeterminedCubes: cmd.savedUndetermined,
+          portMeta: cmd.savedPortMeta,
+          portPositions: cmd.savedPortPositions,
         };
       }
 
@@ -1753,7 +1761,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
 
       if (cmd.kind === "load") {
-        // Redo a load — restore the imported state
+        // Redo a load — restore the imported state, including ports.
         return {
           blocks: cmd.newBlocks,
           spatialIndex: cmd.newIndex,
@@ -1762,6 +1770,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           future: newFuture,
           hoveredGridPos: null,
           undeterminedCubes: new Map(),
+          portMeta: cmd.newPortMeta,
+          portPositions: cmd.newPortPositions,
         };
       }
 
@@ -2013,18 +2023,32 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       };
     }),
 
-  loadBlocks: (incoming) =>
+  loadBlocks: (incoming, ports) =>
     set((state) => {
-      if (incoming.size === 0 && state.blocks.size === 0) return state;
+      const noChange =
+        incoming.size === 0 &&
+        state.blocks.size === 0 &&
+        (!ports || (ports.portMeta.size === 0 && ports.portPositions.size === 0));
+      if (noChange) return state;
       const { spatialIndex, hiddenFaces, undeterminedCubes } = computeDerivedFromBlocks(incoming);
+      // When `ports` is omitted (template loads, .dae imports), preserve
+      // existing portMeta and clear portPositions — matches prior behavior.
+      // When provided (applySnapshot('load') from a shared scene), replace
+      // both atomically so undo can roll the entire load back.
+      const newPortMeta = ports ? ports.portMeta : state.portMeta;
+      const newPortPositions = ports ? ports.portPositions : new Set<string>();
       const cmd: UndoCommand = {
         kind: "load",
         savedBlocks: state.blocks,
         savedHiddenFaces: state.hiddenFaces,
         savedUndetermined: state.undeterminedCubes,
+        savedPortMeta: state.portMeta,
+        savedPortPositions: state.portPositions,
         newBlocks: incoming,
         newIndex: spatialIndex,
         newHiddenFaces: hiddenFaces,
+        newPortMeta,
+        newPortPositions,
       };
       return {
         blocks: incoming,
@@ -2034,7 +2058,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         future: [],
         hoveredGridPos: null,
         undeterminedCubes,
-        portPositions: new Set<string>(),
+        portMeta: newPortMeta,
+        portPositions: newPortPositions,
       };
     }),
 
@@ -2113,8 +2138,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     set((state) => commitPasteReducer(state)),
 
   hydrateBlocks: (incoming) =>
-    set((state) => {
-      if (incoming.size === 0) return state;
+    set(() => {
+      // Run unconditionally — even with empty `incoming`, callers
+      // (applySnapshot from a shared port-only scene, or autosave with no
+      // blocks) need derived state and selection to reset. Returning early
+      // on empty input previously left stale spatialIndex/hiddenFaces
+      // grafted onto whatever ports the same applySnapshot wrote next.
       const { spatialIndex, hiddenFaces } = computeDerivedFromBlocks(incoming);
       return {
         blocks: incoming,

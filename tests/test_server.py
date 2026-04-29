@@ -9,6 +9,8 @@ from server import (
     ZXRequest,
     _pipe_endpoints,
     _piper_to_tqec_pos,
+    _retag_label_to_rank,
+    _retag_port_io,
     _tqec_to_piper_pos,
     convert_blocks,
     validate,
@@ -83,7 +85,7 @@ class TestConvertBlocks:
             BlockInput(pos=[0, 0, 0], type="ZXZ"),
             BlockInput(pos=[3, 0, 0], type="XZZ"),
         ]
-        result = convert_blocks(blocks)
+        result, _ = convert_blocks(blocks)
         assert len(result["cubes"]) == 2
         assert len(result["pipes"]) == 0
         assert result["cubes"][0]["position"] == [0, 0, 0]
@@ -96,7 +98,7 @@ class TestConvertBlocks:
             BlockInput(pos=[3, 0, 0], type="ZXZ"),
             BlockInput(pos=[1, 0, 0], type="OXZ"),
         ]
-        result = convert_blocks(blocks)
+        result, _ = convert_blocks(blocks)
         assert len(result["cubes"]) == 2
         assert len(result["pipes"]) == 1
         assert result["pipes"][0]["u"] == [0, 0, 0]
@@ -109,7 +111,7 @@ class TestConvertBlocks:
             BlockInput(pos=[0, 0, 0], type="ZXZ"),
             BlockInput(pos=[1, 0, 0], type="OXZ"),
         ]
-        result = convert_blocks(blocks)
+        result, _ = convert_blocks(blocks)
         cubes = result["cubes"]
         assert len(cubes) == 2  # original cube + auto port
         port = [c for c in cubes if c["kind"] == "PORT"]
@@ -119,7 +121,7 @@ class TestConvertBlocks:
     def test_auto_port_both_ends(self):
         # Standalone pipe with no cubes at all
         blocks = [BlockInput(pos=[1, 0, 0], type="OZX")]
-        result = convert_blocks(blocks)
+        result, _ = convert_blocks(blocks)
         cubes = result["cubes"]
         ports = [c for c in cubes if c["kind"] == "PORT"]
         assert len(ports) == 2
@@ -128,7 +130,7 @@ class TestConvertBlocks:
 
     def test_auto_port_unique_labels(self):
         blocks = [BlockInput(pos=[1, 0, 0], type="OZX")]
-        result = convert_blocks(blocks)
+        result, _ = convert_blocks(blocks)
         labels = [c["label"] for c in result["cubes"] if c["kind"] == "PORT"]
         assert len(labels) == len(set(labels))
 
@@ -139,14 +141,14 @@ class TestConvertBlocks:
             BlockInput(pos=[1, 0, 0], type="OXZ"),
             BlockInput(pos=[0, 1, 0], type="XOZ"),
         ]
-        result = convert_blocks(blocks)
+        result, _ = convert_blocks(blocks)
         ports = [c for c in result["cubes"] if c["kind"] == "PORT"]
         # (1,0,0) from first pipe, (0,1,0) from second pipe
         assert len(ports) == 2
 
     def test_y_block(self):
         blocks = [BlockInput(pos=[0, 0, 0], type="Y")]
-        result = convert_blocks(blocks)
+        result, _ = convert_blocks(blocks)
         assert result["cubes"][0]["kind"] == "Y"
 
     def test_hadamard_pipe(self):
@@ -155,12 +157,12 @@ class TestConvertBlocks:
             BlockInput(pos=[3, 0, 0], type="ZXZ"),
             BlockInput(pos=[1, 0, 0], type="OXZH"),
         ]
-        result = convert_blocks(blocks)
+        result, _ = convert_blocks(blocks)
         assert result["pipes"][0]["kind"] == "OXZH"
 
     def test_unknown_type_ignored(self):
         blocks = [BlockInput(pos=[0, 0, 0], type="UNKNOWN")]
-        result = convert_blocks(blocks)
+        result, _ = convert_blocks(blocks)
         assert len(result["cubes"]) == 0
         assert len(result["pipes"]) == 0
 
@@ -812,3 +814,51 @@ class TestZXEndpoint:
         assert result["ok"] is True
         assert result["circuit"] is None
         assert "output" in (result["circuit_error"] or "").lower()
+
+
+
+class TestPortLabelRenameTranslation:
+    """C7: when convert_blocks silently renames a duplicate/empty port label,
+    callers' per-label dicts (port_io, ranks) must propagate to the renamed
+    port — otherwise an attacker-crafted share URL with duplicate labels
+    silently strips port direction or qubit ordering."""
+
+    def test_convert_blocks_returns_port_finals_for_renames(self):
+        # Two port endpoints both requesting label "P1": the first gets it,
+        # the second is renamed via the port_{n} fallback.
+        blocks = [
+            BlockInput(pos=[0, 0, 0], type="ZXZ"),
+            BlockInput(pos=[-2, 0, 0], type="OXZ"),
+            BlockInput(pos=[1, 0, 0], type="OXZ"),
+        ]
+        # Tqec positions are (-1, 0, 0) and (1, 0, 0); both request "P1".
+        port_labels = {"-1,0,0": "P1", "1,0,0": "P1"}
+        _, port_finals = convert_blocks(blocks, port_labels)
+        assert set(port_finals.keys()) == {"-1,0,0", "1,0,0"}
+        # One kept "P1", the other was renamed.
+        finals = set(port_finals.values())
+        assert "P1" in finals
+        assert any(f.startswith("port_") for f in finals)
+
+    def test_retag_port_io_propagates_to_renamed_endpoint(self):
+        # User submitted both ports with label "P1" and port_io={"P1": "out"}.
+        # After rename, both finals must inherit "out".
+        port_labels = [
+            PortLabelInput(pos=[-3, 0, 0], label="P1"),
+            PortLabelInput(pos=[3, 0, 0], label="P1"),
+        ]
+        port_finals = {"-1,0,0": "P1", "1,0,0": "port_0"}
+        retagged = _retag_port_io({"P1": "out"}, port_labels, port_finals)
+        assert retagged == {"P1": "out", "port_0": "out"}
+
+    def test_retag_label_to_rank_propagates_to_renamed_endpoint(self):
+        # Each PortLabelInput has its own rank — even though both share a
+        # label, the rank lookup is per-position, so the renamed port keeps
+        # its own rank value.
+        port_labels = [
+            PortLabelInput(pos=[-3, 0, 0], label="P1", rank=0),
+            PortLabelInput(pos=[3, 0, 0], label="P1", rank=1),
+        ]
+        port_finals = {"-1,0,0": "P1", "1,0,0": "port_0"}
+        retagged = _retag_label_to_rank(port_labels, port_finals)
+        assert retagged == {"P1": 0, "port_0": 1}

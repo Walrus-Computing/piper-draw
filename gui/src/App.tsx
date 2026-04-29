@@ -54,6 +54,7 @@ import { downloadPng } from "./utils/photoExport";
 import { downloadDae } from "./utils/daeExport";
 import {
   applySnapshot,
+  isSceneSnapshotV1,
   type SceneSnapshotV1,
 } from "./utils/sceneSnapshot";
 import {
@@ -77,6 +78,40 @@ const GRID_SNAP = 3;
 const AUTOSAVE_KEY = "piper-draw:autosave:v1";
 const AUTOSAVE_META_KEY = "piper-draw:autosave:meta:v1";
 const AUTOSAVE_DEBOUNCE_MS = 500;
+
+// Snapshot of the user's autosave taken just before a shared scene is applied.
+// Persisted to localStorage so "Restore previous" survives a tab close/reload —
+// otherwise the autosave subscriber overwrites the original autosave with the
+// shared scene within AUTOSAVE_DEBOUNCE_MS.
+const PRE_SHARE_SNAPSHOT_KEY = "piper-draw:autosave:pre-share:v1";
+
+function readPreShareSnapshot(): SceneSnapshotV1 | null {
+  try {
+    const raw = localStorage.getItem(PRE_SHARE_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isSceneSnapshotV1(parsed)) {
+      localStorage.removeItem(PRE_SHARE_SNAPSHOT_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    try { localStorage.removeItem(PRE_SHARE_SNAPSHOT_KEY); } catch { /* ignore */ }
+    return null;
+  }
+}
+
+function writePreShareSnapshot(snapshot: SceneSnapshotV1): void {
+  try {
+    localStorage.setItem(PRE_SHARE_SNAPSHOT_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Quota / private mode — banner falls back to React-only state.
+  }
+}
+
+function clearPreShareSnapshot(): void {
+  try { localStorage.removeItem(PRE_SHARE_SNAPSHOT_KEY); } catch { /* ignore */ }
+}
 
 /**
  * Shader-based grid mesh: dark grey cells at block positions (mod 3 ≡ 0),
@@ -506,8 +541,20 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(
     () => typeof localStorage !== 'undefined' && !localStorage.getItem('piperDraw.seenIntro'),
   );
-  const [sharedSceneBanner, setSharedSceneBanner] =
-    useState<{ previousSnapshot: SceneSnapshotV1 } | null>(null);
+  const [sharedSceneBanner, setSharedSceneBanner] = useState<
+    { previousSnapshot: SceneSnapshotV1 } | null
+  >(() => {
+    // Lazy init: hydrate the banner from a previous tab's pre-share key so
+    // it survives a reload while a shared scene is loaded. The boot effect
+    // below sets the banner anew when a fresh share is opened.
+    if (typeof window === "undefined") return null;
+    const carried = readPreShareSnapshot();
+    return carried ? { previousSnapshot: carried } : null;
+  });
+  // Gates the autosave subscriber: stays false during hash-decode so a shared
+  // scene's hydrate can't trigger an immediate write that overwrites the
+  // pre-share autosave (C6 race fix).
+  const [autosaveReady, setAutosaveReady] = useState(false);
   const threeStateRef = useRef<ThreeState | null>(null);
   const photoRequest = useBlockStore((s) => s.photoRequest);
   const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
@@ -943,9 +990,29 @@ export default function App() {
       }
     }
 
+    function resetTransientUI() {
+      // Recipient of a shared URL shouldn't inherit our build cursor / clipboard /
+      // paste preview — those are tied to coordinates that don't exist in the
+      // shared scene. Reset to a clean edit-mode pointer.
+      useBlockStore.setState({
+        mode: "edit",
+        armedTool: "pointer",
+        pipeVariant: null,
+        clipboard: null,
+        buildCursor: null,
+        portWarning: null,
+      });
+    }
+
+    // The banner is hydrated from the pre-share localStorage key in
+    // useState's initializer above; no explicit setSharedSceneBanner here.
     const sharedHash = parseSceneHashParam(window.location.hash);
     if (!sharedHash) {
       applySnapshot(readAutosaveSnapshot(), "hydrate");
+      // Boot finished synchronously; release the autosave subscriber. The
+      // async path below does the same on its terminal setAutosaveReady.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAutosaveReady(true);
       return;
     }
 
@@ -955,17 +1022,24 @@ export default function App() {
       const shared = await decodeSnapshotFromHash(window.location.hash);
       if (cancelled) return;
       if (shared) {
-        applySnapshot(shared, "hydrate");
-        clearShareHash();
         const hadAutosave =
           autosaveSnapshot.blocks.length > 0 || autosaveSnapshot.portPositions.length > 0;
+        // Persist the user's autosave to the pre-share key BEFORE applying the
+        // shared scene. The autosave subscriber (gated on autosaveReady) is
+        // still off here, but we also write before the apply so a refresh
+        // mid-flight doesn't strand the user with no recovery path.
         if (hadAutosave) {
+          writePreShareSnapshot(autosaveSnapshot);
           setSharedSceneBanner({ previousSnapshot: autosaveSnapshot });
         }
+        applySnapshot(shared, "hydrate");
+        resetTransientUI();
+        clearShareHash();
       } else {
         applySnapshot(autosaveSnapshot, "hydrate");
         clearShareHash();
       }
+      setAutosaveReady(true);
     })();
     return () => {
       cancelled = true;
@@ -973,6 +1047,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // Hold the subscriber off until the boot effect has finished hydrating.
+    // Otherwise the hydrate's `setState` would fire the subscriber and the
+    // debounced flush would overwrite the user's autosave with a half-loaded
+    // shared scene (or worse, an empty one if decode fails) — see C6 / C3.
+    if (!autosaveReady) return;
     let timeout: ReturnType<typeof setTimeout> | null = null;
     const flush = (blocks: Map<string, Block>) => {
       try {
@@ -1015,7 +1094,7 @@ export default function App() {
       }
       unsub();
     };
-  }, []);
+  }, [autosaveReady]);
 
   // Persist the Y-defect overlay toggle across sessions. Initial value is
   // hydrated in the store factory; this effect just writes back on changes.
@@ -1062,9 +1141,13 @@ export default function App() {
           previousSnapshot={sharedSceneBanner.previousSnapshot}
           onRestore={(snapshot) => {
             applySnapshot(snapshot, "load");
+            clearPreShareSnapshot();
             setSharedSceneBanner(null);
           }}
-          onDismiss={() => setSharedSceneBanner(null)}
+          onDismiss={() => {
+            clearPreShareSnapshot();
+            setSharedSceneBanner(null);
+          }}
         />
       )}
       <button
