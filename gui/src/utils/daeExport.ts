@@ -1,5 +1,5 @@
 import type { Block } from "../types";
-import { isPipeType } from "../types";
+import { isPipeType, isSlabType } from "../types";
 
 // ---------------------------------------------------------------------------
 // Constants matching tqec's Collada output
@@ -69,9 +69,20 @@ function stubGeometryXml(id: string): string {
  * (both use the same mod-3 grid where scale factor = 1 + pipe_length = 3).
  */
 export function exportBlocksToDae(blocks: Map<string, Block>): string {
-  // Collect unique block kinds
+  // Slabs are a free-build-only authoring affordance with no .dae round-trip
+  // in v1 — drop them on export and log once so the user knows.
+  let droppedSlabs = 0;
+  for (const block of blocks.values()) {
+    if (isSlabType(block.type)) droppedSlabs++;
+  }
+  if (droppedSlabs > 0) {
+    console.info(`[daeExport] dropped ${droppedSlabs} slab(s) — slabs are not represented in .dae`);
+  }
+
+  // Collect unique block kinds (excluding slabs)
   const usedKinds = new Set<string>();
   for (const block of blocks.values()) {
+    if (isSlabType(block.type)) continue;
     usedKinds.add(block.type);
   }
 
@@ -138,6 +149,7 @@ export function exportBlocksToDae(blocks: Map<string, Block>): string {
   let instanceIdx = 0;
 
   for (const block of blocks.values()) {
+    if (isSlabType(block.type)) continue;
     const kindLower = block.type.toLowerCase();
     const nodeId = `lib_${kindLower}`;
 

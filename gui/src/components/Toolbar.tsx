@@ -114,6 +114,7 @@ export function Toolbar({
   const setCubeType = useBlockStore((s) => s.setCubeType);
   const setPipeVariant = useBlockStore((s) => s.setPipeVariant);
   const setPlacePort = useBlockStore((s) => s.setPlacePort);
+  const setArmedSlab = useBlockStore((s) => s.setArmedSlab);
   const setPaletteDragging = useBlockStore((s) => s.setPaletteDragging);
   const cycleBlock = useBlockStore((s) => s.cycleBlock);
   const cyclePipe = useBlockStore((s) => s.cyclePipe);
@@ -740,6 +741,33 @@ export function Toolbar({
           ))}
         </div>
       </div>
+
+      {/* Free-build-only group: Slab */}
+      {freeBuild && mode === "edit" && (
+        <>
+          <div style={{ width: 1, background: "#ddd" }} />
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <span style={groupLabelStyle}>Free-build</span>
+            <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
+              <button
+                key="slab"
+                onPointerDown={() => {
+                  setArmedSlab(true);
+                  setPaletteDragging(true);
+                }}
+                onClick={() => setArmedSlab(true)}
+                title="Place a slab in the gap between 4 horizontal pipes"
+                style={blockBtnStyle(armedTool === "slab")}
+              >
+                Slab
+                <div style={previewWrapStyle}>
+                  <SlabIcon />
+                </div>
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Position display */}
       <div style={{ width: 1, background: "#ddd" }} />
@@ -1706,6 +1734,16 @@ function PointerIcon() {
         strokeWidth="0.5"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+function SlabIcon() {
+  // Two parallel horizontal squares filling the inner gap of a 4-pipe square.
+  return (
+    <svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true">
+      <rect x="4" y="6" width="24" height="6" fill="#cccccc" stroke="#333" strokeWidth="1" />
+      <rect x="4" y="20" width="24" height="6" fill="#cccccc" stroke="#333" strokeWidth="1" />
     </svg>
   );
 }

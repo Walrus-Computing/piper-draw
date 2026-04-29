@@ -1,5 +1,5 @@
 import type { Block, Position3D } from "../types";
-import { isPipeType } from "../types";
+import { isPipeType, isSlabType, SLAB_TYPE } from "../types";
 
 // ---------------------------------------------------------------------------
 // Hadamard direction equivalences (same as tqec's adjust_hadamards_direction)
@@ -49,6 +49,9 @@ export function getAxesDirections(rot: number[][]): Record<string, number> {
  * Port of tqec's `rotate_block_kind_by_matrix`.
  */
 export function rotateBlockKind(kindStr: string, rot: number[][]): string {
+  // Slabs are rotation-invariant in XY (two horizontal squares), so the type
+  // never changes — only the position rotates around Z elsewhere.
+  if (kindStr === SLAB_TYPE) return kindStr;
   const isY = kindStr === "Y";
   // For Y blocks, use "Y-!" as the base for the rotation check
   const originalName = isY ? "Y-!" : kindStr.slice(0, 3);
@@ -173,6 +176,10 @@ export function rotateBlockAroundZ(
 ): Block {
   const rot = direction === "ccw" ? ROT_Z_CCW : ROT_Z_CW;
   const isPipe = isPipeType(block.type);
+  // Slabs share the pipe-slot coord constraint (x,y ≡ 1 mod 3), so a Z-rotation
+  // around a cube pivot can land them at c ≡ 2 (mod 3). Treat them the same as
+  // pipes for the canonicalization step.
+  const needsCoordCanon = isPipe || isSlabType(block.type);
 
   let newType = rotateBlockKind(block.type, rot);
 
@@ -188,7 +195,7 @@ export function rotateBlockAroundZ(
     }
   }
 
-  const newPos = rotatePositionAroundZ(block.pos, pivot, direction, isPipe);
+  const newPos = rotatePositionAroundZ(block.pos, pivot, direction, needsCoordCanon);
 
   return { pos: newPos, type: newType as Block["type"] };
 }
