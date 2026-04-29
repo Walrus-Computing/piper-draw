@@ -6,6 +6,12 @@ import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPo
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
+import {
+  buildShareUrl,
+  encodeSnapshotToHashParam,
+  isCompressionStreamSupported,
+} from "../utils/sceneShare";
+import { captureSnapshot } from "../utils/sceneSnapshot";
 import { fetchTemplateManifest, loadTemplateBlocks, type TemplateEntry } from "../utils/templates";
 import { evalCoordExpr } from "../utils/parseCoordExpr";
 import { usePreviewImages } from "./PreviewRenderer";
@@ -94,6 +100,7 @@ export function Toolbar({
   onOpenKeybindEditor: (mode: KeybindMode) => void;
 }) {
   const [userScale, setUserScale] = useState<number>(loadToolbarUserScale);
+  const [recenterTooltip, setRecenterTooltip] = useState(false);
   useEffect(() => {
     window.localStorage.setItem(TOOLBAR_USER_SCALE_KEY, String(userScale));
   }, [userScale]);
@@ -490,9 +497,6 @@ export function Toolbar({
             </button>
           </div>
         )}
-        <button onClick={onResetCamera} style={btnStyle(false)} title="Recenter the camera on the origin">
-          Origin
-        </button>
       </div>
 
       {/* History + Analyze */}
@@ -764,6 +768,60 @@ export function Toolbar({
             }
             return <><span>X: {pos.x / 3}</span><span>Y: {pos.y / 3}</span><span>Z: {pos.z / 3}</span></>;
           })()}
+        </div>
+        <div style={{ position: "relative", alignSelf: "center" }}>
+          <button
+            onClick={onResetCamera}
+            onMouseEnter={() => setRecenterTooltip(true)}
+            onMouseLeave={() => setRecenterTooltip(false)}
+            aria-label="Recenter camera on origin"
+            style={{
+              ...btnStyle(false),
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 0,
+              width: 28,
+              height: 22,
+            }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.2"
+              aria-hidden="true"
+            >
+              <circle cx="7" cy="7" r="3.5" />
+              <line x1="7" y1="0.5" x2="7" y2="3" />
+              <line x1="7" y1="11" x2="7" y2="13.5" />
+              <line x1="0.5" y1="7" x2="3" y2="7" />
+              <line x1="11" y1="7" x2="13.5" y2="7" />
+            </svg>
+          </button>
+          {recenterTooltip && (
+            <div
+              role="tooltip"
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                right: 0,
+                background: "rgba(0,0,0,0.85)",
+                color: "#fff",
+                padding: "4px 8px",
+                borderRadius: 4,
+                fontSize: 11,
+                fontFamily: "sans-serif",
+                whiteSpace: "nowrap",
+                pointerEvents: "none",
+                zIndex: 100,
+              }}
+            >
+              Recenter camera on origin (0, 0, 0)
+            </div>
+          )}
         </div>
         <div style={{ textAlign: "center" }}>
           <FpsDisplay spanRef={fpsRef} />
@@ -1099,7 +1157,15 @@ function FileMenu({
   const [templates, setTemplates] = useState<TemplateEntry[] | null>(null);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [loadingFile, setLoadingFile] = useState<string | null>(null);
+  const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "too-long" | "error">("idle");
+  const shareTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const compressionSupported = isCompressionStreamSupported();
+
+  // ~6 KB total URL — Twitter/X and most chat clients are well above this,
+  // but very long URLs choke older SMS, some embeds, and the URL bar in
+  // older browsers. Past this we surface the .dae export instead.
+  const SHARE_URL_MAX_LEN = 6144;
 
   useEffect(() => {
     if (!open) return;
@@ -1148,6 +1214,52 @@ function FileMenu({
     cursor: disabled ? "default" : "pointer",
     whiteSpace: "nowrap",
   });
+
+  const onShare = async () => {
+    if (!compressionSupported || blocksEmpty) return;
+    if (shareTimeoutRef.current !== null) {
+      clearTimeout(shareTimeoutRef.current);
+      shareTimeoutRef.current = null;
+    }
+    try {
+      const snapshot = captureSnapshot();
+      const encoded = await encodeSnapshotToHashParam(snapshot);
+      const url = buildShareUrl(encoded);
+      if (url.length > SHARE_URL_MAX_LEN) {
+        setShareStatus("too-long");
+      } else {
+        await navigator.clipboard.writeText(url);
+        setShareStatus("copied");
+      }
+    } catch {
+      setShareStatus("error");
+    }
+    shareTimeoutRef.current = setTimeout(() => {
+      setShareStatus("idle");
+      setOpen(false);
+      shareTimeoutRef.current = null;
+    }, 1600);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (shareTimeoutRef.current !== null) clearTimeout(shareTimeoutRef.current);
+    };
+  }, []);
+
+  let shareLabel = "Share link";
+  let shareTitle = "Copy a link that loads this exact scene";
+  if (!compressionSupported) {
+    shareTitle = "Share link is unsupported in this browser (needs CompressionStream)";
+  } else if (shareStatus === "copied") {
+    shareLabel = "Link copied!";
+  } else if (shareStatus === "too-long") {
+    shareLabel = "Too large — use Export";
+    shareTitle = "Scene is too big for a URL; use Export to send a .dae file instead";
+  } else if (shareStatus === "error") {
+    shareLabel = "Could not copy";
+  }
+  const shareDisabled = blocksEmpty || !compressionSupported;
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
@@ -1205,6 +1317,16 @@ function FileMenu({
             style={item(blocksEmpty)}
           >
             Export
+          </button>
+          <button
+            onClick={() => {
+              void onShare();
+            }}
+            disabled={shareDisabled}
+            title={shareTitle}
+            style={item(shareDisabled)}
+          >
+            {shareLabel}
           </button>
           <button
             onClick={() => {
@@ -1457,6 +1579,8 @@ function SettingsMenu({
   const toggleCameraFollowsBuild = useKeybindStore((s) => s.toggleCameraFollowsBuild);
   const axisAbsoluteWasd = useKeybindStore((s) => s.axisAbsoluteWasd);
   const toggleAxisAbsoluteWasd = useKeybindStore((s) => s.toggleAxisAbsoluteWasd);
+  const showYDefects = useBlockStore((s) => s.showYDefects);
+  const toggleShowYDefects = useBlockStore((s) => s.toggleShowYDefects);
 
   useEffect(() => {
     if (!open) return;
@@ -1502,6 +1626,16 @@ function SettingsMenu({
               Ignore color rules
               <div style={{ fontSize: 10, color: "#888", whiteSpace: "nowrap" }}>
                 (“Free Build” — skips color-matching checks)
+              </div>
+            </span>
+          </label>
+
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={showYDefects} onChange={toggleShowYDefects} style={{ marginTop: 2 }} />
+            <span>
+              Highlight Y defects
+              <div style={{ fontSize: 10, color: "#888", whiteSpace: "nowrap" }}>
+                (magenta cylinders along edges where X and Z faces meet)
               </div>
             </span>
           </label>

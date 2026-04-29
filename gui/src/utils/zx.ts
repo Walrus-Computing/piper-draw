@@ -68,7 +68,7 @@ export async function computeZX(
   }));
   const portLabels = Array.from(portMeta.entries()).map(([key, meta]) => {
     const p = posFromKey(key);
-    return { pos: [p.x, p.y, p.z], label: meta.label };
+    return { pos: [p.x, p.y, p.z], label: meta.label, rank: meta.rank ?? null };
   });
   const portIO: Record<string, string> = {};
   for (const meta of portMeta.values()) {
