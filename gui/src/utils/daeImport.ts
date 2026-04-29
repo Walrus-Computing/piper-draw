@@ -160,6 +160,15 @@ export function parseDaeToBlocks(xmlString: string): Map<string, Block> {
     // Skip correlation surface nodes and ports
     if (kindName.endsWith("_CORRELATION") || kindName === "PORT") continue;
 
+    // Y-twist pipes are a free-build-only piper-draw concept with no TQEC
+    // semantics. If a hand-authored .dae somehow contains one, strip the Y
+    // suffix and import as the matching plain pipe, with a console note so
+    // the conversion is auditable.
+    if (kindName.length === 4 && kindName.endsWith("Y") && kindName.includes("O")) {
+      console.log(`[dae import] stripping Y-twist suffix on ${kindName} → ${kindName.slice(0, 3)} (Y-twist pipes have no TQEC semantics)`);
+      kindName = kindName.slice(0, 3);
+    }
+
     // Validate it's a known block type before rotation
     // (after rotation it should become a valid type)
 

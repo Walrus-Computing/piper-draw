@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createBlockGeometry, createYDefectEdges, getHiddenFaceMaskForPos, FACE_NEG_X, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_X, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, getOrderedPortPositions, CUBE_TYPES, PIPE_TYPES } from "./index";
+import { blockTqecSize, createBlockGeometry, createYDefectEdges, getHiddenFaceMaskForPos, FACE_NEG_X, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_X, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, getOrderedPortPositions, CUBE_TYPES, PIPE_TYPES } from "./index";
 import type { PipeType, CubeType, PortMeta } from "./index";
 import type { BlockType } from "./index";
 import { Vector3 } from "three";
@@ -491,6 +491,78 @@ describe("createBlockGeometry", () => {
 
     expect((full.getIndex()?.count ?? 0) - (hidden.getIndex()?.count ?? 0)).toBe(6);
   });
+
+  it("Y-twist pipe geometry omits the yellow Hadamard band", () => {
+    // Hadamard walls are split into 3 strips (below band, yellow band, above).
+    // Y-twist walls are split into 2 strips (below midline, above midline) with
+    // the colours flipped, but no yellow band — so no vertex carries H_COLOR.
+    const geo = createBlockGeometry("OZXY");
+    const colors = geo.getAttribute("color").array as Float32Array;
+    // H_COLOR = #ffff65 → r ≈ 1, g ≈ 1, b ≈ 0.396. Look for any vertex with
+    // both red and green channels saturated (the unique signature of yellow).
+    let yellowVerts = 0;
+    for (let i = 0; i < colors.length; i += 3) {
+      if (colors[i] > 0.95 && colors[i + 1] > 0.95) yellowVerts++;
+    }
+    expect(yellowVerts).toBe(0);
+  });
+
+  it("Y-twist pipe walls flip colour at the midline", () => {
+    // OZXY is X-open. Group quads by (face normal, side of open-axis midline)
+    // and confirm each face's "below midline" and "above midline" buckets
+    // carry different colours.
+    const geo = createBlockGeometry("OZXY");
+    const positions = geo.getAttribute("position").array as Float32Array;
+    const normals = geo.getAttribute("normal").array as Float32Array;
+    const colors = geo.getAttribute("color").array as Float32Array;
+    // Open axis in Three.js for OZXY (TQEC X-open) is X (index 0).
+    const buckets = new Map<string, Set<string>>();
+    for (let q = 0; q < positions.length / 12; q++) {
+      const baseV = q * 12;
+      const baseN = q * 12;
+      // Use the centroid of the 4 verts to decide the side of the band.
+      let sumOpen = 0;
+      for (let v = 0; v < 4; v++) sumOpen += positions[baseV + v * 3 + 0];
+      const side = sumOpen / 4 >= 0 ? "above" : "below";
+      // Normal direction names which face this quad belongs to.
+      const nx = Math.round(normals[baseN]);
+      const ny = Math.round(normals[baseN + 1]);
+      const nz = Math.round(normals[baseN + 2]);
+      const face =
+        nx !== 0 ? (nx > 0 ? "+X" : "-X") :
+        ny !== 0 ? (ny > 0 ? "+Y" : "-Y") :
+        nz > 0 ? "+Z" : "-Z";
+      const c = `${colors[baseV].toFixed(2)},${colors[baseV + 1].toFixed(2)},${colors[baseV + 2].toFixed(2)}`;
+      const key = `${face}|${side}`;
+      if (!buckets.has(key)) buckets.set(key, new Set());
+      buckets.get(key)!.add(c);
+    }
+    // Each closed-axis face has both halves; each half has a single colour
+    // and the two halves must differ (colour flip across the band).
+    for (const face of ["+Y", "-Y", "+Z", "-Z"] as const) {
+      const above = buckets.get(`${face}|above`);
+      const below = buckets.get(`${face}|below`);
+      expect(above, `face ${face} above`).toBeDefined();
+      expect(below, `face ${face} below`).toBeDefined();
+      const aboveC = [...above!][0];
+      const belowC = [...below!][0];
+      expect(aboveC).not.toBe(belowC);
+    }
+  });
+});
+
+describe("Y-twist pipe types (free-build only)", () => {
+  it("registers all 6 Y-twist pipe types", () => {
+    for (const t of ["OZXY", "OXZY", "ZOXY", "XOZY", "ZXOY", "XZOY"] as const) {
+      expect(PIPE_TYPES.includes(t)).toBe(true);
+    }
+  });
+
+  it("Y-twist pipes have the same TQEC dimensions as their plain counterparts", () => {
+    expect(blockTqecSize("OZXY")).toEqual(blockTqecSize("OZX"));
+    expect(blockTqecSize("XOZY")).toEqual(blockTqecSize("XOZ"));
+    expect(blockTqecSize("ZXOY")).toEqual(blockTqecSize("ZXO"));
+  });
 });
 
 describe("flipBlockType", () => {
@@ -600,6 +672,27 @@ describe("createYDefectEdges", () => {
     // Sanity: hiding everything yields zero edges.
     const all = FACE_POS_X | FACE_NEG_X | FACE_POS_Y | FACE_NEG_Y | FACE_POS_Z | FACE_NEG_Z;
     expect(edgeCount(createYDefectEdges("XZZ", all))).toBe(0);
+  });
+
+  it("Y-twist pipes emit 4 long edges + 4 ring segments at the band midline", () => {
+    // 4 along the open axis (same as a non-Hadamard pipe of mixed bases) plus
+    // 4 short segments forming a square ring at the band midline (one on each
+    // closed-axis face, marking the colour-flip seam).
+    expect(edgeCount(createYDefectEdges("OZXY"))).toBe(8);
+    expect(edgeCount(createYDefectEdges("XOZY"))).toBe(8);
+    expect(edgeCount(createYDefectEdges("ZXOY"))).toBe(8);
+  });
+
+  it("Y-twist ring segments lie at the open-axis midline", () => {
+    const geo = createYDefectEdges("OZXY"); // X-open in Three.js
+    const arr = geo.getAttribute("position").array as Float32Array;
+    // 4 edges run along Three.js X (the open axis) — non-zero X span on both endpoints.
+    // 4 edges are ring segments at X = 0 — both endpoints at Three.js X ≈ 0.
+    let ringCount = 0;
+    for (let i = 0; i < arr.length; i += 6) {
+      if (Math.abs(arr[i]) < 1e-6 && Math.abs(arr[i + 3]) < 1e-6) ringCount++;
+    }
+    expect(ringCount).toBe(4);
   });
 });
 

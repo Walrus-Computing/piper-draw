@@ -1,5 +1,5 @@
 import type { Block } from "../types";
-import { isPipeType, isSlabType } from "../types";
+import { isPipeType, isSlabType, isYTwistPipe } from "../types";
 
 // ---------------------------------------------------------------------------
 // Constants matching tqec's Collada output
@@ -69,20 +69,26 @@ function stubGeometryXml(id: string): string {
  * (both use the same mod-3 grid where scale factor = 1 + pipe_length = 3).
  */
 export function exportBlocksToDae(blocks: Map<string, Block>): string {
-  // Slabs are a free-build-only authoring affordance with no .dae round-trip
-  // in v1 — drop them on export and log once so the user knows.
+  // Slabs and Y-twist pipes are free-build-only authoring affordances with no
+  // .dae round-trip in v1 — drop them on export and log once so the user knows.
   let droppedSlabs = 0;
+  let droppedYTwist = 0;
   for (const block of blocks.values()) {
     if (isSlabType(block.type)) droppedSlabs++;
+    else if (isYTwistPipe(block.type)) droppedYTwist++;
   }
   if (droppedSlabs > 0) {
     console.info(`[daeExport] dropped ${droppedSlabs} slab(s) — slabs are not represented in .dae`);
   }
+  if (droppedYTwist > 0) {
+    console.warn(`[daeExport] dropped ${droppedYTwist} Y-twist pipe(s) — Y-twist pipes have no TQEC semantics in v1`);
+  }
 
-  // Collect unique block kinds (excluding slabs)
+  // Collect unique block kinds (excluding slabs and Y-twist pipes)
   const usedKinds = new Set<string>();
   for (const block of blocks.values()) {
     if (isSlabType(block.type)) continue;
+    if (isYTwistPipe(block.type)) continue;
     usedKinds.add(block.type);
   }
 
@@ -150,6 +156,7 @@ export function exportBlocksToDae(blocks: Map<string, Block>): string {
 
   for (const block of blocks.values()) {
     if (isSlabType(block.type)) continue;
+    if (isYTwistPipe(block.type)) continue;
     const kindLower = block.type.toLowerCase();
     const nodeId = `lib_${kindLower}`;
 

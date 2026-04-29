@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useBlockStore, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
 import { useKeybindStore, type Mode as KeybindMode, type NavStyle } from "../stores/keybindStore";
-import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
+import { CUBE_TYPES, FREE_BUILD_PIPE_VARIANTS, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
@@ -701,7 +701,7 @@ export function Toolbar({
       <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <span style={groupLabelStyle}>Pipes</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
-          {PIPE_VARIANTS.map((v) => (
+          {PIPE_VARIANTS.filter((v) => freeBuild || !FREE_BUILD_PIPE_VARIANTS.has(v)).map((v) => (
             <button
               key={v}
               onPointerDown={() => {
@@ -721,6 +721,11 @@ export function Toolbar({
                 }
                 setPipeVariant(v);
               }}
+              title={
+                FREE_BUILD_PIPE_VARIANTS.has(v)
+                  ? "Y-twist pipe (free-build only): faces flip colour at the band midline; magenta Y-defect ring shows when 'Highlight Y defects' is on."
+                  : undefined
+              }
               style={blockBtnStyle(
                 (mode === "edit" && armedTool === "pipe" && pipeVariant === v) ||
                 (mode === "build" && buildActivePipeVariant === v) ||

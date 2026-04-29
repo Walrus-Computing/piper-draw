@@ -148,6 +148,23 @@ describe("round-trip: export → import", () => {
     expect(imported.get("1,0,0")!.type).toBe("OZXH");
   });
 
+  it("strips Y-twist pipes on export (free-build only, no TQEC semantics)", () => {
+    const original = makeBlocks(
+      ["0,0,0", { x: 0, y: 0, z: 0 }, "XZZ"],
+      ["1,0,0", { x: 1, y: 0, z: 0 }, "OZXY"],
+      ["3,0,0", { x: 3, y: 0, z: 0 }, "ZXZ"],
+    );
+    const xml = exportBlocksToDae(original);
+    // The Y-twist pipe should not appear in the output XML at all.
+    expect(xml).not.toContain("ozxy");
+    expect(xml).not.toContain("OZXY");
+    const imported = parseDaeToBlocks(xml);
+    expect(imported.size).toBe(2);
+    expect(imported.get("0,0,0")!.type).toBe("XZZ");
+    expect(imported.get("3,0,0")!.type).toBe("ZXZ");
+    expect(imported.has("1,0,0")).toBe(false);
+  });
+
   it("preserves all 6 cube types", () => {
     const types = ["XZZ", "ZXZ", "ZXX", "XXZ", "ZZX", "XZX"] as const;
     const entries: [string, { x: number; y: number; z: number }, string][] = types.map((t, i) => [
