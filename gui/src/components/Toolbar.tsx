@@ -230,6 +230,9 @@ export function Toolbar({
     } else {
       return null;
     }
+    if (s.freeBuild) {
+      return `${currentType};1;${[...CUBE_TYPES, "Y"].join(",")}`;
+    }
     const coords: [number, number, number] = [pos.x, pos.y, pos.z];
     let pipeCount = 0;
     for (let axis = 0; axis < 3; axis++) {
@@ -271,6 +274,9 @@ export function Toolbar({
     const pipeBlock = s.blocks.get(k);
     if (!pipeBlock || !isPipeType(pipeBlock.type)) return null;
     const currentVariant = PIPE_TYPE_TO_VARIANT[pipeBlock.type as PipeType];
+    if (s.freeBuild) {
+      return `${currentVariant};${PIPE_VARIANTS.join(",")}`;
+    }
     const base = (pipeBlock.type as string).replace("H", "");
     const openAxis = base.indexOf("O") as 0 | 1 | 2;
     const pipeCoords: [number, number, number] = [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z];

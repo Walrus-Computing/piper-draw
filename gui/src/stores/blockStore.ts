@@ -816,26 +816,30 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const currentVariant = PIPE_TYPE_TO_VARIANT[oldType];
 
           const validVariants: PipeVariant[] = [];
-          for (const v of PIPE_VARIANTS) {
-            const candidate = VARIANT_AXIS_MAP[v][openAxis];
-            const tmp = new Map(s.blocks);
-            tmp.set(pipeKey, { pos: pipeBlock.pos, type: candidate });
-            let ok = true;
-            for (const offset of [-1, 2]) {
-              const nc: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
-              nc[openAxis] += offset;
-              const nKey = posKey({ x: nc[0], y: nc[1], z: nc[2] });
-              const neighbor = tmp.get(nKey);
-              if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
-              const opts = determineCubeOptions(neighbor.pos, tmp);
-              const currentType = neighbor.type as CubeType;
-              if (opts.determined) {
-                if (opts.type !== currentType) { ok = false; break; }
-              } else if (!opts.options.includes(currentType)) {
-                ok = false; break;
+          if (s.freeBuild) {
+            for (const v of PIPE_VARIANTS) validVariants.push(v);
+          } else {
+            for (const v of PIPE_VARIANTS) {
+              const candidate = VARIANT_AXIS_MAP[v][openAxis];
+              const tmp = new Map(s.blocks);
+              tmp.set(pipeKey, { pos: pipeBlock.pos, type: candidate });
+              let ok = true;
+              for (const offset of [-1, 2]) {
+                const nc: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
+                nc[openAxis] += offset;
+                const nKey = posKey({ x: nc[0], y: nc[1], z: nc[2] });
+                const neighbor = tmp.get(nKey);
+                if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
+                const opts = determineCubeOptions(neighbor.pos, tmp);
+                const currentType = neighbor.type as CubeType;
+                if (opts.determined) {
+                  if (opts.type !== currentType) { ok = false; break; }
+                } else if (!opts.options.includes(currentType)) {
+                  ok = false; break;
+                }
               }
+              if (ok) validVariants.push(v);
             }
-            if (ok) validVariants.push(v);
           }
 
           const cycle: PipeVariant[] = [];
@@ -918,11 +922,18 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           }
         }
       }
-      const result = determineCubeOptions(pos, s.blocks);
-      const cubeOpts = new Set<CubeType | "Y">(result.determined ? [result.type] : result.options);
-      // Y is a leaf: only valid with at most one attached (Z-open) pipe.
-      if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", pos, s.blocks)) cubeOpts.add("Y");
-      const portAllowed = pipeCount < 2;
+      let cubeOpts: Set<CubeType | "Y">;
+      let portAllowed: boolean;
+      if (s.freeBuild) {
+        cubeOpts = new Set<CubeType | "Y">([...CUBE_TYPES, "Y"]);
+        portAllowed = true;
+      } else {
+        const result = determineCubeOptions(pos, s.blocks);
+        cubeOpts = new Set<CubeType | "Y">(result.determined ? [result.type] : result.options);
+        // Y is a leaf: only valid with at most one attached (Z-open) pipe.
+        if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", pos, s.blocks)) cubeOpts.add("Y");
+        portAllowed = pipeCount < 2;
+      }
 
       type Opt = { kind: "port" } | { kind: "cube"; type: CubeType | "Y" };
       const cycle: Opt[] = [];

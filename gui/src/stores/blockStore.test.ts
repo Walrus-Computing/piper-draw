@@ -1210,6 +1210,83 @@ describe("blockStore", () => {
     });
   });
 
+  describe("cycleSelectedType — freeBuild bypasses validation", () => {
+    it("free-build pipe cycle accepts a variant that color rules would reject", () => {
+      // XZZ–XZ–XZZ on the z-axis is a valid pair. A Hadamard variant (XZH → XZOH)
+      // flips the +z end's closed-axis basis, so it conflicts with two XZZ cubes.
+      useBlockStore.setState({ cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 3 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 1 });
+      expect(useBlockStore.getState().blocks.get("0,0,1")?.type).toBe("XZO");
+
+      useBlockStore.setState({
+        armedTool: "pointer",
+        selectedKeys: new Set(["0,0,1"]),
+        freeBuild: false,
+      });
+      useBlockStore.getState().cycleSelectedType(1, { kind: "pipe", variant: "XZH" });
+      expect(useBlockStore.getState().blocks.get("0,0,1")?.type).toBe("XZO");
+
+      useBlockStore.setState({ freeBuild: true });
+      useBlockStore.getState().cycleSelectedType(1, { kind: "pipe", variant: "XZH" });
+      expect(useBlockStore.getState().blocks.get("0,0,1")?.type).toBe("XZOH");
+    });
+
+    it("free-build cube cycle accepts a CUBE_TYPE that color rules would reject", () => {
+      // OXZ pipe at (1,0,0) constrains the cube at (0,0,0) to Y=X, Z=Z (only
+      // ZXZ and XXZ pass). XZX has Y=Z and is rejected without freeBuild.
+      useBlockStore.setState({ cubeType: "ZXZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXZ");
+
+      useBlockStore.setState({
+        armedTool: "pointer",
+        selectedKeys: new Set(["0,0,0"]),
+        freeBuild: false,
+      });
+      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "XZX" });
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXZ");
+
+      useBlockStore.setState({ freeBuild: true });
+      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "XZX" });
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZX");
+    });
+
+    it("free-build cube cycle includes the port option even with two attached pipes", () => {
+      // ZXZ–XZ–ZXZ–XZ–ZXZ along x. The middle cube at (3,0,0) has two attached
+      // X-pipes, so portAllowed = (pipeCount < 2) = false without freeBuild.
+      useBlockStore.setState({ cubeType: "ZXZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 6, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 4, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(5);
+
+      useBlockStore.setState({
+        armedTool: "pointer",
+        selectedKeys: new Set(["3,0,0"]),
+        freeBuild: false,
+      });
+      useBlockStore.getState().cycleSelectedType(1, { kind: "port" });
+      expect(useBlockStore.getState().blocks.has("3,0,0")).toBe(true);
+      expect(useBlockStore.getState().portPositions.has("3,0,0")).toBe(false);
+
+      useBlockStore.setState({ freeBuild: true });
+      useBlockStore.getState().cycleSelectedType(1, { kind: "port" });
+      const s = useBlockStore.getState();
+      expect(s.blocks.has("3,0,0")).toBe(false);
+      expect(s.portPositions.has("3,0,0")).toBe(true);
+      expect(s.selectedKeys.has("3,0,0")).toBe(false);
+      expect(s.selectedPortPositions.has("3,0,0")).toBe(true);
+    });
+  });
+
   describe("buildMove from an empty origin", () => {
     it("leaves the origin slot empty (no cube placed at the start position)", () => {
       useBlockStore.setState({
