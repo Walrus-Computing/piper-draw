@@ -108,6 +108,11 @@ export function GridPlane() {
       }
       return;
     }
+    // Paint tool: targets faces of existing blocks, never the empty plane.
+    if (store.armedTool === "paint") {
+      setHoveredGridPos(null);
+      return;
+    }
     // Slab tool: XY-plane only — snap to the gap centre between 4 pipes
     // (both x and y at 3k+1). Iso views are not supported for slabs in v1.
     if (store.armedTool === "slab") {
@@ -199,6 +204,8 @@ export function GridPlane() {
       addBlock(pos);
       return;
     }
+    // Paint tool: empty-plane click is a no-op.
+    if (store.armedTool === "paint") return;
     const forPipe = store.pipeVariant !== null;
     const pos = snapForViewMode(viewMode, e.point, forPipe);
     addBlock(pos);
