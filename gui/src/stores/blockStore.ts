@@ -16,6 +16,8 @@ import {
   hasYCubePipeAxisConflict,
   isPipeType,
   isSlabType,
+  isYTwistPipe,
+  FREE_BUILD_PIPE_VARIANTS,
   isValidBlockPos,
   isValidPos,
   resolvePipeType,
@@ -52,7 +54,7 @@ const MAX_HISTORY = 100;
 
 /** Canonical X-open PipeType for each variant, used as cubeType fallback. */
 const PIPE_VARIANT_CANONICAL: Record<PipeVariant, BlockType> = {
-  ZX: "OZX", XZ: "OXZ", ZXH: "OZXH", XZH: "OXZH",
+  ZX: "OZX", XZ: "OXZ", ZXH: "OZXH", XZH: "OXZH", ZXY: "OZXY", XZY: "OXZY",
 };
 
 // ---------------------------------------------------------------------------
@@ -659,6 +661,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     if (!next && s.armedTool === "slab") {
       return { freeBuild: next, armedTool: "pointer" as ArmedTool };
     }
+    // Disarm Y-twist pipe variants when leaving free-build (toolbar buttons hide).
+    if (!next && s.armedTool === "pipe" && s.pipeVariant != null && FREE_BUILD_PIPE_VARIANTS.has(s.pipeVariant)) {
+      return { freeBuild: next, armedTool: "pointer" as ArmedTool, pipeVariant: null };
+    }
     return { freeBuild: next };
   }),
 
@@ -798,11 +804,19 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     let next = cur === -1
       ? (dir === 1 ? 0 : N - 1)
       : (((cur + dir) % N) + N) % N;
-    // Skip slab when not in free-build mode — it's the only kind that's
-    // gated, so a single re-step in the same direction always lands on a
-    // legal placeable.
-    if (!s.freeBuild && PLACEABLE_ORDER[next].kind === "slab") {
-      next = (((next + dir) % N) + N) % N;
+    // Skip free-build-only placeables (slab, Y-twist pipe variants) when not in
+    // free-build mode. A bounded re-step loop lands on a legal placeable.
+    const isGated = (idx: number) => {
+      const p = PLACEABLE_ORDER[idx];
+      if (p.kind === "slab") return true;
+      if (p.kind === "pipe" && FREE_BUILD_PIPE_VARIANTS.has(p.variant)) return true;
+      return false;
+    };
+    if (!s.freeBuild) {
+      let guard = N;
+      while (isGated(next) && guard-- > 0) {
+        next = (((next + dir) % N) + N) % N;
+      }
     }
     const target = PLACEABLE_ORDER[next];
     if (target.kind === "port") s.setPlacePort(true);
@@ -827,8 +841,13 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const pipeCoords: [number, number, number] = [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z];
           const currentVariant = PIPE_TYPE_TO_VARIANT[oldType];
 
+          // Y-twist variants are free-build only — exclude them from the cycle
+          // when the gate is off so R-key / arrow-key cycling can't land there.
+          const cycleVariants = s.freeBuild
+            ? PIPE_VARIANTS
+            : PIPE_VARIANTS.filter(v => !FREE_BUILD_PIPE_VARIANTS.has(v));
           const validVariants: PipeVariant[] = [];
-          for (const v of PIPE_VARIANTS) {
+          for (const v of cycleVariants) {
             const candidate = VARIANT_AXIS_MAP[v][openAxis];
             const tmp = new Map(s.blocks);
             tmp.set(pipeKey, { pos: pipeBlock.pos, type: candidate });
@@ -851,7 +870,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           }
 
           const cycle: PipeVariant[] = [];
-          for (const v of PIPE_VARIANTS) {
+          for (const v of cycleVariants) {
             if (v === currentVariant || validVariants.includes(v)) cycle.push(v);
           }
           if (cycle.length <= 1) return s;
@@ -1141,8 +1160,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         return state;
       }
       if (hasBlockOverlap(pos, blockType, state.blocks, state.spatialIndex, existing ? key : undefined)) return state;
-      // Slabs are free-build only; reject if the gate is off.
+      // Slabs and Y-twist pipes are free-build only; reject if the gate is off.
       if (isSlabType(blockType) && !store.freeBuild) return state;
+      if (isYTwistPipe(blockType) && !store.freeBuild) return state;
       if (!store.freeBuild) {
         if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, state.blocks)) return state;
         if (!isPipeType(blockType) && blockType !== "Y" && !isSlabType(blockType) && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
@@ -3340,8 +3360,13 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     const openAxis = oldBase.indexOf("O") as 0 | 1 | 2;
     const pipeCoords: [number, number, number] = [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z];
 
-    // Compute all candidate pipe types for this axis (one per toolbar variant)
-    const allCandidates = PIPE_VARIANTS.map(v => VARIANT_AXIS_MAP[v][openAxis]);
+    // Compute all candidate pipe types for this axis (one per toolbar variant).
+    // Y-twist variants are free-build only — exclude them from the cycle when
+    // the gate is off so the R-key can't land there.
+    const cycleVariants = state.freeBuild
+      ? PIPE_VARIANTS
+      : PIPE_VARIANTS.filter(v => !FREE_BUILD_PIPE_VARIANTS.has(v));
+    const allCandidates = cycleVariants.map(v => VARIANT_AXIS_MAP[v][openAxis]);
 
     // Filter to valid candidates: both neighbor cubes must have valid options
     // In free build mode, all candidates are valid

@@ -38,8 +38,19 @@ export function depthToSlice(depth: number): number {
 export const CUBE_TYPES = ["XZZ", "ZXZ", "ZXX", "XXZ", "ZZX", "XZX"] as const;
 export type CubeType = (typeof CUBE_TYPES)[number];
 
-export const PIPE_TYPES = ["OZX", "OXZ", "OZXH", "OXZH", "ZOX", "XOZ", "ZOXH", "XOZH", "ZXO", "XZO", "ZXOH", "XZOH"] as const;
+export const PIPE_TYPES = [
+  "OZX", "OXZ", "OZXH", "OXZH", "OZXY", "OXZY",
+  "ZOX", "XOZ", "ZOXH", "XOZH", "ZOXY", "XOZY",
+  "ZXO", "XZO", "ZXOH", "XZOH", "ZXOY", "XZOY",
+] as const;
 export type PipeType = (typeof PIPE_TYPES)[number];
+
+/** Y-twist pipes are free-build-only: same colour-flip as Hadamard, but the
+ * yellow band is replaced by a magenta Y-defect ring (visible only when the
+ * "Highlight Y defects" toggle is on). They have no TQEC semantics in v1. */
+export function isYTwistPipe(bt: BlockType): bt is PipeType {
+  return typeof bt === "string" && bt.length === 4 && bt.endsWith("Y") && (PIPE_TYPES as readonly string[]).includes(bt);
+}
 
 /** Slab: a free-build-only element sitting in the gap between 4 horizontal pipes
  * forming a square on the XY plane. Renders as two solid horizontal squares at
@@ -66,9 +77,13 @@ export const FACE_BIT_BY_INDEX: ReadonlyArray<number> = [
   FACE_NEG_Z,
 ];
 
-/** Pipe variant: the two non-O face characters (+ optional H). Open axis determined by position. */
-export type PipeVariant = "ZX" | "XZ" | "ZXH" | "XZH";
-export const PIPE_VARIANTS: PipeVariant[] = ["ZX", "XZ", "ZXH", "XZH"];
+/** Pipe variant: the two non-O face characters (+ optional H or Y suffix).
+ * Open axis is determined by position. The Y suffix is free-build-only (Y-twist
+ * pipes whose yellow Hadamard band is replaced by a magenta Y-defect ring). */
+export type PipeVariant = "ZX" | "XZ" | "ZXH" | "XZH" | "ZXY" | "XZY";
+export const PIPE_VARIANTS: PipeVariant[] = ["ZX", "XZ", "ZXH", "XZH", "ZXY", "XZY"];
+/** Variants that are only available when free-build mode is on. */
+export const FREE_BUILD_PIPE_VARIANTS: ReadonlySet<PipeVariant> = new Set(["ZXY", "XZY"]);
 
 /**
  * Toolbar-order list of placeable items (Port + 6 cubes + Y + 4 pipes).
@@ -231,6 +246,9 @@ export const VARIANT_AXIS_MAP: Record<PipeVariant, [PipeType, PipeType, PipeType
   XZ:  ["OXZ",  "XOZ",  "XZO"],
   ZXH: ["OZXH", "XOZH", "ZXOH"],
   XZH: ["OXZH", "ZOXH", "XZOH"],
+  // Y-twist family mirrors the H family for axis ordering. Free-build only.
+  ZXY: ["OZXY", "XOZY", "ZXOY"],
+  XZY: ["OXZY", "ZOXY", "XZOY"],
 };
 
 /** Reverse lookup: concrete PipeType → toolbar PipeVariant. */
@@ -298,9 +316,9 @@ export function snapGroundPosSlab(rawX: number, rawY: number): Position3D {
 export function blockTqecSize(blockType: BlockType): [number, number, number] {
   switch (blockType) {
     case "Y": return [1, 1, 0.5];
-    case "ZXO": case "XZO": case "ZXOH": case "XZOH": return [1, 1, 2];
-    case "ZOX": case "XOZ": case "ZOXH": case "XOZH": return [1, 2, 1];
-    case "OZX": case "OXZ": case "OZXH": case "OXZH": return [2, 1, 1];
+    case "ZXO": case "XZO": case "ZXOH": case "XZOH": case "ZXOY": case "XZOY": return [1, 1, 2];
+    case "ZOX": case "XOZ": case "ZOXH": case "XOZH": case "ZOXY": case "XOZY": return [1, 2, 1];
+    case "OZX": case "OXZ": case "OZXH": case "OXZH": case "OZXY": case "OXZY": return [2, 1, 1];
     // Slab fills the 2×2 inner gap between 4 pipes that form a square,
     // anchored at its lower-left corner (x ≡ 1, y ≡ 1, z ≡ 0 mod 3).
     case SLAB_TYPE: return [2, 2, 1];
@@ -377,24 +395,30 @@ const THREE_TO_TQEC_AXIS = [0, 2, 1] as const;
  * For non-Hadamard pipes: a BoxGeometry with the open-axis face pair removed and
  * closed-axis walls inset by WALL_EPS.
  *
- * For Hadamard pipes: each wall is subdivided into 3 strips (below band, yellow
- * Hadamard band, above band) with the two wall colors swapping above the band.
+ * For colour-flip pipes (Hadamard or Y-twist): each wall is subdivided into
+ * strips and the two wall colours swap across the band midline. Hadamard adds
+ * a yellow middle strip; Y-twist omits it (the colour-flip seam is the only
+ * marker, with the magenta Y-defect ring drawn separately by the overlay).
  *
  * @param openAxis   Three.js axis index (0=X, 1=Y, 2=Z) that is open (length 2)
  * @param wallColors Colors for the two closed-axis wall pairs, ordered by Three.js axis number
- * @param hadamard   If true, subdivide walls with a yellow Hadamard band; colors swap above it
+ * @param bandStyle  "none" → single-strip walls (no colour flip);
+ *                   "hadamard" → 3 strips with yellow middle band;
+ *                   "ydefect" → 2 strips meeting at the band midline (no yellow)
  * @param hiddenFaces Bitmask of faces to omit from geometry
  */
+export type BandStyle = "none" | "hadamard" | "ydefect";
+
 function createPipeGeometry(
   openAxis: number,
   wallColors: [THREE.Color, THREE.Color],
-  hadamard: boolean,
+  bandStyle: BandStyle,
   hiddenFaces: FaceMask = 0,
   hBandHalfHeight?: number,
 ): THREE.BufferGeometry {
   const closedAxes = [0, 1, 2].filter(a => a !== openAxis) as [number, number];
 
-  if (!hadamard) {
+  if (bandStyle === "none") {
     const e = WALL_EPS;
     const dims: [number, number, number] = [1, 1, 1];
     dims[openAxis] = 2;
@@ -439,11 +463,12 @@ function createPipeGeometry(
     return geo;
   }
 
-  // --- Hadamard pipe: 4 walls × 3 strips each ---
+  // --- Colour-flip pipe (Hadamard / Y-twist): 4 walls × 2-or-3 strips each ---
 
   const halfExt: [number, number, number] = [0.5, 0.5, 0.5];
   for (const ca of closedAxes) halfExt[ca] -= WALL_EPS;
   const bh = hBandHalfHeight ?? H_BAND_HALF_HEIGHT;
+  const isHadamard = bandStyle === "hadamard";
   // Above the band, the two closed-axis colors swap per TQEC convention
   const wallColorsAbove: [THREE.Color, THREE.Color] = [wallColors[1], wallColors[0]];
 
@@ -499,13 +524,21 @@ function createPipeGeometry(
         return [make(t0, -ocDir), make(t1, -ocDir), make(t1, ocDir), make(t0, ocDir)];
       };
 
-      // Three strips along the open axis: below band, yellow band, above band
-      const [b0, b1, b2, b3] = quad(-1, -bh);
-      addQuad(b0, b1, b2, b3, n, wallColors[i]);
-      const [m0, m1, m2, m3] = quad(-bh, bh);
-      addQuad(m0, m1, m2, m3, n, H_COLOR);
-      const [a0, a1, a2, a3] = quad(bh, 1);
-      addQuad(a0, a1, a2, a3, n, wallColorsAbove[i]);
+      // Hadamard: three strips along the open axis (below band, yellow band, above).
+      // Y-twist: two strips meeting at the open-axis midline (no yellow strip).
+      if (isHadamard) {
+        const [b0, b1, b2, b3] = quad(-1, -bh);
+        addQuad(b0, b1, b2, b3, n, wallColors[i]);
+        const [m0, m1, m2, m3] = quad(-bh, bh);
+        addQuad(m0, m1, m2, m3, n, H_COLOR);
+        const [a0, a1, a2, a3] = quad(bh, 1);
+        addQuad(a0, a1, a2, a3, n, wallColorsAbove[i]);
+      } else {
+        const [b0, b1, b2, b3] = quad(-1, 0);
+        addQuad(b0, b1, b2, b3, n, wallColors[i]);
+        const [a0, a1, a2, a3] = quad(0, 1);
+        addQuad(a0, a1, a2, a3, n, wallColorsAbove[i]);
+      }
     }
   }
 
@@ -556,19 +589,22 @@ function createSlabGeometry(): THREE.BufferGeometry {
 export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask = 0, hBandHalfHeight?: number): THREE.BufferGeometry {
   if (isSlabType(blockType)) return createSlabGeometry();
   if (isPipeType(blockType)) {
-    const base = blockType.replace("H", "");
-    const hadamard = blockType.length > 3;
+    const bandStyle: BandStyle =
+      blockType.endsWith("H") ? "hadamard" :
+      blockType.endsWith("Y") ? "ydefect" : "none";
+    const base = blockType.length > 3 ? blockType.slice(0, 3) : blockType;
     const tqecOpenAxis = base.indexOf("O") as 0 | 1 | 2;
     const threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpenAxis];
     const closedAxes = [0, 1, 2].filter(a => a !== threeOpenAxis) as [number, number];
     let wallColors = closedAxes.map(ta => basisColor(base[THREE_TO_TQEC_AXIS[ta]])) as [THREE.Color, THREE.Color];
-    // For Y-open Hadamard pipes, the geometry "below band" end (negative Three.js Z)
-    // corresponds to the tail (higher TQEC Y). Pre-swap so below-band shows tail
-    // (flipped) colors and above-band shows head (original) colors.
-    if (hadamard && tqecOpenAxis === 1) {
+    // For Y-open colour-flip pipes (Hadamard or Y-twist), the geometry "below
+    // band" end (negative Three.js Z) corresponds to the tail (higher TQEC Y).
+    // Pre-swap so below-band shows tail (flipped) colors and above-band shows
+    // head (original) colors.
+    if (bandStyle !== "none" && tqecOpenAxis === 1) {
       wallColors = [wallColors[1], wallColors[0]];
     }
-    return createPipeGeometry(threeOpenAxis, wallColors, hadamard, hiddenFaces, hBandHalfHeight);
+    return createPipeGeometry(threeOpenAxis, wallColors, bandStyle, hiddenFaces, hBandHalfHeight);
   }
 
   if (blockType === "Y") {
@@ -731,8 +767,9 @@ export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0
  * Cubes: 8 of 12 edges qualify for any TQEC cube type (the 4 edges parallel to
  * the matched-basis axis are the same-basis pair and are skipped).
  * Pipes: the 4 edges along the open axis (where the two wall-pairs of opposite
- * basis meet). End caps and band rings are not emitted in v1; the H-pipe band
- * ring is a known follow-up.
+ * basis meet). Y-twist pipes additionally emit a 4-segment ring at the band
+ * midline — the magenta ring that visually replaces the yellow Hadamard band.
+ * The H-pipe band ring (above and below the yellow band) is a known follow-up.
  * Y blocks: empty (single-basis block, no X/Z transitions).
  *
  * An edge is skipped if both adjacent faces are hidden.
@@ -793,7 +830,7 @@ export function createYDefectEdges(blockType: BlockType, hiddenFaces: FaceMask =
   };
 
   if (pipe) {
-    const base = blockType.replace("H", "");
+    const base = blockType.length > 3 ? blockType.slice(0, 3) : blockType;
     const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
     const threeOpen = TQEC_TO_THREE_AXIS[tqecOpen];
     const closed = [0, 1, 2].filter(a => a !== threeOpen) as [number, number];
@@ -827,6 +864,32 @@ export function createYDefectEdges(blockType: BlockType, hiddenFaces: FaceMask =
     // Acceptable trade-off; tagged as known limitation.)
     if ((hiddenFaces & faceA) || (hiddenFaces & faceB)) continue;
     linePoints.push(...corners[i], ...corners[j]);
+  }
+
+  // Y-twist pipes: add a 4-segment magenta ring at the open-axis midline. Each
+  // segment lies on one closed-axis face, runs along the OTHER closed axis, and
+  // marks the seam where the face's colour flips (X ↔ Z). Skip a segment if its
+  // host face is hidden by an adjacent block (consistent with cube edges).
+  if (pipe && isYTwistPipe(blockType)) {
+    const base = blockType.slice(0, 3);
+    const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
+    const threeOpen = TQEC_TO_THREE_AXIS[tqecOpen];
+    const closedThree = [0, 1, 2].filter(a => a !== threeOpen) as [number, number];
+    const halfExt = [hx, hy, hz];
+    for (let k = 0; k < 2; k++) {
+      const ca = closedThree[k];      // axis of the face hosting this seam
+      const oc = closedThree[1 - k];  // axis the seam runs along
+      for (const sign of [1, -1] as const) {
+        const faceBit = FACE_BIT_BY_INDEX[ca * 2 + (sign > 0 ? 0 : 1)];
+        if (hiddenFaces & faceBit) continue;
+        const a: [number, number, number] = [0, 0, 0];
+        const b: [number, number, number] = [0, 0, 0];
+        a[threeOpen] = 0; b[threeOpen] = 0;
+        a[ca] = sign * halfExt[ca]; b[ca] = sign * halfExt[ca];
+        a[oc] = -halfExt[oc]; b[oc] = halfExt[oc];
+        linePoints.push(...a, ...b);
+      }
+    }
   }
 
   const geo = new THREE.BufferGeometry();

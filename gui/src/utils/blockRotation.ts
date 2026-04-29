@@ -2,13 +2,18 @@ import type { Block, Position3D } from "../types";
 import { isPipeType, isSlabType, SLAB_TYPE } from "../types";
 
 // ---------------------------------------------------------------------------
-// Hadamard direction equivalences (same as tqec's adjust_hadamards_direction)
+// Hadamard direction equivalences (same as tqec's adjust_hadamards_direction).
+// Y-twist pipes share the same colour-flip convention, so the same equivalences
+// apply with the H suffix swapped for Y.
 // ---------------------------------------------------------------------------
 
 export const HDM_EQUIVALENCES: Record<string, string> = {
   ZXOH: "XZOH",
   XOZH: "ZOXH",
   OXZH: "OZXH",
+  ZXOY: "XZOY",
+  XOZY: "ZOXY",
+  OXZY: "OZXY",
 };
 
 export const HDM_INVERSE: Record<string, string> = Object.fromEntries(
@@ -78,9 +83,14 @@ export function rotateBlockKind(kindStr: string, rot: number[][]): string {
     return kindStr;
   }
 
-  // Hadamard: append 'H' if original had it
+  // Suffix preservation: H (Hadamard) or Y (free-build Y-twist). Both attach to
+  // pipes only; cube types never end in H or Y, and the bare "Y" block was
+  // already returned above. The geometry/colour-flip convention is the same
+  // for both, so rotation handles them identically.
   if (kindStr.endsWith("H")) {
     rotatedName += "H";
+  } else if (kindStr.endsWith("Y") && kindStr.length > 1) {
+    rotatedName += "Y";
   }
 
   return rotatedName.toUpperCase();
@@ -183,10 +193,10 @@ export function rotateBlockAroundZ(
 
   let newType = rotateBlockKind(block.type, rot);
 
-  // Hadamard pipes: after rotation, if the pipe now points in the negative
-  // direction along its axis, swap to the canonical equivalent so rendering
-  // stays consistent. Mirrors daeImport.ts behavior.
-  if (isPipe && newType.endsWith("H")) {
+  // Colour-flip pipes (Hadamard or Y-twist): after rotation, if the pipe now
+  // points in the negative direction along its axis, swap to the canonical
+  // equivalent so rendering stays consistent. Mirrors daeImport.ts behavior.
+  if (isPipe && (newType.endsWith("H") || newType.endsWith("Y"))) {
     const axesDirs = getAxesDirections(rot);
     const dirIdx = pipeDirectionIndex(newType);
     const dirLabel = ["X", "Y", "Z"][dirIdx];
