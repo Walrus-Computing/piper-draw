@@ -78,6 +78,12 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
       return;
     }
 
+    // Paint tool: ports have no paintable geometry. No ghost preview, no fall-through to placement.
+    if (store.armedTool === "paint") {
+      store.setHoveredGridPos(null);
+      return;
+    }
+
     if (store.armedTool === "pipe" && store.pipeVariant) {
       // Pipe placement adjacent to a port: use the hovered face normal to compute
       // which adjacent pipe slot to target, mirroring BlockInstances' face logic.
@@ -135,6 +141,8 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
     }
     // Port tool: clicking a port is a no-op (it's already a port).
     if (store.armedTool === "port") return;
+    // Paint tool: clicking a port is a no-op (no paintable geometry).
+    if (store.armedTool === "paint") return;
     if (store.armedTool === "pipe" && store.pipeVariant) {
       if (!e.face) return;
       const resolved = resolvePipeTypeFromFace(pos, PORT_SENTINEL_TYPE, e.face.normal, store.pipeVariant);

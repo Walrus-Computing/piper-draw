@@ -109,11 +109,11 @@ export const PLACEABLE_ORDER: ReadonlyArray<Placeable> = [
  * pointer tool is armed (no placeable selected).
  */
 export function currentPlaceableIndex(
-  armedTool: "pointer" | "cube" | "pipe" | "port" | "paste" | "slab",
+  armedTool: "pointer" | "cube" | "pipe" | "port" | "paste" | "slab" | "paint",
   cubeType: BlockType,
   pipeVariant: PipeVariant | null,
 ): number {
-  if (armedTool === "pointer" || armedTool === "paste") return -1;
+  if (armedTool === "pointer" || armedTool === "paste" || armedTool === "paint") return -1;
   if (armedTool === "port") return 0;
   if (armedTool === "slab") return PLACEABLE_ORDER.findIndex((p) => p.kind === "slab");
   if (armedTool === "pipe") {
@@ -126,6 +126,15 @@ export function currentPlaceableIndex(
 export interface Block {
   pos: Position3D;
   type: BlockType;
+  /**
+   * Free-build face-paint overrides. Keys are Three.js face indices (`"0"`..`"5"`)
+   * for cubes / Y / slabs / non-colour-flip pipes; for Hadamard and Y-twist
+   * pipes the key is `"<faceIdx>:below"` | `"<faceIdx>:above"` (with
+   * `"<faceIdx>:band"` also valid for Hadamard's yellow band) so each strip on
+   * a wall can be painted independently. Values are hex color strings
+   * (`"#rrggbb"`).
+   */
+  faceColors?: Record<string, string>;
 }
 
 export type PortIO = "in" | "out";
@@ -162,7 +171,7 @@ export const H_HEX = "#ffff65";
 export const Y_DEFECT_HEX = "#ff39c2";
 export const SLAB_HEX = "#cccccc";
 
-const H_BAND_HALF_HEIGHT = 0.08;
+export const H_BAND_HALF_HEIGHT = 0.08;
 /** Inset so pipe walls are never coplanar with adjacent blocks/pipes. */
 const WALL_EPS = 0.001;
 const FACE_MASK_EPS = 1e-9;
@@ -385,9 +394,21 @@ function hasPositiveOverlap(a0: number, a1: number, b0: number, b1: number): boo
 }
 
 /** TQEC axis index → Three.js axis index: TQEC [X,Y,Z] → Three.js [0,2,1]. */
-const TQEC_TO_THREE_AXIS = [0, 2, 1] as const;
+export const TQEC_TO_THREE_AXIS = [0, 2, 1] as const;
 /** Inverse (same mapping since it's a self-inverse permutation). */
 const THREE_TO_TQEC_AXIS = [0, 2, 1] as const;
+
+/**
+ * Map a Three.js face normal to its box-face index in the canonical
+ * [+X, -X, +Y, -Y, +Z, -Z] order. Used by the free-build paint tool to
+ * identify which face of a block was clicked from raycast results.
+ */
+export function faceIndexFromNormal(n: THREE.Vector3): 0 | 1 | 2 | 3 | 4 | 5 {
+  const ax = Math.abs(n.x), ay = Math.abs(n.y), az = Math.abs(n.z);
+  if (ax >= ay && ax >= az) return n.x > 0 ? 0 : 1;
+  if (ay >= az) return n.y > 0 ? 2 : 3;
+  return n.z > 0 ? 4 : 5;
+}
 
 /**
  * Unified pipe geometry constructor. Builds a pipe open along one Three.js axis.
@@ -415,8 +436,10 @@ function createPipeGeometry(
   bandStyle: BandStyle,
   hiddenFaces: FaceMask = 0,
   hBandHalfHeight?: number,
+  overrides?: Record<string, string>,
 ): THREE.BufferGeometry {
   const closedAxes = [0, 1, 2].filter(a => a !== openAxis) as [number, number];
+  const tmpColor = new THREE.Color();
 
   if (bandStyle === "none") {
     const e = WALL_EPS;
@@ -436,8 +459,10 @@ function createPipeGeometry(
 
     for (let face = 0; face < 6; face++) {
       if (hiddenFaces & FACE_BIT_BY_INDEX[face]) continue;
-      const c = faceColors[face];
+      let c = faceColors[face];
       if (!c) continue;
+      const ov = overrides?.[String(face)];
+      if (ov) c = tmpColor.set(ov);
       for (let v = 0; v < 4; v++) {
         const idx = (face * 4 + v) * 3;
         colors[idx] = c.r;
@@ -524,20 +549,29 @@ function createPipeGeometry(
         return [make(t0, -ocDir), make(t1, -ocDir), make(t1, ocDir), make(t0, ocDir)];
       };
 
-      // Hadamard: three strips along the open axis (below band, yellow band, above).
-      // Y-twist: two strips meeting at the open-axis midline (no yellow strip).
+      // Hadamard: three strips (below / yellow band / above).
+      // Y-twist: two strips meeting at the open-axis midline (no band strip).
+      // Free-build paint overrides apply per-strip with keys "<face>:below" / ":band" / ":above";
+      // the band key is only meaningful for Hadamard.
+      const faceIdx = ca * 2 + (sign > 0 ? 0 : 1);
+      const ovBelow = overrides?.[`${faceIdx}:below`];
+      const ovAbove = overrides?.[`${faceIdx}:above`];
+      const belowColor = ovBelow ? new THREE.Color(ovBelow) : wallColors[i];
+      const aboveColor = ovAbove ? new THREE.Color(ovAbove) : wallColorsAbove[i];
       if (isHadamard) {
+        const ovBand = overrides?.[`${faceIdx}:band`];
+        const bandColor = ovBand ? new THREE.Color(ovBand) : H_COLOR;
         const [b0, b1, b2, b3] = quad(-1, -bh);
-        addQuad(b0, b1, b2, b3, n, wallColors[i]);
+        addQuad(b0, b1, b2, b3, n, belowColor);
         const [m0, m1, m2, m3] = quad(-bh, bh);
-        addQuad(m0, m1, m2, m3, n, H_COLOR);
+        addQuad(m0, m1, m2, m3, n, bandColor);
         const [a0, a1, a2, a3] = quad(bh, 1);
-        addQuad(a0, a1, a2, a3, n, wallColorsAbove[i]);
+        addQuad(a0, a1, a2, a3, n, aboveColor);
       } else {
         const [b0, b1, b2, b3] = quad(-1, 0);
-        addQuad(b0, b1, b2, b3, n, wallColors[i]);
+        addQuad(b0, b1, b2, b3, n, belowColor);
         const [a0, a1, a2, a3] = quad(0, 1);
-        addQuad(a0, a1, a2, a3, n, wallColorsAbove[i]);
+        addQuad(a0, a1, a2, a3, n, aboveColor);
       }
     }
   }
@@ -558,7 +592,7 @@ function createPipeGeometry(
  * are stripped. The 2-unit horizontal extent fills the inner gap between the
  * 4 pipes that form a square in TQEC X/Y.
  */
-function createSlabGeometry(): THREE.BufferGeometry {
+function createSlabGeometry(overrides?: Record<string, string>): THREE.BufferGeometry {
   const e = WALL_EPS;
   const geo = new THREE.BoxGeometry(2 - 2 * e, 1 - 2 * e, 2 - 2 * e);
   const colors = new Float32Array(24 * 3);
@@ -566,6 +600,18 @@ function createSlabGeometry(): THREE.BufferGeometry {
     colors[i * 3] = SLAB_COLOR.r;
     colors[i * 3 + 1] = SLAB_COLOR.g;
     colors[i * 3 + 2] = SLAB_COLOR.b;
+  }
+  const tmpColor = new THREE.Color();
+  for (const face of [2, 3]) {
+    const ov = overrides?.[String(face)];
+    if (!ov) continue;
+    tmpColor.set(ov);
+    for (let v = 0; v < 4; v++) {
+      const idx = (face * 4 + v) * 3;
+      colors[idx] = tmpColor.r;
+      colors[idx + 1] = tmpColor.g;
+      colors[idx + 2] = tmpColor.b;
+    }
   }
   // Keep only +Y (face 2) and -Y (face 3) — Three.js box face order is
   // +X, -X, +Y, -Y, +Z, -Z. Drop side faces so the slab reads as two plates.
@@ -586,8 +632,13 @@ function createSlabGeometry(): THREE.BufferGeometry {
  * Pipe types are parsed from the type name: each character gives the basis
  * for that TQEC axis ('X', 'Z', or 'O' for open). Hadamard variants end in 'H'.
  */
-export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask = 0, hBandHalfHeight?: number): THREE.BufferGeometry {
-  if (isSlabType(blockType)) return createSlabGeometry();
+export function createBlockGeometry(
+  blockType: BlockType,
+  hiddenFaces: FaceMask = 0,
+  hBandHalfHeight?: number,
+  overrides?: Record<string, string>,
+): THREE.BufferGeometry {
+  if (isSlabType(blockType)) return createSlabGeometry(overrides);
   if (isPipeType(blockType)) {
     const bandStyle: BandStyle =
       blockType.endsWith("H") ? "hadamard" :
@@ -604,8 +655,10 @@ export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask 
     if (bandStyle !== "none" && tqecOpenAxis === 1) {
       wallColors = [wallColors[1], wallColors[0]];
     }
-    return createPipeGeometry(threeOpenAxis, wallColors, bandStyle, hiddenFaces, hBandHalfHeight);
+    return createPipeGeometry(threeOpenAxis, wallColors, bandStyle, hiddenFaces, hBandHalfHeight, overrides);
   }
+
+  const tmpColor = new THREE.Color();
 
   if (blockType === "Y") {
     // YHalfCube: 1×1×0.5 in TQEC → 1 (X) × 0.5 (Y) × 1 (Z) in Three.js, all green
@@ -613,12 +666,16 @@ export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask 
     const colors = new Float32Array(24 * 3);
     const oldIndex = geo.index!;
     const newIndices: number[] = [];
-    for (let i = 0; i < 24; i++) {
-      colors[i * 3] = Y_COLOR.r;
-      colors[i * 3 + 1] = Y_COLOR.g;
-      colors[i * 3 + 2] = Y_COLOR.b;
-    }
     for (let face = 0; face < 6; face++) {
+      let c: THREE.Color = Y_COLOR;
+      const ov = overrides?.[String(face)];
+      if (ov) c = tmpColor.set(ov);
+      for (let v = 0; v < 4; v++) {
+        const idx = (face * 4 + v) * 3;
+        colors[idx] = c.r;
+        colors[idx + 1] = c.g;
+        colors[idx + 2] = c.b;
+      }
       if (hiddenFaces & FACE_BIT_BY_INDEX[face]) continue;
       for (let i = 0; i < 6; i++) {
         newIndices.push(oldIndex.getX(face * 6 + i));
@@ -645,7 +702,9 @@ export function createBlockGeometry(blockType: BlockType, hiddenFaces: FaceMask 
   const newIndices: number[] = [];
 
   for (let face = 0; face < 6; face++) {
-    const c = faceColors[face];
+    let c = faceColors[face];
+    const ov = overrides?.[String(face)];
+    if (ov) c = tmpColor.set(ov);
     if (hiddenFaces & FACE_BIT_BY_INDEX[face]) continue;
     for (let v = 0; v < 4; v++) {
       const idx = (face * 4 + v) * 3;

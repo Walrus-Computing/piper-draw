@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useBlockStore, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
 import { useKeybindStore, type Mode as KeybindMode, type NavStyle } from "../stores/keybindStore";
-import { CUBE_TYPES, FREE_BUILD_PIPE_VARIANTS, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
+import { CUBE_TYPES, FREE_BUILD_PIPE_VARIANTS, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey, X_HEX, Z_HEX, Y_HEX, H_HEX, Y_DEFECT_HEX, SLAB_HEX } from "../types";
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
@@ -82,6 +82,86 @@ const blockBtnStyle = (active: boolean, disabled?: boolean) => ({
 });
 
 // ---------------------------------------------------------------------------
+// Paint-tool color picker popover
+// ---------------------------------------------------------------------------
+
+const PAINT_PRESETS: ReadonlyArray<string> = [
+  X_HEX, Z_HEX, Y_HEX, H_HEX, Y_DEFECT_HEX, SLAB_HEX, "#ffffff", "#000000",
+];
+
+function PaintPickerPopover({
+  color,
+  onPick,
+  onClose,
+}: {
+  color: string;
+  onPick: (hex: string) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const onDocPointerDown = (e: PointerEvent) => {
+      if (!ref.current) return;
+      if (e.target instanceof Node && ref.current.contains(e.target)) return;
+      onClose();
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [onClose]);
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: "absolute",
+        top: "calc(100% + 4px)",
+        left: 0,
+        background: "#fff",
+        border: "1px solid #ccc",
+        borderRadius: 4,
+        padding: 6,
+        boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+        zIndex: 10,
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        minWidth: 152,
+      }}
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 28px)", gap: 4 }}>
+        {PAINT_PRESETS.map((hex) => {
+          const active = hex.toLowerCase() === color.toLowerCase();
+          return (
+            <button
+              key={hex}
+              onClick={() => onPick(hex)}
+              title={hex}
+              style={{
+                width: 28,
+                height: 28,
+                background: hex,
+                border: active ? "2px solid #4a9eff" : "1px solid #888",
+                borderRadius: 3,
+                cursor: "pointer",
+                padding: 0,
+              }}
+            />
+          );
+        })}
+      </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontFamily: "sans-serif" }}>
+        <span>Custom</span>
+        <input
+          type="color"
+          value={color}
+          onChange={(e) => onPick(e.target.value)}
+          style={{ width: 36, height: 24, padding: 0, border: "1px solid #888", borderRadius: 3, background: "none" }}
+        />
+      </label>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Toolbar component
 // ---------------------------------------------------------------------------
 
@@ -115,6 +195,10 @@ export function Toolbar({
   const setPipeVariant = useBlockStore((s) => s.setPipeVariant);
   const setPlacePort = useBlockStore((s) => s.setPlacePort);
   const setArmedSlab = useBlockStore((s) => s.setArmedSlab);
+  const setArmedPaint = useBlockStore((s) => s.setArmedPaint);
+  const paintColor = useBlockStore((s) => s.paintColor);
+  const setPaintColor = useBlockStore((s) => s.setPaintColor);
+  const [paintPickerOpen, setPaintPickerOpen] = useState(false);
   const setPaletteDragging = useBlockStore((s) => s.setPaletteDragging);
   const cycleBlock = useBlockStore((s) => s.cycleBlock);
   const cyclePipe = useBlockStore((s) => s.cyclePipe);
@@ -747,7 +831,7 @@ export function Toolbar({
         </div>
       </div>
 
-      {/* Free-build-only group: Slab */}
+      {/* Free-build-only group: Slab + Paint */}
       {freeBuild && mode === "edit" && (
         <>
           <div style={{ width: 1, background: "#ddd" }} />
@@ -769,6 +853,41 @@ export function Toolbar({
                   <SlabIcon />
                 </div>
               </button>
+              <div style={{ position: "relative", display: "flex" }}>
+                <button
+                  key="paint"
+                  onClick={() => {
+                    if (armedTool === "paint") {
+                      setPaintPickerOpen((o) => !o);
+                    } else {
+                      setArmedPaint(true);
+                      setPaintPickerOpen(true);
+                    }
+                  }}
+                  title="Paint a face: click a cube/pipe/slab face to recolor it"
+                  style={blockBtnStyle(armedTool === "paint")}
+                >
+                  Paint
+                  <div style={previewWrapStyle}>
+                    <div
+                      style={{
+                        width: 22,
+                        height: 22,
+                        background: paintColor,
+                        border: "1px solid #888",
+                        borderRadius: 2,
+                      }}
+                    />
+                  </div>
+                </button>
+                {paintPickerOpen && armedTool === "paint" && (
+                  <PaintPickerPopover
+                    color={paintColor}
+                    onPick={(c) => setPaintColor(c)}
+                    onClose={() => setPaintPickerOpen(false)}
+                  />
+                )}
+              </div>
             </div>
           </div>
         </>
