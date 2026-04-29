@@ -44,6 +44,7 @@ import {
   flipBlockType,
   PLACEABLE_ORDER,
   currentPlaceableIndex,
+  H_HEX,
 } from "../types";
 import { rotateBlockAroundZ } from "../utils/blockRotation";
 
@@ -817,9 +818,28 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     const key = posKey(pos);
     const oldBlock = state.blocks.get(key);
     if (!oldBlock) return state;
-    const nextOverrides: Record<string, string> = { ...(oldBlock.faceColors ?? {}) };
+    let nextOverrides: Record<string, string> = { ...(oldBlock.faceColors ?? {}) };
     nextOverrides[faceKey] = color;
-    const newBlock: Block = { ...oldBlock, faceColors: nextOverrides };
+
+    // Auto-promote: a Hadamard pipe whose yellow band is painted away from H_HEX
+    // no longer mediates the X↔Z basis switch on its walls — the geometric
+    // equivalent is a Y-twist (magenta seam, no band strip). Convert the type
+    // and drop the now-orphaned ":band" overrides since Y-twist has no band.
+    let newType: BlockType = oldBlock.type;
+    const isHadBand = isPipeType(oldBlock.type)
+      && oldBlock.type.endsWith("H")
+      && faceKey.endsWith(":band")
+      && color.toLowerCase() !== H_HEX.toLowerCase();
+    if (isHadBand) {
+      newType = (oldBlock.type.slice(0, -1) + "Y") as BlockType;
+      const stripped: Record<string, string> = {};
+      for (const [k, v] of Object.entries(nextOverrides)) {
+        if (!k.endsWith(":band")) stripped[k] = v;
+      }
+      nextOverrides = stripped;
+    }
+
+    const newBlock: Block = { ...oldBlock, type: newType, faceColors: nextOverrides };
     const removed = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, key, oldBlock);
     const { blocks, hiddenFaces } = doAdd(removed.blocks, state.spatialIndex, removed.hiddenFaces, key, newBlock);
     const cmd: UndoCommand = { kind: "replace", key, oldBlock, newBlock };

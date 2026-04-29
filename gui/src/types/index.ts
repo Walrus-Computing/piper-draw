@@ -833,7 +833,24 @@ export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0
  *
  * An edge is skipped if both adjacent faces are hidden.
  */
-export function createYDefectEdges(blockType: BlockType, hiddenFaces: FaceMask = 0): THREE.BufferGeometry {
+/**
+ * Map a paint hex to its TQEC basis. Only X_HEX and Z_HEX carry a basis;
+ * H_HEX (yellow / Hadamard mediator) and any other hex return null, meaning
+ * "no basis" — adjacent faces with a null basis on either side never form a
+ * Y-defect edge, since yellow mediates the X↔Z transition.
+ */
+function paintHexToBasis(hex: string): "X" | "Z" | null {
+  const h = hex.toLowerCase();
+  if (h === X_HEX.toLowerCase()) return "X";
+  if (h === Z_HEX.toLowerCase()) return "Z";
+  return null;
+}
+
+export function createYDefectEdges(
+  blockType: BlockType,
+  hiddenFaces: FaceMask = 0,
+  faceColors?: Record<string, string>,
+): THREE.BufferGeometry {
   const empty = () => {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(0), 3));
@@ -909,6 +926,20 @@ export function createYDefectEdges(blockType: BlockType, hiddenFaces: FaceMask =
     faceBasis[FACE_POS_Z] = yCh; faceBasis[FACE_NEG_Z] = yCh;
   }
 
+  // Free-build paint overrides take precedence over type-derived basis.
+  // Only whole-face overrides ("0".."5") matter here: per-strip keys
+  // (`<face>:below|band|above`) modify intra-wall colour but don't change the
+  // face's "basis" for cube-edge Y-defect computation. X_HEX / Z_HEX swap the
+  // basis; any other hex (H_HEX yellow, or anything off-palette) clears it
+  // (null = mediator / no basis = no Y-defect edge contribution).
+  if (faceColors) {
+    for (let face = 0; face < 6; face++) {
+      const hex = faceColors[String(face)];
+      if (!hex) continue;
+      faceBasis[FACE_BIT_BY_INDEX[face]] = paintHexToBasis(hex);
+    }
+  }
+
   const linePoints: number[] = [];
   for (const { i, j, faceA, faceB } of edgeFacePairs) {
     const ba = faceBasis[faceA];
@@ -974,9 +1005,10 @@ export function createYDefectCylinderGroup(
   hiddenFaces: FaceMask = 0,
   material: THREE.Material,
   radius: number = Y_DEFECT_CYLINDER_RADIUS,
+  faceColors?: Record<string, string>,
 ): THREE.Group {
   const group = new THREE.Group();
-  const edges = createYDefectEdges(blockType, hiddenFaces);
+  const edges = createYDefectEdges(blockType, hiddenFaces, faceColors);
   const positions = edges.getAttribute("position").array as Float32Array;
   edges.dispose();
 

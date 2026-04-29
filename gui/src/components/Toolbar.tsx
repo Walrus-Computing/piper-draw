@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useBlockStore, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
 import { useKeybindStore, type Mode as KeybindMode, type NavStyle } from "../stores/keybindStore";
-import { CUBE_TYPES, FREE_BUILD_PIPE_VARIANTS, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey, X_HEX, Z_HEX, Y_HEX, H_HEX, Y_DEFECT_HEX, SLAB_HEX } from "../types";
+import { CUBE_TYPES, FREE_BUILD_PIPE_VARIANTS, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey, X_HEX, Z_HEX, H_HEX } from "../types";
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
@@ -85,8 +85,15 @@ const blockBtnStyle = (active: boolean, disabled?: boolean) => ({
 // Paint-tool color picker popover
 // ---------------------------------------------------------------------------
 
-const PAINT_PRESETS: ReadonlyArray<string> = [
-  X_HEX, Z_HEX, Y_HEX, H_HEX, Y_DEFECT_HEX, SLAB_HEX, "#ffffff", "#000000",
+// Three-color palette: X (red), Z (blue), and Hadamard (yellow). A "color
+// switch without a Hadamard" auto-promotes pipes to Y-twist; for cubes, two
+// adjacent X/Z faces auto-render a magenta Y-defect edge (see
+// `createYDefectEdges`). No custom-hex picker — the basis intent must be
+// unambiguous.
+const PAINT_PRESETS: ReadonlyArray<{ hex: string; label: string }> = [
+  { hex: X_HEX, label: "X (red)" },
+  { hex: Z_HEX, label: "Z (blue)" },
+  { hex: H_HEX, label: "Hadamard (yellow)" },
 ];
 
 function PaintPickerPopover({
@@ -122,41 +129,28 @@ function PaintPickerPopover({
         boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
         zIndex: 10,
         display: "flex",
-        flexDirection: "column",
-        gap: 6,
-        minWidth: 152,
+        gap: 4,
       }}
     >
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 28px)", gap: 4 }}>
-        {PAINT_PRESETS.map((hex) => {
-          const active = hex.toLowerCase() === color.toLowerCase();
-          return (
-            <button
-              key={hex}
-              onClick={() => onPick(hex)}
-              title={hex}
-              style={{
-                width: 28,
-                height: 28,
-                background: hex,
-                border: active ? "2px solid #4a9eff" : "1px solid #888",
-                borderRadius: 3,
-                cursor: "pointer",
-                padding: 0,
-              }}
-            />
-          );
-        })}
-      </div>
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontFamily: "sans-serif" }}>
-        <span>Custom</span>
-        <input
-          type="color"
-          value={color}
-          onChange={(e) => onPick(e.target.value)}
-          style={{ width: 36, height: 24, padding: 0, border: "1px solid #888", borderRadius: 3, background: "none" }}
-        />
-      </label>
+      {PAINT_PRESETS.map(({ hex, label }) => {
+        const active = hex.toLowerCase() === color.toLowerCase();
+        return (
+          <button
+            key={hex}
+            onClick={() => onPick(hex)}
+            title={label}
+            style={{
+              width: 28,
+              height: 28,
+              background: hex,
+              border: active ? "2px solid #4a9eff" : "1px solid #888",
+              borderRadius: 3,
+              cursor: "pointer",
+              padding: 0,
+            }}
+          />
+        );
+      })}
     </div>
   );
 }

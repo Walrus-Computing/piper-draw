@@ -20,19 +20,36 @@ type CylinderInstance = {
 
 const templateCache = new Map<string, CylinderInstance[]>();
 
-function getCachedTemplate(blockType: BlockType, hiddenFaces: FaceMask): CylinderInstance[] {
+function buildTemplate(
+  blockType: BlockType,
+  hiddenFaces: FaceMask,
+  faceColors?: Record<string, string>,
+): CylinderInstance[] {
+  const group = createYDefectCylinderGroup(blockType, hiddenFaces, yDefectMaterial, undefined, faceColors);
+  return group.children.map((child) => {
+    const mesh = child as THREE.Mesh;
+    return {
+      geometry: mesh.geometry as THREE.CylinderGeometry,
+      position: mesh.position.clone(),
+      quaternion: mesh.quaternion.clone(),
+    };
+  });
+}
+
+function getTemplate(
+  blockType: BlockType,
+  hiddenFaces: FaceMask,
+  faceColors?: Record<string, string>,
+): CylinderInstance[] {
+  // Painted blocks bypass the shared cache: their effective Y-defect topology
+  // depends on the override map, which can vary per instance.
+  if (faceColors && Object.keys(faceColors).length > 0) {
+    return buildTemplate(blockType, hiddenFaces, faceColors);
+  }
   const key = `${blockType}:${hiddenFaces}`;
   let arr = templateCache.get(key);
   if (!arr) {
-    const group = createYDefectCylinderGroup(blockType, hiddenFaces, yDefectMaterial);
-    arr = group.children.map((child) => {
-      const mesh = child as THREE.Mesh;
-      return {
-        geometry: mesh.geometry as THREE.CylinderGeometry,
-        position: mesh.position.clone(),
-        quaternion: mesh.quaternion.clone(),
-      };
-    });
+    arr = buildTemplate(blockType, hiddenFaces);
     templateCache.set(key, arr);
   }
   return arr;
@@ -53,7 +70,7 @@ export function YDefectOverlay() {
     for (const block of blocks.values()) {
       const k = posKey(block.pos);
       const hf = hiddenFaces.get(k) ?? 0;
-      const cylinders = getCachedTemplate(block.type, hf);
+      const cylinders = getTemplate(block.type, hf, block.faceColors);
       if (cylinders.length === 0) continue;
       const zo = block.type === "Y" ? yBlockZOffset(block.pos, blocks) : 0;
       out.push({ key: k, worldPos: tqecToThree(block.pos, block.type, zo), cylinders });
