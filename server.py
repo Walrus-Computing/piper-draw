@@ -323,7 +323,7 @@ def _quad_vertices_three(basis: str, trans) -> list[float]:  # type: ignore[no-u
 def convert_blocks(
     blocks: list[BlockInput],
     port_labels: dict[str, str] | None = None,
-) -> dict:
+) -> tuple[dict, dict[str, str]]:
     """Convert piper-draw blocks to a tqec BlockGraph dict.
 
     Pipes in piper-draw whose endpoints don't have a cube get an automatic
@@ -331,11 +331,19 @@ def convert_blocks(
     an open-ended pipe represents a logical qubit input/output (Port).
 
     ``port_labels`` maps a tqec-position key (see ``_port_key``) to a caller-
-    supplied label. Any unmapped port gets a fallback ``port_{n}`` name.
+    supplied label. Any unmapped port gets a fallback ``port_{n}`` name; a
+    duplicate also gets renamed (TQEC requires unique port labels).
+
+    Returns a 2-tuple: ``(graph_dict, port_finals)``.
+    ``port_finals`` maps each port endpoint's TQEC-position key to the final
+    label written to the graph (after any rename). Callers can use it to
+    re-key per-label dicts (``port_io``, ranks) so that a renamed port's
+    direction / rank still applies to the same physical endpoint.
     """
     port_labels = port_labels or {}
     cubes: list[dict] = []
     pipes: list[dict] = []
+    port_finals: dict[str, str] = {}
 
     cube_positions: set[tuple[int, int, int]] = set()
     for block in blocks:
@@ -365,7 +373,8 @@ def convert_blocks(
         )
         for endpoint in (u, v):
             if endpoint not in cube_positions:
-                label = port_labels.get(_port_key(endpoint))
+                pos_key = _port_key(endpoint)
+                label = port_labels.get(pos_key)
                 if not label or label in used_labels:
                     while True:
                         fallback = f"port_{port_counter}"
@@ -374,6 +383,7 @@ def convert_blocks(
                             label = fallback
                             break
                 used_labels.add(label)
+                port_finals[pos_key] = label
                 cubes.append(
                     {
                         "position": list(endpoint),
@@ -383,11 +393,53 @@ def convert_blocks(
                 )
                 cube_positions.add(endpoint)
 
-    return {"name": "piper-draw", "cubes": cubes, "pipes": pipes, "ports": {}}
+    return ({"name": "piper-draw", "cubes": cubes, "pipes": pipes, "ports": {}}, port_finals)
 
 
 def _build_port_label_map(port_labels: list[PortLabelInput]) -> dict[str, str]:
     return {_port_key(_piper_to_tqec_pos(p.pos)): p.label for p in port_labels if p.label}
+
+
+def _retag_port_io(
+    port_io: dict[str, str],
+    port_labels: list[PortLabelInput],
+    port_finals: dict[str, str],
+) -> dict[str, str]:
+    """Re-key ``port_io`` so it indexes by the FINAL port label.
+
+    ``port_io`` is keyed by the user's requested label. If two ports requested
+    the same label, ``convert_blocks`` renamed the second to ``port_{n}`` —
+    walking ``port_labels`` (the per-position requests) lets each renamed port
+    inherit the caller's intent that was set on the original label.
+    """
+    out: dict[str, str] = {}
+    for p in port_labels:
+        if not p.label or p.label not in port_io:
+            continue
+        final = port_finals.get(_port_key(_piper_to_tqec_pos(p.pos)))
+        if final is None:
+            continue
+        out[final] = port_io[p.label]
+    return out
+
+
+def _retag_label_to_rank(
+    port_labels: list[PortLabelInput],
+    port_finals: dict[str, str],
+) -> dict[str, int]:
+    """Build a rank dict keyed by FINAL label, accounting for renames.
+
+    Mirrors ``_retag_port_io`` but for the per-position rank field.
+    """
+    out: dict[str, int] = {}
+    for p in port_labels:
+        if p.rank is None or not p.label:
+            continue
+        final = port_finals.get(_port_key(_piper_to_tqec_pos(p.pos)))
+        if final is None:
+            continue
+        out[final] = p.rank
+    return out
 
 
 @app.post("/api/validate")
@@ -396,7 +448,7 @@ async def validate(req: ValidateRequest) -> ValidateResponse:
         return ValidateResponse(valid=True, errors=[])
 
     try:
-        graph_dict = convert_blocks(req.blocks)
+        graph_dict, _ = convert_blocks(req.blocks)
         graph = BlockGraph.from_dict(graph_dict)
     except (TQECError, ValueError, KeyError) as e:
         return ValidateResponse(
@@ -430,7 +482,7 @@ async def flows(req: FlowsRequest) -> FlowsResponse:
 
     try:
         label_map = _build_port_label_map(req.port_labels)
-        graph_dict = convert_blocks(req.blocks, label_map)
+        graph_dict, port_finals = convert_blocks(req.blocks, label_map)
         graph = BlockGraph.from_dict(graph_dict)
         graph.validate()
     except (TQECError, ValueError, KeyError) as e:
@@ -454,24 +506,21 @@ async def flows(req: FlowsRequest) -> FlowsResponse:
             error="Diagram has no open ports",
         )
 
-    # Sort by user-defined rank from the Ports table (matches /api/zx) so the
-    # qubit-register position when this diagram is interpreted as a circuit
-    # follows the GUI order. Unranked ports fall through to TQEC's
-    # alphabetical order.
-    label_to_rank: dict[str, int] = {
-        p.label: p.rank for p in req.port_labels if p.label and p.rank is not None
-    }
+    # Re-key port_io and ranks by FINAL port label so renames (duplicate or
+    # empty caller labels → port_{n}) don't lose the user's intent.
+    port_io_final = _retag_port_io(req.port_io, req.port_labels, port_finals)
+    label_to_rank = _retag_label_to_rank(req.port_labels, port_finals)
 
     def _flows_sort_key(label: str) -> tuple[int, str]:
         rank = label_to_rank.get(label)
         return (rank if rank is not None else 2**31, label)
 
     inputs = sorted(
-        (p for p in ordered_ports if req.port_io.get(p, "in") == "in"),
+        (p for p in ordered_ports if port_io_final.get(p, "in") == "in"),
         key=_flows_sort_key,
     )
     outputs = sorted(
-        (p for p in ordered_ports if req.port_io.get(p, "in") == "out"),
+        (p for p in ordered_ports if port_io_final.get(p, "in") == "out"),
         key=_flows_sort_key,
     )
 
@@ -531,7 +580,7 @@ async def zx(req: ZXRequest) -> ZXResponse:
 
     try:
         label_map = _build_port_label_map(req.port_labels)
-        graph_dict = convert_blocks(req.blocks, label_map)
+        graph_dict, port_finals = convert_blocks(req.blocks, label_map)
         graph = BlockGraph.from_dict(graph_dict)
         graph.validate()
         pzx = graph.to_zx_graph()
@@ -545,6 +594,12 @@ async def zx(req: ZXRequest) -> ZXResponse:
             error=f"Cannot compute ZX graph: {e}",
         )
 
+    # Re-key the user's per-label port_io / rank dicts onto FINAL labels so
+    # renames (duplicate / empty caller labels → port_{n}) don't strand the
+    # user's "out" intent or rank on a label the graph never sees.
+    port_io_final = _retag_port_io(req.port_io, req.port_labels, port_finals)
+    label_to_rank = _retag_label_to_rank(req.port_labels, port_finals)
+
     # Port labels are on BlockGraph cubes; resolve each to the pyzx vertex id
     # via PositionedZX.p2v before any simplification rewrites vertex ids.
     port_label_by_vertex: dict[int, str] = {}
@@ -554,15 +609,8 @@ async def zx(req: ZXRequest) -> ZXResponse:
         if cube.is_port and cube.position in pzx.p2v:
             v = int(pzx.p2v[cube.position])
             port_label_by_vertex[v] = cube.label
-            io = req.port_io.get(cube.label, "in")
+            io = port_io_final.get(cube.label, "in")
             (output_vs if io == "out" else input_vs).append(v)
-
-    # Sort input/output vertex lists by user-defined rank from the Ports table
-    # so the extracted circuit's qubit register matches the GUI order.
-    # Unranked ports sort last, then alphabetically by label.
-    label_to_rank: dict[str, int] = {
-        p.label: p.rank for p in req.port_labels if p.label and p.rank is not None
-    }
 
     def _port_sort_key(v: int) -> tuple[int, str]:
         label = port_label_by_vertex.get(v, "")

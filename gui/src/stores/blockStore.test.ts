@@ -1485,4 +1485,98 @@ describe("blockStore", () => {
       expect(s.history.length).toBe(2);
     });
   });
+
+  describe("loadBlocks atomic ports — undo/redo round-trip", () => {
+    beforeEach(() => {
+      useBlockStore.setState({ portMeta: new Map(), portPositions: new Set() });
+    });
+
+    it("captures port state in the load undo command and restores it on undo", () => {
+      // Seed the store with a starting scene that has a port.
+      useBlockStore.setState({
+        blocks: new Map<string, Block>([
+          ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ]),
+        spatialIndex: buildSpatialIndex(
+          new Map<string, Block>([
+            ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+          ]),
+        ),
+        portMeta: new Map([["3,0,0", { label: "P_orig", io: "in", rank: 0 }]]),
+        portPositions: new Set(["3,0,0"]),
+      });
+
+      // Load a new scene with different blocks AND ports atomically.
+      const newBlocks = new Map<string, Block>([
+        ["6,0,0", { pos: { x: 6, y: 0, z: 0 }, type: "ZXZ" }],
+      ]);
+      const newPortMeta = new Map([
+        ["9,0,0", { label: "P_new", io: "out" as const, rank: 0 }],
+      ]);
+      const newPortPositions = new Set(["9,0,0"]);
+      useBlockStore.getState().loadBlocks(newBlocks, {
+        portMeta: newPortMeta,
+        portPositions: newPortPositions,
+      });
+
+      // After load: only the new state is visible.
+      let s = useBlockStore.getState();
+      expect(s.blocks.has("6,0,0")).toBe(true);
+      expect(s.blocks.has("0,0,0")).toBe(false);
+      expect(s.portMeta.get("9,0,0")?.label).toBe("P_new");
+      expect(s.portPositions.has("9,0,0")).toBe(true);
+
+      // Undo: original blocks AND original ports both come back.
+      useBlockStore.getState().undo();
+      s = useBlockStore.getState();
+      expect(s.blocks.has("0,0,0")).toBe(true);
+      expect(s.blocks.has("6,0,0")).toBe(false);
+      expect(s.portMeta.get("3,0,0")?.label).toBe("P_orig");
+      expect(s.portPositions.has("3,0,0")).toBe(true);
+      expect(s.portMeta.has("9,0,0")).toBe(false);
+
+      // Redo: new state — ports included — comes back.
+      useBlockStore.getState().redo();
+      s = useBlockStore.getState();
+      expect(s.blocks.has("6,0,0")).toBe(true);
+      expect(s.portMeta.get("9,0,0")?.label).toBe("P_new");
+      expect(s.portMeta.has("3,0,0")).toBe(false);
+    });
+
+    it("preserves prior portMeta when loadBlocks is called without ports (template-load semantics)", () => {
+      useBlockStore.setState({
+        portMeta: new Map([["3,0,0", { label: "T", io: "in" }]]),
+        portPositions: new Set(["3,0,0"]),
+      });
+      useBlockStore.getState().loadBlocks(
+        new Map<string, Block>([
+          ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+        ]),
+      );
+      const s = useBlockStore.getState();
+      // portMeta untouched, portPositions cleared (matches prior behavior).
+      expect(s.portMeta.get("3,0,0")?.label).toBe("T");
+      expect(s.portPositions.size).toBe(0);
+    });
+  });
+
+  describe("hydrateBlocks — empty incoming clears derived state", () => {
+    it("clears spatialIndex and hiddenFaces when hydrating with an empty Map", () => {
+      // Seed with non-empty blocks + derived state.
+      const blocks = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" }],
+      ]);
+      useBlockStore.setState({
+        blocks,
+        spatialIndex: buildSpatialIndex(blocks),
+        hiddenFaces: new Map([["0,0,0", 0]]),
+      });
+      // Hydrate with empty — derived state must follow.
+      useBlockStore.getState().hydrateBlocks(new Map());
+      const s = useBlockStore.getState();
+      expect(s.blocks.size).toBe(0);
+      expect(s.spatialIndex.size).toBe(0);
+      expect(s.hiddenFaces.size).toBe(0);
+    });
+  });
 });
