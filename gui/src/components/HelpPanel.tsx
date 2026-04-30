@@ -93,6 +93,11 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
             to rotate, drag to pan. Use the <b>Iso ▾</b> menu in the toolbar
             to snap to an axis-locked orthographic view.
           </li>
+          <li>
+            <b>Shortcuts</b> — every key binding is listed and rebindable in
+            the Customize panel; click <b>Customize</b> at the end of the hint
+            bar (or press <kbd>?</kbd>).
+          </li>
         </ul>
 
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Modes</h4>

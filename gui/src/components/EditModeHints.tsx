@@ -42,7 +42,15 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
       ["Ctrl+Shift+Drag", "Marquee select"],
       [bindingToLabel(b.selectAll), "Select all"],
       [bindingToLabel(b.flipColors), "Flip colors"],
-      [bindingToLabel(b.rotateCcw), "Rotate"],
+    );
+    if (hasSelection) {
+      const rotateKeys = `${bindingToLabel(b.rotateCcw)}/${bindingToLabel(b.rotateXCcw)}/${bindingToLabel(b.rotateYCcw)}`;
+      const flipKeys = `${bindingToLabel(b.flipX)}/${bindingToLabel(b.flipY)}/${bindingToLabel(b.flipZ)}`;
+      hints.push([rotateKeys, "Rotate"], [flipKeys, "Flip"]);
+    } else {
+      hints.push([bindingToLabel(b.rotateCcw), "Rotate"]);
+    }
+    hints.push(
       [`Hold ${bindingToLabel(b.holdToDelete)}`, "Click-to-delete"],
       [bindingToLabel(b.deleteSelection), "Delete selected"],
       [bindingToLabel(b.clearSelection), "Clear selection"],
