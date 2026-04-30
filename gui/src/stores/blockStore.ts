@@ -42,7 +42,7 @@ import {
   PLACEABLE_ORDER,
   currentPlaceableIndex,
 } from "../types";
-import { rotateBlockAroundZ } from "../utils/blockRotation";
+import { rotateBlockAroundAxis, type RotationAxis, type RotationOperation } from "../utils/blockRotation";
 
 export type Mode = "edit" | "build";
 export type ArmedTool = "pointer" | "cube" | "pipe" | "port" | "paste";
@@ -171,8 +171,10 @@ interface BlockStore {
   portPositions: Set<string>;
   /** Pivot used by rotateSelected, cached across subsequent rotations of the same
    * selection so that 4×CCW returns to identity even when the selection bbox is
-   * not cube-grid-aligned. Cleared whenever the selection itself changes. */
-  selectionPivot: Position3D | null;
+   * not cube-grid-aligned. Cleared whenever the selection itself changes. The
+   * axis is stored alongside so that switching rotation axis recomputes the
+   * pivot rather than reusing a stale one. */
+  selectionPivot: { pos: Position3D; axis: RotationAxis } | null;
 
   /** Clipboard populated by `copySelection`. Entries are normalized so the
    * selection's bounding-box min corner sits at (0,0,0). In-memory only —
@@ -288,7 +290,7 @@ interface BlockStore {
   clearSelection: () => void;
   deleteSelected: () => void;
   flipSelected: () => void;
-  rotateSelected: (direction: "cw" | "ccw", pivotOverride?: Position3D | null) => { ok: true } | { ok: false; reason: string };
+  rotateSelected: (axis: RotationAxis, operation: RotationOperation, pivotOverride?: Position3D | null) => { ok: true } | { ok: false; reason: string };
   selectAll: () => void;
   selectBlocks: (keys: string[], additive: boolean, portKeys?: string[]) => void;
   togglePortSelection: (pos: Position3D, additive: boolean) => void;
@@ -2367,27 +2369,27 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       };
     }),
 
-  rotateSelected: (direction, pivotOverride) => {
+  rotateSelected: (axis, operation, pivotOverride) => {
     const state = get();
     if (state.selectedKeys.size === 0) return { ok: true };
 
     // Determine pivot. Priority:
-    //   1. Explicit override (user hovered a selected block while pressing R).
-    //   2. Cached selectionPivot from a prior rotation of the same selection —
-    //      this is what makes 4×CCW return to identity even when the selection
-    //      bbox isn't cube-grid-aligned (bbox swaps X/Y spans on rotation, so
-    //      recomputing each time would drift).
-    //   3. Single-block selection: that block's position.
-    //   4. Multi-block selection: bbox XY center, snapped to the cube grid.
+    //   1. Explicit override (user hovered a selected block while pressing the rotate key).
+    //   2. Cached selectionPivot from a prior rotation of the same selection AND
+    //      same axis. Reusing across axes would inherit a z-coord that wasn't
+    //      meaningful for Z-only rotation (and still isn't for X/Y) — recompute
+    //      when axis changes.
+    //   3. Single-block selection: that block's position, snapped to cube grid.
+    //   4. Multi-block selection: bbox center on all 3 axes, snapped to cube grid.
     let pivot: Position3D;
     if (pivotOverride) {
       pivot = {
         x: Math.round(pivotOverride.x / 3) * 3,
         y: Math.round(pivotOverride.y / 3) * 3,
-        z: pivotOverride.z,
+        z: Math.round(pivotOverride.z / 3) * 3,
       };
-    } else if (state.selectionPivot) {
-      pivot = state.selectionPivot;
+    } else if (state.selectionPivot && state.selectionPivot.axis === axis) {
+      pivot = state.selectionPivot.pos;
     } else if (state.selectedKeys.size === 1) {
       const onlyKey = state.selectedKeys.values().next().value as string;
       const onlyBlock = state.blocks.get(onlyKey);
@@ -2395,24 +2397,25 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       pivot = {
         x: Math.round(onlyBlock.pos.x / 3) * 3,
         y: Math.round(onlyBlock.pos.y / 3) * 3,
-        z: onlyBlock.pos.z,
+        z: Math.round(onlyBlock.pos.z / 3) * 3,
       };
     } else {
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      let zSample = 0;
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
       for (const key of state.selectedKeys) {
         const block = state.blocks.get(key);
         if (!block) continue;
         if (block.pos.x < minX) minX = block.pos.x;
         if (block.pos.y < minY) minY = block.pos.y;
+        if (block.pos.z < minZ) minZ = block.pos.z;
         if (block.pos.x > maxX) maxX = block.pos.x;
         if (block.pos.y > maxY) maxY = block.pos.y;
-        zSample = block.pos.z;
+        if (block.pos.z > maxZ) maxZ = block.pos.z;
       }
       pivot = {
         x: Math.round(((minX + maxX) / 2) / 3) * 3,
         y: Math.round(((minY + maxY) / 2) / 3) * 3,
-        z: zSample,
+        z: Math.round(((minZ + maxZ) / 2) / 3) * 3,
       };
     }
 
@@ -2423,49 +2426,50 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       for (const oldKey of state.selectedKeys) {
         const oldBlock = state.blocks.get(oldKey);
         if (!oldBlock) continue;
-        const newBlock = rotateBlockAroundZ(oldBlock, pivot, direction);
+        const newBlock = rotateBlockAroundAxis(oldBlock, pivot, axis, operation);
         if (!isValidPos(newBlock.pos, newBlock.type)) {
-          return { ok: false, reason: "Rotation produced an invalid grid position" };
+          return { ok: false, reason: "Result has an invalid grid position" };
         }
         const newKey = posKey(newBlock.pos);
         if (newKeys.has(newKey)) {
-          return { ok: false, reason: "Rotation produced overlapping positions" };
+          return { ok: false, reason: "Result has overlapping positions" };
         }
         newKeys.add(newKey);
         entries.push({ oldKey, oldBlock, newKey, newBlock });
       }
     } catch (e) {
-      return { ok: false, reason: e instanceof Error ? e.message : "Rotation failed" };
+      return { ok: false, reason: e instanceof Error ? e.message : "Operation failed" };
     }
 
     // Collision: any new key not in the old selection that already has a block
     for (const newKey of newKeys) {
       if (state.selectedKeys.has(newKey)) continue;
       if (state.blocks.has(newKey)) {
-        return { ok: false, reason: "Rotation would overlap an existing block" };
+        return { ok: false, reason: "Result would overlap an existing block" };
       }
     }
 
-    // TQEC validity: cube types must remain compatible with adjacent pipes.
-    // Skipped under "Ignore color rules" (freeBuild), matching moveSelection
-    // and placement paths (GridPlane, BlockInstances, OpenPipeGhosts).
-    if (!state.freeBuild) {
-      const tentative = new Map(state.blocks);
-      for (const entry of entries) tentative.delete(entry.oldKey);
-      for (const entry of entries) tentative.set(entry.newKey, entry.newBlock);
+    // Build the post-operation tentative map once for adjacency validation.
+    const tentative = new Map(state.blocks);
+    for (const entry of entries) tentative.delete(entry.oldKey);
+    for (const entry of entries) tentative.set(entry.newKey, entry.newBlock);
 
-      // Cubes to re-validate: every rotated cube, plus any cube adjacent to a
-      // rotated pipe's new position (catches the mirror case where a pipe lands
-      // next to an unselected cube and breaks its constraints).
+    // TQEC validity: cube types must remain compatible with adjacent pipes,
+    // and Y blocks must only neighbor Z-open pipes. Skipped under
+    // "Ignore color rules" (freeBuild), matching moveSelection and placement
+    // paths (GridPlane, BlockInstances, OpenPipeGhosts).
+    if (!state.freeBuild) {
+      // Cubes to re-validate for color rules: every rotated cube, plus any
+      // cube adjacent to a rotated pipe's new position.
       const toCheck = new Map<string, Block>();
       for (const entry of entries) {
         const b = entry.newBlock;
         if (isPipeType(b.type)) {
           const base = b.type.replace("H", "");
-          const axis = base.indexOf("O") as 0 | 1 | 2;
+          const pipeOpenAxis = base.indexOf("O") as 0 | 1 | 2;
           const nc: [number, number, number] = [b.pos.x, b.pos.y, b.pos.z];
           for (const pipeToCubeOffset of [-1, 2]) {
-            nc[axis] = [b.pos.x, b.pos.y, b.pos.z][axis] + pipeToCubeOffset;
+            nc[pipeOpenAxis] = [b.pos.x, b.pos.y, b.pos.z][pipeOpenAxis] + pipeToCubeOffset;
             const key = posKey({ x: nc[0], y: nc[1], z: nc[2] });
             const neighbor = tentative.get(key);
             if (neighbor && !isPipeType(neighbor.type) && neighbor.type !== "Y") {
@@ -2482,7 +2486,17 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const type = cube.type as CubeType;
         const ok = opts.determined ? opts.type === type : opts.options.includes(type);
         if (!ok) {
-          return { ok: false, reason: "Rotation would break color rules between adjacent blocks" };
+          return { ok: false, reason: "Color rules between adjacent blocks would break" };
+        }
+      }
+
+      // Y-block adjacency check: a Y block must only sit next to Z-open pipes.
+      // hasYCubePipeAxisConflict is symmetric — passing a Y block checks its
+      // pipe neighbors; passing a pipe checks for Y blocks at its endpoints.
+      // Iterating over rotated entries catches both directions.
+      for (const entry of entries) {
+        if (hasYCubePipeAxisConflict(entry.newBlock.type, entry.newBlock.pos, tentative)) {
+          return { ok: false, reason: "Y block can only attach to Z-open pipes (top/bottom)" };
         }
       }
     }
@@ -2505,6 +2519,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       const prevSelectedKeys = Array.from(s.selectedKeys);
       const nextSelectedKeys = entries.map((e) => e.newKey);
+      // The "rotate-selection" UndoCommand kind covers any axis and 180° flips —
+      // entries[] fully encodes the transformation.
       const cmd: UndoCommand = {
         kind: "rotate-selection",
         entries,
@@ -2517,7 +2533,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         history: [...s.history, cmd].slice(-MAX_HISTORY),
         future: [],
         selectedKeys: new Set(nextSelectedKeys),
-        selectionPivot: pivot,
+        selectionPivot: { pos: pivot, axis },
         hoveredGridPos: null,
         undeterminedCubes: newUndetermined,
       };
@@ -2629,6 +2645,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         history: [...state.history, cmd].slice(-MAX_HISTORY),
         future: [],
         selectedKeys: newSelected,
+        selectionPivot: null,
         hoveredGridPos: null,
         undeterminedCubes: newUndetermined,
       };

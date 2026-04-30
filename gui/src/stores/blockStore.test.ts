@@ -593,7 +593,7 @@ describe("blockStore", () => {
       useBlockStore.setState({ cubeType: "XZZ" });
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       useBlockStore.getState().selectAll();
-      const result = useBlockStore.getState().rotateSelected("ccw");
+      const result = useBlockStore.getState().rotateSelected("z", "ccw");
       expect(result).toEqual({ ok: true });
       expect(useBlockStore.getState().blocks.size).toBe(1);
       const b = useBlockStore.getState().blocks.get("0,0,0");
@@ -607,7 +607,7 @@ describe("blockStore", () => {
       useBlockStore.setState({ pipeVariant: "ZX" });
       useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
       useBlockStore.getState().selectAll();
-      const result = useBlockStore.getState().rotateSelected("ccw");
+      const result = useBlockStore.getState().rotateSelected("z", "ccw");
       expect(result).toEqual({ ok: true });
       const blocks = useBlockStore.getState().blocks;
       // bbox center (1.5, 0, 0) → snaps to (3, 0, 0). Rotating CCW around (3,0,0):
@@ -624,8 +624,8 @@ describe("blockStore", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
       useBlockStore.getState().selectAll();
-      useBlockStore.getState().rotateSelected("ccw");
-      useBlockStore.getState().rotateSelected("cw");
+      useBlockStore.getState().rotateSelected("z", "ccw");
+      useBlockStore.getState().rotateSelected("z", "cw");
       const blocks = useBlockStore.getState().blocks;
       expect(blocks.size).toBe(2);
       expect(blocks.get("0,0,0")?.type).toBe("XZZ");
@@ -640,7 +640,7 @@ describe("blockStore", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       useBlockStore.getState().addBlock({ x: 3, y: 3, z: 0 });
       useBlockStore.getState().selectAll();
-      for (let i = 0; i < 4; i++) useBlockStore.getState().rotateSelected("ccw");
+      for (let i = 0; i < 4; i++) useBlockStore.getState().rotateSelected("z", "ccw");
       const blocks = useBlockStore.getState().blocks;
       expect(blocks.size).toBe(2);
       expect(blocks.get("0,0,0")?.type).toBe("XZZ");
@@ -652,7 +652,7 @@ describe("blockStore", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       useBlockStore.getState().addBlock({ x: 3, y: 3, z: 0 });
       useBlockStore.getState().selectAll();
-      useBlockStore.getState().rotateSelected("ccw");
+      useBlockStore.getState().rotateSelected("z", "ccw");
       expect(useBlockStore.getState().selectionPivot).not.toBeNull();
       useBlockStore.getState().clearSelection();
       expect(useBlockStore.getState().selectionPivot).toBeNull();
@@ -678,7 +678,7 @@ describe("blockStore", () => {
       s.selectBlock({ x: 0, y: 0, z: 0 }, false);
       s.selectBlock({ x: 3, y: 0, z: 0 }, true);
       const blocksBefore = new Map(useBlockStore.getState().blocks);
-      const result = useBlockStore.getState().rotateSelected("ccw");
+      const result = useBlockStore.getState().rotateSelected("z", "ccw");
       expect(result.ok).toBe(false);
       // State unchanged
       const blocksAfter = useBlockStore.getState().blocks;
@@ -690,7 +690,7 @@ describe("blockStore", () => {
       useBlockStore.setState({ cubeType: "Y" });
       useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
       useBlockStore.getState().selectAll();
-      const result = useBlockStore.getState().rotateSelected("ccw");
+      const result = useBlockStore.getState().rotateSelected("z", "ccw");
       expect(result).toEqual({ ok: true });
       const blocks = useBlockStore.getState().blocks;
       // Single-block selection uses its own pos as pivot → stays in place.
@@ -702,7 +702,7 @@ describe("blockStore", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
       useBlockStore.getState().selectAll();
-      useBlockStore.getState().rotateSelected("ccw");
+      useBlockStore.getState().rotateSelected("z", "ccw");
       useBlockStore.getState().undo();
       const blocks = useBlockStore.getState().blocks;
       expect(blocks.size).toBe(2);
@@ -715,7 +715,7 @@ describe("blockStore", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
       useBlockStore.getState().selectAll();
-      useBlockStore.getState().rotateSelected("ccw");
+      useBlockStore.getState().rotateSelected("z", "ccw");
       const afterRotate = new Map(useBlockStore.getState().blocks);
       useBlockStore.getState().undo();
       useBlockStore.getState().redo();
@@ -730,7 +730,7 @@ describe("blockStore", () => {
       useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
       useBlockStore.getState().selectAll();
       // Use (0,0,0) as override pivot; (3,0,0) should rotate to (0,3,0).
-      const result = useBlockStore.getState().rotateSelected("ccw", { x: 0, y: 0, z: 0 });
+      const result = useBlockStore.getState().rotateSelected("z", "ccw", { x: 0, y: 0, z: 0 });
       expect(result).toEqual({ ok: true });
       const blocks = useBlockStore.getState().blocks;
       expect(blocks.has("0,0,0")).toBe(true);
@@ -741,7 +741,7 @@ describe("blockStore", () => {
       useBlockStore.setState({ cubeType: "XZZ" });
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       useBlockStore.getState().selectAll();
-      useBlockStore.getState().rotateSelected("ccw");
+      useBlockStore.getState().rotateSelected("z", "ccw");
       // Single cube pivots on itself — new key is the same.
       expect(useBlockStore.getState().selectedKeys.has("0,0,0")).toBe(true);
     });
@@ -749,7 +749,7 @@ describe("blockStore", () => {
     it("is a no-op when nothing is selected", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       const histBefore = useBlockStore.getState().history.length;
-      const result = useBlockStore.getState().rotateSelected("ccw");
+      const result = useBlockStore.getState().rotateSelected("z", "ccw");
       expect(result).toEqual({ ok: true });
       expect(useBlockStore.getState().history.length).toBe(histBefore);
     });
@@ -766,7 +766,7 @@ describe("blockStore", () => {
       const blocksBefore = new Map(useBlockStore.getState().blocks);
 
       useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
-      const result = useBlockStore.getState().rotateSelected("ccw");
+      const result = useBlockStore.getState().rotateSelected("z", "ccw");
       expect(result.ok).toBe(false);
 
       // State unchanged
@@ -783,7 +783,7 @@ describe("blockStore", () => {
       useBlockStore.setState({ pipeVariant: null });
 
       useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
-      const result = useBlockStore.getState().rotateSelected("ccw");
+      const result = useBlockStore.getState().rotateSelected("z", "ccw");
       expect(result).toEqual({ ok: true });
       expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZZ");
     });
@@ -797,7 +797,7 @@ describe("blockStore", () => {
 
       useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 0 }, false);
       useBlockStore.getState().selectBlock({ x: 1, y: 0, z: 0 }, true);
-      const result = useBlockStore.getState().rotateSelected("ccw");
+      const result = useBlockStore.getState().rotateSelected("z", "ccw");
       expect(result).toEqual({ ok: true });
     });
 
@@ -813,12 +813,139 @@ describe("blockStore", () => {
       const blocksBefore = new Map(useBlockStore.getState().blocks);
 
       useBlockStore.getState().selectBlock({ x: 1, y: 0, z: 0 }, false);
-      const result = useBlockStore.getState().rotateSelected("ccw");
+      const result = useBlockStore.getState().rotateSelected("z", "ccw");
       expect(result.ok).toBe(false);
 
       const blocksAfter = useBlockStore.getState().blocks;
       expect(blocksAfter.size).toBe(blocksBefore.size);
       for (const [k, v] of blocksBefore) expect(blocksAfter.get(k)).toEqual(v);
+    });
+
+    it("rotates a single cube around X axis with type transform", () => {
+      useBlockStore.setState({ cubeType: "XZX" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      const result = useBlockStore.getState().rotateSelected("x", "ccw");
+      expect(result).toEqual({ ok: true });
+      // Single-block selection pivots on itself; type rotates: XZX → XXZ.
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XXZ");
+    });
+
+    it("rotates a single cube around Y axis with type transform", () => {
+      useBlockStore.setState({ cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      const result = useBlockStore.getState().rotateSelected("y", "ccw");
+      expect(result).toEqual({ ok: true });
+      // XZZ rotated CCW around Y: X → -Z, Z → X → "ZZX".
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZZX");
+    });
+
+    it("flips a multi-cube selection 180° around X axis (Y/Z negate)", () => {
+      useBlockStore.setState({ cubeType: "XZZ", freeBuild: true });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 0, y: 3, z: 0 });
+      useBlockStore.getState().selectAll();
+      const result = useBlockStore.getState().rotateSelected("x", "flip");
+      expect(result).toEqual({ ok: true });
+      const blocks = useBlockStore.getState().blocks;
+      // bbox center on Y is (0, 1.5, 0) → snaps to (0, 3, 0). Flipping Y around 3:
+      // (0,0,0) → (0, 6, 0); (0, 3, 0) → (0, 3, 0).
+      expect(blocks.has("0,6,0")).toBe(true);
+      expect(blocks.has("0,3,0")).toBe(true);
+    });
+
+    it("two flips around any axis is identity", () => {
+      useBlockStore.setState({ cubeType: "XZZ", freeBuild: true });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 3, z: 3 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().rotateSelected("x", "flip");
+      useBlockStore.getState().rotateSelected("x", "flip");
+      const blocks = useBlockStore.getState().blocks;
+      expect(blocks.has("0,0,0")).toBe(true);
+      expect(blocks.has("3,3,3")).toBe(true);
+    });
+
+    it("rejects X rotation of a Y block with a clear error", () => {
+      useBlockStore.setState({ cubeType: "Y" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      const result = useBlockStore.getState().rotateSelected("x", "ccw");
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toMatch(/can only rotate around the Z axis/);
+    });
+
+    it("allows Z flip of a Y block (Z direction preserved)", () => {
+      useBlockStore.setState({ cubeType: "Y" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      const result = useBlockStore.getState().rotateSelected("z", "flip");
+      expect(result).toEqual({ ok: true });
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("Y");
+    });
+
+    it("rejects rotating a Z-open pipe around X axis when adjacent to a Y block", () => {
+      // Setup: Y block at (0,0,0) with a Z-open pipe at (0,0,1).
+      useBlockStore.setState({ cubeType: "Y" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 1 });
+      useBlockStore.setState({ pipeVariant: null });
+      // Select only the pipe and rotate it around X axis. The pipe lands at
+      // (0,-2,0) as a Y-axis pipe — and the Y block at (0,0,0) is at one of
+      // the pipe's endpoints. Color rules can't catch this (Y blocks are
+      // excluded from cube-color validation), so the new Y-neighbor check is
+      // the ONLY pass that rejects this rotation. Asserting `result.reason`
+      // proves the new code path fires.
+      useBlockStore.getState().selectBlock({ x: 0, y: 0, z: 1 }, false);
+      const result = useBlockStore.getState().rotateSelected("x", "ccw");
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toMatch(/Z-open pipes/);
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("Y");
+      expect(useBlockStore.getState().blocks.get("0,0,1")).toBeDefined();
+    });
+
+    it("four CCW rotations around X axis is identity (multi-block at the store level)", () => {
+      useBlockStore.setState({ cubeType: "XZZ", freeBuild: true });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 0, y: 3, z: 0 });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 3 });
+      useBlockStore.getState().selectAll();
+      for (let i = 0; i < 4; i++) useBlockStore.getState().rotateSelected("x", "ccw");
+      const blocks = useBlockStore.getState().blocks;
+      expect(blocks.size).toBe(3);
+      expect(blocks.has("0,0,0")).toBe(true);
+      expect(blocks.has("0,3,0")).toBe(true);
+      expect(blocks.has("0,0,3")).toBe(true);
+    });
+
+    it("four CCW rotations around Y axis is identity (multi-block at the store level)", () => {
+      useBlockStore.setState({ cubeType: "XZZ", freeBuild: true });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 3 });
+      useBlockStore.getState().selectAll();
+      for (let i = 0; i < 4; i++) useBlockStore.getState().rotateSelected("y", "ccw");
+      const blocks = useBlockStore.getState().blocks;
+      expect(blocks.size).toBe(3);
+      expect(blocks.has("0,0,0")).toBe(true);
+      expect(blocks.has("3,0,0")).toBe(true);
+      expect(blocks.has("0,0,3")).toBe(true);
+    });
+
+    it("recomputes pivot when rotation axis changes", () => {
+      useBlockStore.setState({ cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 3, z: 3 });
+      useBlockStore.getState().selectAll();
+      useBlockStore.getState().rotateSelected("z", "ccw");
+      const pivotAfterZ = useBlockStore.getState().selectionPivot;
+      expect(pivotAfterZ?.axis).toBe("z");
+      // Switch axis → pivot recomputes (axis updates to "x").
+      useBlockStore.getState().rotateSelected("x", "ccw");
+      const pivotAfterX = useBlockStore.getState().selectionPivot;
+      expect(pivotAfterX?.axis).toBe("x");
     });
   });
 

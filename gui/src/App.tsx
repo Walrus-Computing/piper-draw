@@ -47,6 +47,7 @@ import {
   type KeyBinding,
 } from "./stores/keybindStore";
 import { useValidationStore } from "./stores/validationStore";
+import type { RotationAxis, RotationOperation } from "./utils/blockRotation";
 import { wasdToBuildDirection, tqecToThree, posKey, blockTqecSize, type Block, type IsoAxis, type ViewMode } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
@@ -74,6 +75,25 @@ import {
 } from "./utils/isoView";
 
 const GRID_SNAP = 3;
+
+type RotationActionName =
+  | "rotateCcw" | "rotateCw"
+  | "rotateXCcw" | "rotateXCw"
+  | "rotateYCcw" | "rotateYCw"
+  | "flipX" | "flipY" | "flipZ";
+
+/** Edit-mode keybind actions that map to a (axis, operation) for rotateSelected. */
+const ROTATION_ACTIONS: Record<RotationActionName, { axis: RotationAxis; operation: RotationOperation }> = {
+  rotateCcw:  { axis: "z", operation: "ccw" },
+  rotateCw:   { axis: "z", operation: "cw" },
+  rotateXCcw: { axis: "x", operation: "ccw" },
+  rotateXCw:  { axis: "x", operation: "cw" },
+  rotateYCcw: { axis: "y", operation: "ccw" },
+  rotateYCw:  { axis: "y", operation: "cw" },
+  flipX:      { axis: "x", operation: "flip" },
+  flipY:      { axis: "y", operation: "flip" },
+  flipZ:      { axis: "z", operation: "flip" },
+};
 
 const AUTOSAVE_KEY = "piper-draw:autosave:v1";
 const AUTOSAVE_META_KEY = "piper-draw:autosave:meta:v1";
@@ -849,14 +869,23 @@ export default function App() {
           }
           return;
         case "rotateCcw":
-        case "rotateCw": {
+        case "rotateCw":
+        case "rotateXCcw":
+        case "rotateXCw":
+        case "rotateYCcw":
+        case "rotateYCw":
+        case "flipX":
+        case "flipY":
+        case "flipZ": {
           if (store.selectedKeys.size === 0) return;
           e.preventDefault();
+          const { axis, operation } = ROTATION_ACTIONS[action as RotationActionName];
           const hovered = store.hoveredGridPos;
           const pivotOverride = hovered && store.selectedKeys.has(posKey(hovered)) ? hovered : null;
-          const result = store.rotateSelected(action === "rotateCw" ? "cw" : "ccw", pivotOverride);
+          const result = store.rotateSelected(axis, operation, pivotOverride);
           if (!result.ok) {
-            useValidationStore.getState().reportEphemeralError(`Rotation aborted: ${result.reason}`);
+            const verb = operation === "flip" ? "Flip" : "Rotation";
+            useValidationStore.getState().reportEphemeralError(`${verb} aborted: ${result.reason}`);
           }
           return;
         }
