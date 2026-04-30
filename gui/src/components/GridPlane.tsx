@@ -62,18 +62,14 @@ export function GridPlane() {
   });
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
-    // Pass-through (pointer/paste only): when a block/port is also under the
-    // cursor, return early without stopProp so the block's onPointerMove sets
-    // hoveredGridPos. Done before any setHoveredGridPos call so we don't write
-    // the plane cell and let the block immediately overwrite it (one-frame
-    // flash on stacked hits).
+    // Pass-through: when a block/port is also under the cursor, return early
+    // without stopProp so the block's onPointerMove sets hoveredGridPos. This
+    // matters whenever the GridPlane is closer to the camera than the block —
+    // looking down at sub-ground (z<0) blocks, or looking up from below at
+    // above-ground (z>0) blocks (so pipes can attach to their bottom faces).
     if (mode === "edit") {
       const s = useBlockStore.getState();
-      if (
-        !s.xHeld &&
-        (s.armedTool === "pointer" || s.armedTool === "paste") &&
-        shouldPassThroughGridPlane(e.intersections, meshRef.current)
-      ) {
+      if (!s.xHeld && shouldPassThroughGridPlane(e.intersections, meshRef.current)) {
         return;
       }
     }
@@ -139,28 +135,28 @@ export function GridPlane() {
     if (e.delta > 2) { e.stopPropagation(); return; } // ignore drags
     if (mode !== "edit") { e.stopPropagation(); return; }
 
+    // Pass-through: when the click ray also hits a block or port ghost,
+    // let that handler own the event. Lets sub-ground (z<0) blocks be
+    // selected/edited from above and above-ground (z>0) blocks be
+    // selected/edited (and pipes attached to their bottom faces) from below.
+    //
+    // NOTE: this couples GridPlane's click policy (deselect, place-on-grid,
+    // port-on-grid, paste-commit) to every other clickable scene mesh. Any
+    // future clickable mesh must either opt out of raycast (the
+    // raycast={noRaycast} convention used by decoratives) or call
+    // e.stopPropagation() in its own onClick. Otherwise clicks falling
+    // through that mesh would be silently dropped.
+    if (shouldPassThroughGridPlane(e.intersections, meshRef.current)) return;
+    e.stopPropagation();
+
     const store = useBlockStore.getState();
     // X-held delete on empty grid is a no-op.
-    if (store.xHeld) { e.stopPropagation(); return; }
+    if (store.xHeld) return;
 
     if (store.armedTool === "pointer") {
-      // Pass-through: when the click ray also hits a block or port ghost
-      // further along, let that handler own the event so sub-ground blocks
-      // (TQEC z<0) can be selected from above.
-      //
-      // NOTE: this couples deselect-on-empty-click policy to GridPlane. Any
-      // future clickable scene mesh must either opt out of raycast (the
-      // raycast={noRaycast} convention used by decoratives) or call
-      // e.stopPropagation() in its own onClick. Otherwise deselection would
-      // silently stop working through that mesh.
-      if (shouldPassThroughGridPlane(e.intersections, meshRef.current)) return;
-      e.stopPropagation();
       store.clearSelection();
       return;
     }
-    // Paste / port / placement: the plane is the intended target, so we
-    // always consume the click here.
-    e.stopPropagation();
     // Paste tool: commit the clipboard at the snapped hover cell, then
     // return to pointer (commitPaste sets armedTool="pointer").
     if (store.armedTool === "paste") {
