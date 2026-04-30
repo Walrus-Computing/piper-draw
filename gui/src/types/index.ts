@@ -102,6 +102,13 @@ export function currentPlaceableIndex(
 export interface Block {
   pos: Position3D;
   type: BlockType;
+  /**
+   * Optional group membership. Blocks sharing a `groupId` are treated as a
+   * unit by selection (click any → fan out), verify (filter by groupId), ZX
+   * extraction, and copy/paste. A block belongs to at most one group.
+   * Auto-promoted blocks intentionally start ungrouped (`undefined`).
+   */
+  groupId?: string;
 }
 
 export type PortIO = "in" | "out";

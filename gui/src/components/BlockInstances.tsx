@@ -2,6 +2,7 @@ import { useRef, useLayoutEffect, useMemo, useEffect, useState } from "react";
 import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
+import { groupMembers as listGroupMembers } from "../stores/groupSelectors";
 import {
   tqecToThree,
   yBlockZOffset,
@@ -324,7 +325,18 @@ function TypedInstances({
     }
     const armed = store.armedTool;
     if (armed === "pointer") {
-      store.selectBlock(b[e.instanceId].pos, e.nativeEvent.shiftKey);
+      const pos = b[e.instanceId].pos;
+      const altKey = e.nativeEvent.altKey;
+      const shiftKey = e.nativeEvent.shiftKey;
+      const clickedBlock = store.blocks.get(posKey(pos));
+      // Plain click on a grouped member fans out to all members; Alt+click
+      // bypasses fan-out and selects just the clicked block (drill-in).
+      if (!altKey && clickedBlock?.groupId) {
+        const members = listGroupMembers(store.blocks, clickedBlock.groupId);
+        store.selectBlocks(members, shiftKey);
+      } else {
+        store.selectBlock(pos, shiftKey);
+      }
       return;
     }
     if (armed === "paste") {

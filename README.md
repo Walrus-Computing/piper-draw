@@ -48,6 +48,9 @@ Piper-draw has two interaction modes for placing blocks:
 
 Use the **Iso ▾** menu in the toolbar to snap to an axis-locked orthographic view; slice stepping auto-advances through depth as you build.
 
+### Groups
+Select two or more blocks and press `G` to bundle them into a group. Grouped blocks share a colored dashed outline and behave as a unit: clicking any member selects the whole group, and `Verify` / `ZX` automatically scope to that group's blocks. Press `G` again on a group to ungroup. `Alt+click` drills in to a single member without disturbing the rest; `Alt+marquee` is a one-shot literal-set selection. Copy/paste duplicates a group as a fresh new group with its own color, leaving the original intact. The grid toggle (previously `G`) moved to `Shift+G`.
+
 ### Analysis
 - **Verify (tqec)** — check that the diagram is a valid TQEC block graph. Errors are highlighted inline on the offending cubes.
 - **Flows (tqec)** — compute stabilizer flows (correlation surfaces) and visualize each surface directly in 3D. Edit the Pauli basis on ports to query custom flows.
