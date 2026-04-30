@@ -18,6 +18,26 @@ Key routing rules:
 - Save progress, checkpoint, resume → invoke checkpoint
 - Code quality, health check → invoke health
 
+## Versioning
+
+The project tracks releases in `VERSION` (repo root) and `CHANGELOG.md` (repo
+root, [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format). Version
+format is **four digits**: `MAJOR.MINOR.PATCH.MICRO`.
+
+When bumping `VERSION`, also update `gui/package.json`'s `"version"` field to
+the same value. The two files are kept in lockstep manually — `/ship`'s
+package.json sync logic looks at the repo root and won't reach into `gui/`.
+
+Bump levels:
+- **MICRO** (4th digit) — typo, comment, config nudge, single-file < 50 lines.
+- **PATCH** (3rd digit) — bug fix or small change, no new features.
+- **MINOR** (2nd digit) — new feature or capability. Ask before bumping.
+- **MAJOR** (1st digit) — breaking change or milestone. Ask before bumping.
+
+CHANGELOG entries describe what users / TQEC authors / GUI users can now do (or
+what stopped breaking). Group by `### Added`, `### Changed`, `### Fixed`,
+`### Removed`. Implementation notes belong in commit messages, not the changelog.
+
 ## Canonicalisation assumption (colinear-pipe cubes)
 
 A ZXCube sandwiched between two pipes that share the same open axis (e.g. an X-open
