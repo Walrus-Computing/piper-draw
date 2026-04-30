@@ -1337,6 +1337,153 @@ export function determineCubeOptions(
 }
 
 /**
+ * Lightweight `BlocksLookup` overlay: returns from `overrides` if present,
+ * else from `base`. Avoids `new Map(blocks)` clones in hot validation loops.
+ */
+class BlocksOverlay implements BlocksLookup {
+  private readonly base: BlocksLookup;
+  private readonly overrides: Map<string, Block>;
+  constructor(base: BlocksLookup, overrides: Map<string, Block>) {
+    this.base = base;
+    this.overrides = overrides;
+  }
+  get(key: string): Block | undefined {
+    return this.overrides.has(key) ? this.overrides.get(key) : this.base.get(key);
+  }
+}
+
+/**
+ * For a candidate cube T at one endpoint of pipe `n`, return the set of valid
+ * retyped pipe types whose other end still validates per `hasPipeColorConflict`.
+ *
+ * Enumerates all 4 pipe variants for the given open axis (2 base chars × {no H, H})
+ * and filters by overlay-validated `hasPipeColorConflict`. This is symmetric on
+ * both pipe endpoints — correctly handles cases where T is at the +2 (far) end
+ * of the pipe, where Hadamard swaps the basis chars at OUR end (not just the
+ * other end). Naive `inferPipeType(T, axis) + maybeH` is wrong for far-end
+ * with H because the chars need to be swapped first.
+ */
+function pipeRetypeCandidates(
+  cubePos: Position3D,
+  cubeKey: string,
+  T: CubeType,
+  axis: 0 | 1 | 2,
+  nPos: Position3D,
+  nKey: string,
+  blocks: BlocksLookup,
+): PipeType[] {
+  const out: PipeType[] = [];
+  for (const candidate of PIPE_TYPES) {
+    if ((candidate as string).replace("H", "").indexOf("O") !== axis) continue;
+    const overrides = new Map<string, Block>();
+    overrides.set(cubeKey, { pos: cubePos, type: T });
+    overrides.set(nKey, { pos: nPos, type: candidate });
+    const overlay = new BlocksOverlay(blocks, overrides);
+    if (!hasPipeColorConflict(candidate, nPos, overlay)) out.push(candidate);
+  }
+  return out;
+}
+
+/**
+ * Like `determineCubeOptions`, but allows the *adjacent pipes* to retype
+ * alongside the cube — including toggling Hadamard on a per-pipe basis. A
+ * candidate cube type `T` is valid iff every adjacent pipe has at least one
+ * retype variant (H or non-H) whose far end still validates per
+ * `hasPipeColorConflict`.
+ *
+ * This is the helper used by user-facing cube-cycle UI (cycleBlock,
+ * cycleSelectedType, Toolbar greying). Use the strict `determineCubeOptions`
+ * for canonicalisation (port auto-promote, .dae import) and pipe-cycle
+ * ambiguity detection — those compute "valid given existing pipes" and
+ * intentionally do not imply pipe retyping.
+ *
+ * Local-only semantic: only pipes directly adjacent to `cubePos` are
+ * considered for retyping. Far-end cubes are checked strictly. No multi-hop
+ * CSP. Returns `CubeType[]` in `CUBE_TYPES` order.
+ */
+export function determineCubeOptionsWithPipeRetype(
+  cubePos: Position3D,
+  blocks: BlocksLookup,
+): CubeType[] {
+  const cubeKey = posKey(cubePos);
+  const coords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
+  const result: CubeType[] = [];
+
+  for (const T of CUBE_TYPES) {
+    let ok = true;
+    for (let axis = 0; axis < 3 && ok; axis++) {
+      for (const pipeOffset of [1, -2]) {
+        const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
+        nCoords[axis] += pipeOffset;
+        const nPos: Position3D = { x: nCoords[0], y: nCoords[1], z: nCoords[2] };
+        const nKey = posKey(nPos);
+        const neighbor = blocks.get(nKey);
+        if (!neighbor || !isPipeType(neighbor.type)) continue;
+
+        const base = neighbor.type.replace("H", "");
+        if (base.indexOf("O") !== axis) continue;
+
+        const candidates = pipeRetypeCandidates(
+          cubePos, cubeKey, T, axis as 0 | 1 | 2, nPos, nKey, blocks,
+        );
+        if (candidates.length === 0) { ok = false; break; }
+      }
+    }
+    if (ok) result.push(T);
+  }
+  return result;
+}
+
+/**
+ * Compute the pipe-retype updates required to make `newCubeType` consistent
+ * with adjacent pipes. Returns `null` if any adjacent pipe has no valid
+ * retype (neither H-preserved nor H-toggled). Returns `[]` when no pipe
+ * needs to change. For each pipe, prefers H-preserved when it works, falls
+ * back to H-toggled — so a non-H pipe stays non-H whenever possible.
+ *
+ * Used by both `cycleBlock` (build mode) and `cycleSelectedType` (edit mode)
+ * to keep their pipe-mutation logic in one place.
+ */
+export function computePipeRetypes(
+  blocks: BlocksLookup,
+  cubePos: Position3D,
+  newCubeType: CubeType,
+): Array<{ key: string; oldType: PipeType; newType: PipeType }> | null {
+  const cubeKey = posKey(cubePos);
+  const coords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
+  const updates: Array<{ key: string; oldType: PipeType; newType: PipeType }> = [];
+
+  for (let axis = 0; axis < 3; axis++) {
+    for (const pipeOffset of [1, -2]) {
+      const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
+      nCoords[axis] += pipeOffset;
+      const nPos: Position3D = { x: nCoords[0], y: nCoords[1], z: nCoords[2] };
+      const nKey = posKey(nPos);
+      const neighbor = blocks.get(nKey);
+      if (!neighbor || !isPipeType(neighbor.type)) continue;
+
+      const oldType = neighbor.type as PipeType;
+      const oldHadamard = oldType.length > 3;
+      const base = oldType.replace("H", "");
+      if (base.indexOf("O") !== axis) continue;
+
+      const candidates = pipeRetypeCandidates(
+        cubePos, cubeKey, newCubeType, axis as 0 | 1 | 2, nPos, nKey, blocks,
+      );
+      if (candidates.length === 0) return null;
+      // Preference order: keep oldType if valid (no change); else prefer same H
+      // state as oldType (don't add/remove Hadamard if unnecessary); else any.
+      let newType: PipeType | undefined;
+      if (candidates.includes(oldType)) newType = oldType;
+      else newType = candidates.find((c) => (c.length > 3) === oldHadamard) ?? candidates[0];
+      if (newType === oldType) continue;
+      updates.push({ key: nKey, oldType, newType });
+    }
+  }
+  return updates;
+}
+
+/**
  * Return posKeys of pipes whose open-axis endpoint lies at cubePos.
  * Used by the cube → port conversion (must have ≤1) and by the cascade-delete
  * path (deleting a junction cube also removes its attached pipes).

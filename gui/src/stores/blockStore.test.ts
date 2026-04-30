@@ -1362,8 +1362,10 @@ describe("blockStore", () => {
     });
 
     it("free-build cube cycle accepts a CUBE_TYPE that color rules would reject", () => {
-      // OXZ pipe at (1,0,0) constrains the cube at (0,0,0) to Y=X, Z=Z (only
-      // ZXZ and XXZ pass). XZX has Y=Z and is rejected without freeBuild.
+      // OXZ pipe at (1,0,0). Cube candidate XZZ has identical Y/Z chars (Z,Z),
+      // so inferPipeType(XZZ, 0) = "OZZ" — not a valid PIPE_TYPE. The wider gate
+      // therefore rejects XZZ even though pipes could otherwise retype. freeBuild
+      // bypasses this and lets the user place XZZ anyway.
       useBlockStore.setState({ cubeType: "ZXZ" });
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       useBlockStore.setState({ pipeVariant: "XZ" });
@@ -1375,12 +1377,12 @@ describe("blockStore", () => {
         selectedKeys: new Set(["0,0,0"]),
         freeBuild: false,
       });
-      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "XZX" });
+      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "XZZ" });
       expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXZ");
 
       useBlockStore.setState({ freeBuild: true });
-      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "XZX" });
-      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZX");
+      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "XZZ" });
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XZZ");
     });
 
     it("free-build cube cycle includes the port option even with two attached pipes", () => {
@@ -1411,6 +1413,278 @@ describe("blockStore", () => {
       expect(s.portPositions.has("3,0,0")).toBe(true);
       expect(s.selectedKeys.has("3,0,0")).toBe(false);
       expect(s.selectedPortPositions.has("3,0,0")).toBe(true);
+    });
+  });
+
+  describe("cycleSelectedType — wider gate retypes adjacent pipes", () => {
+    function setupColinearPortFarEnds() {
+      // Middle cube ZZX with two OZX pipes; both far-ends are ports (no cubes).
+      useBlockStore.setState({ cubeType: "ZZX" });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "ZX" }); // OZX on X-axis
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 4, y: 0, z: 0 });
+      useBlockStore.setState({
+        mode: "edit",
+        armedTool: "pointer",
+        selectedKeys: new Set(["3,0,0"]),
+        selectedPortPositions: new Set(),
+        freeBuild: false,
+      });
+    }
+
+    it("retypes adjacent pipes when cycling to a wider-set cube type", () => {
+      setupColinearPortFarEnds();
+      // XXZ would require T[1]=X, T[2]=Z — narrow would reject (pipes are OZX).
+      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "XXZ" });
+      const s = useBlockStore.getState();
+      expect(s.blocks.get("3,0,0")?.type).toBe("XXZ");
+      expect(s.blocks.get("1,0,0")?.type).toBe("OXZ");
+      expect(s.blocks.get("4,0,0")?.type).toBe("OXZ");
+    });
+
+    it("undo restores cube AND retyped pipes", () => {
+      setupColinearPortFarEnds();
+      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "XXZ" });
+      useBlockStore.getState().undo();
+      const s = useBlockStore.getState();
+      expect(s.blocks.get("3,0,0")?.type).toBe("ZZX");
+      expect(s.blocks.get("1,0,0")?.type).toBe("OZX");
+      expect(s.blocks.get("4,0,0")?.type).toBe("OZX");
+    });
+
+    it("redo re-applies cube AND retyped pipes", () => {
+      setupColinearPortFarEnds();
+      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "XXZ" });
+      useBlockStore.getState().undo();
+      useBlockStore.getState().redo();
+      const s = useBlockStore.getState();
+      expect(s.blocks.get("3,0,0")?.type).toBe("XXZ");
+      expect(s.blocks.get("1,0,0")?.type).toBe("OXZ");
+      expect(s.blocks.get("4,0,0")?.type).toBe("OXZ");
+    });
+
+    it("no-op when target type is not in the wider set (inferPipeType null)", () => {
+      // Place ZZX at (0,0,0) and (3,0,0), connect with OZX pipe. Target XZZ
+      // has same Y/Z chars (Z,Z); infer axis 0 = OZZ which is not a valid
+      // PIPE_TYPE. The wider gate excludes XZZ; the cycle is a no-op.
+      useBlockStore.setState({ cubeType: "ZZX" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.setState({
+        mode: "edit",
+        armedTool: "pointer",
+        selectedKeys: new Set(["0,0,0"]),
+        selectedPortPositions: new Set(),
+        freeBuild: false,
+      });
+      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "XZZ" });
+      const s = useBlockStore.getState();
+      expect(s.blocks.get("0,0,0")?.type).toBe("ZZX");
+      expect(s.blocks.get("1,0,0")?.type).toBe("OZX");
+    });
+
+    it("frees a corner cube of a 4-cube square via H-toggle on perpendicular pipes", () => {
+      // The user's scenario: ZZX corner with two perpendicular non-H pipes
+      // and ZZX far-end corners. Cycling the corner to XXZ requires both
+      // pipes to take Hadamard. After cycle: cube=XXZ, pipe1=OXZH, pipe2=XOZH.
+      // Far-end corners (still ZZX) remain consistent because Hadamard swaps
+      // closed-axis chars at the far end — the swap matches ZZX.
+      useBlockStore.setState({ cubeType: "ZZX" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 0, y: 3, z: 0 });
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 0, y: 1, z: 0 });
+
+      useBlockStore.setState({
+        mode: "edit",
+        armedTool: "pointer",
+        selectedKeys: new Set(["0,0,0"]),
+        selectedPortPositions: new Set(),
+        freeBuild: false,
+      });
+      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "XXZ" });
+
+      const s = useBlockStore.getState();
+      expect(s.blocks.get("0,0,0")?.type).toBe("XXZ");
+      expect(s.blocks.get("1,0,0")?.type).toBe("OXZH");
+      expect(s.blocks.get("0,1,0")?.type).toBe("XOZH");
+      expect(s.blocks.get("3,0,0")?.type).toBe("ZZX");
+      expect(s.blocks.get("0,3,0")?.type).toBe("ZZX");
+    });
+
+    it("cycles a corner of an 8-cube square frame (corners + edges, like the user's picture)", () => {
+      // Square frame: 4 corner cubes at (0,0,0), (6,0,0), (0,6,0), (6,6,0)
+      // and 4 edge cubes at (3,0,0), (0,3,0), (6,3,0), (3,6,0).
+      // 8 OZX/ZOX pipes connecting them.
+      useBlockStore.setState({ cubeType: "ZZX" });
+      // Corners
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 6, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 0, y: 6, z: 0 });
+      useBlockStore.getState().addBlock({ x: 6, y: 6, z: 0 });
+      // Edges
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 0, y: 3, z: 0 });
+      useBlockStore.getState().addBlock({ x: 6, y: 3, z: 0 });
+      useBlockStore.getState().addBlock({ x: 3, y: 6, z: 0 });
+      // X-axis pipes
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 4, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 1, y: 6, z: 0 });
+      useBlockStore.getState().addBlock({ x: 4, y: 6, z: 0 });
+      // Y-axis pipes (variant ZX on axis 1 = ZOX)
+      useBlockStore.getState().addBlock({ x: 0, y: 1, z: 0 });
+      useBlockStore.getState().addBlock({ x: 0, y: 4, z: 0 });
+      useBlockStore.getState().addBlock({ x: 6, y: 1, z: 0 });
+      useBlockStore.getState().addBlock({ x: 6, y: 4, z: 0 });
+      expect(useBlockStore.getState().blocks.size).toBe(16);
+
+      useBlockStore.setState({
+        mode: "edit",
+        armedTool: "pointer",
+        selectedKeys: new Set(["0,0,0"]),
+        selectedPortPositions: new Set(),
+        freeBuild: false,
+      });
+      // Cycle corner (0,0,0) forward — wider set is {ZZX, XXZ}; from ZZX
+      // we should land on XXZ with H added to both perpendicular pipes.
+      useBlockStore.getState().cycleSelectedType(1);
+      const s = useBlockStore.getState();
+      expect(s.blocks.get("0,0,0")?.type).toBe("XXZ");
+      expect(s.blocks.get("1,0,0")?.type).toBe("OXZH");
+      expect(s.blocks.get("0,1,0")?.type).toBe("XOZH");
+      // Other 7 cubes unchanged.
+      expect(s.blocks.get("3,0,0")?.type).toBe("ZZX");
+      expect(s.blocks.get("6,0,0")?.type).toBe("ZZX");
+      expect(s.blocks.get("0,3,0")?.type).toBe("ZZX");
+      expect(s.blocks.get("0,6,0")?.type).toBe("ZZX");
+      expect(s.blocks.get("6,6,0")?.type).toBe("ZZX");
+    });
+
+    it("Y target keeps adjacent pipe unchanged (Y is structural, not retypable)", () => {
+      // XZZ with a Z-axis pipe (XZO). Cycling to Y must leave the pipe alone.
+      useBlockStore.setState({ cubeType: "XZZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 1 });
+      expect(useBlockStore.getState().blocks.get("0,0,1")?.type).toBe("XZO");
+      useBlockStore.setState({
+        mode: "edit",
+        armedTool: "pointer",
+        selectedKeys: new Set(["0,0,0"]),
+        selectedPortPositions: new Set(),
+        freeBuild: false,
+      });
+      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "Y" });
+      const s = useBlockStore.getState();
+      expect(s.blocks.get("0,0,0")?.type).toBe("Y");
+      expect(s.blocks.get("0,0,1")?.type).toBe("XZO");
+    });
+
+    it("preserves Hadamard suffix when retyping pipes (cycleSelectedType)", () => {
+      // ZZX at (3,0,0); two pipes — left non-H, right H.
+      useBlockStore.setState({ cubeType: "ZZX" });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "ZXH" });
+      useBlockStore.getState().addBlock({ x: 4, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.get("1,0,0")?.type).toBe("OZX");
+      expect(useBlockStore.getState().blocks.get("4,0,0")?.type).toBe("OZXH");
+
+      useBlockStore.setState({
+        mode: "edit",
+        armedTool: "pointer",
+        selectedKeys: new Set(["3,0,0"]),
+        selectedPortPositions: new Set(),
+        freeBuild: false,
+      });
+      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "XXZ" });
+      const s = useBlockStore.getState();
+      expect(s.blocks.get("3,0,0")?.type).toBe("XXZ");
+      expect(s.blocks.get("1,0,0")?.type).toBe("OXZ");
+      expect(s.blocks.get("4,0,0")?.type).toBe("OXZH");
+    });
+
+    it("undo of port→cube transition restores selectedPortPositions (regression)", () => {
+      // Place an explicit port marker, select it, cycle to a cube, undo.
+      useBlockStore.getState().addPortAt({ x: 0, y: 0, z: 0 });
+      expect(useBlockStore.getState().portPositions.has("0,0,0")).toBe(true);
+      useBlockStore.setState({
+        mode: "edit",
+        armedTool: "pointer",
+        selectedKeys: new Set(),
+        selectedPortPositions: new Set(["0,0,0"]),
+        freeBuild: false,
+      });
+      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "XZZ" });
+      let s = useBlockStore.getState();
+      expect(s.blocks.get("0,0,0")?.type).toBe("XZZ");
+      expect(s.selectedKeys.has("0,0,0")).toBe(true);
+      expect(s.selectedPortPositions.has("0,0,0")).toBe(false);
+
+      useBlockStore.getState().undo();
+      s = useBlockStore.getState();
+      expect(s.blocks.has("0,0,0")).toBe(false);
+      expect(s.portPositions.has("0,0,0")).toBe(true);
+      expect(s.selectedPortPositions.has("0,0,0")).toBe(true);
+      expect(s.selectedKeys.has("0,0,0")).toBe(false);
+    });
+  });
+
+  describe("cycleBlock — wider gate retypes adjacent pipes", () => {
+    it("cycles cursor cube to a wider-set type and retypes adjacent pipes", () => {
+      useBlockStore.setState({ cubeType: "ZZX" });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 4, y: 0, z: 0 });
+
+      useBlockStore.setState({
+        mode: "build",
+        buildCursor: { x: 3, y: 0, z: 0 },
+        buildHistory: [],
+        freeBuild: false,
+      });
+
+      useBlockStore.getState().cycleBlock("XXZ");
+      const s = useBlockStore.getState();
+      expect(s.blocks.get("3,0,0")?.type).toBe("XXZ");
+      expect(s.blocks.get("1,0,0")?.type).toBe("OXZ");
+      expect(s.blocks.get("4,0,0")?.type).toBe("OXZ");
+    });
+
+    it("cycleBlock undo+redo round-trips both cube and pipe retypes", () => {
+      useBlockStore.setState({ cubeType: "ZZX" });
+      useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.getState().addBlock({ x: 4, y: 0, z: 0 });
+      useBlockStore.setState({
+        mode: "build",
+        buildCursor: { x: 3, y: 0, z: 0 },
+        buildHistory: [],
+        freeBuild: false,
+      });
+
+      useBlockStore.getState().cycleBlock("XXZ");
+      useBlockStore.getState().undo();
+      let s = useBlockStore.getState();
+      expect(s.blocks.get("3,0,0")?.type).toBe("ZZX");
+      expect(s.blocks.get("1,0,0")?.type).toBe("OZX");
+      expect(s.blocks.get("4,0,0")?.type).toBe("OZX");
+
+      useBlockStore.getState().redo();
+      s = useBlockStore.getState();
+      expect(s.blocks.get("3,0,0")?.type).toBe("XXZ");
+      expect(s.blocks.get("1,0,0")?.type).toBe("OXZ");
+      expect(s.blocks.get("4,0,0")?.type).toBe("OXZ");
     });
   });
 
