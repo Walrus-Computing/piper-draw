@@ -23,6 +23,7 @@ import { ValidationToast } from "./components/ValidationToast";
 import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { LocatePulseHighlight } from "./components/LocatePulseHighlight";
 import { SelectionHighlights } from "./components/SelectionHighlights";
+import { GroupOutlines } from "./components/GroupOutlines";
 import { BuildCursor } from "./components/BuildCursor";
 import { SelectModePointer, type ThreeState } from "./components/SelectModePointer";
 import { DragGhost } from "./components/DragGhost";
@@ -47,6 +48,7 @@ import {
   type KeyBinding,
 } from "./stores/keybindStore";
 import { useValidationStore } from "./stores/validationStore";
+import type { RotationAxis, RotationOperation } from "./utils/blockRotation";
 import { wasdToBuildDirection, tqecToThree, posKey, blockTqecSize, type Block, type IsoAxis, type ViewMode } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
 import { animateCamera } from "./utils/cameraAnim";
@@ -54,6 +56,7 @@ import { downloadPng } from "./utils/photoExport";
 import { downloadDae } from "./utils/daeExport";
 import {
   applySnapshot,
+  isSceneSnapshotV1,
   type SceneSnapshotV1,
 } from "./utils/sceneSnapshot";
 import {
@@ -74,9 +77,65 @@ import {
 
 const GRID_SNAP = 3;
 
+type RotationActionName =
+  | "rotateCcw" | "rotateCw"
+  | "rotateXCcw" | "rotateXCw"
+  | "rotateYCcw" | "rotateYCw"
+  | "flipX" | "flipY" | "flipZ";
+
+/** Edit-mode keybind actions that map to a (axis, operation) for rotateSelected. */
+const ROTATION_ACTIONS: Record<RotationActionName, { axis: RotationAxis; operation: RotationOperation }> = {
+  rotateCcw:  { axis: "z", operation: "ccw" },
+  rotateCw:   { axis: "z", operation: "cw" },
+  rotateXCcw: { axis: "x", operation: "ccw" },
+  rotateXCw:  { axis: "x", operation: "cw" },
+  rotateYCcw: { axis: "y", operation: "ccw" },
+  rotateYCw:  { axis: "y", operation: "cw" },
+  flipX:      { axis: "x", operation: "flip" },
+  flipY:      { axis: "y", operation: "flip" },
+  flipZ:      { axis: "z", operation: "flip" },
+};
+
 const AUTOSAVE_KEY = "piper-draw:autosave:v1";
 const AUTOSAVE_META_KEY = "piper-draw:autosave:meta:v1";
 const AUTOSAVE_DEBOUNCE_MS = 500;
+
+// Snapshot of the user's autosave taken just before a shared scene is applied.
+// Persisted to localStorage so "Restore previous" survives a tab close/reload —
+// otherwise the autosave subscriber overwrites the original autosave with the
+// shared scene within AUTOSAVE_DEBOUNCE_MS.
+const PRE_SHARE_SNAPSHOT_KEY = "piper-draw:autosave:pre-share:v1";
+// One-time flag for the group/grid keymap migration toast (g moved from grid
+// toggle to group toggle; grid moved to Shift+G). Show once per browser.
+const GROUP_KEYMAP_MIGRATION_KEY = "piper-draw:group-keymap-migration-shown";
+
+function readPreShareSnapshot(): SceneSnapshotV1 | null {
+  try {
+    const raw = localStorage.getItem(PRE_SHARE_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isSceneSnapshotV1(parsed)) {
+      localStorage.removeItem(PRE_SHARE_SNAPSHOT_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    try { localStorage.removeItem(PRE_SHARE_SNAPSHOT_KEY); } catch { /* ignore */ }
+    return null;
+  }
+}
+
+function writePreShareSnapshot(snapshot: SceneSnapshotV1): void {
+  try {
+    localStorage.setItem(PRE_SHARE_SNAPSHOT_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Quota / private mode — banner falls back to React-only state.
+  }
+}
+
+function clearPreShareSnapshot(): void {
+  try { localStorage.removeItem(PRE_SHARE_SNAPSHOT_KEY); } catch { /* ignore */ }
+}
 
 /**
  * Shader-based grid mesh: dark grey cells at block positions (mod 3 ≡ 0),
@@ -506,8 +565,20 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(
     () => typeof localStorage !== 'undefined' && !localStorage.getItem('piperDraw.seenIntro'),
   );
-  const [sharedSceneBanner, setSharedSceneBanner] =
-    useState<{ previousSnapshot: SceneSnapshotV1 } | null>(null);
+  const [sharedSceneBanner, setSharedSceneBanner] = useState<
+    { previousSnapshot: SceneSnapshotV1 } | null
+  >(() => {
+    // Lazy init: hydrate the banner from a previous tab's pre-share key so
+    // it survives a reload while a shared scene is loaded. The boot effect
+    // below sets the banner anew when a fresh share is opened.
+    if (typeof window === "undefined") return null;
+    const carried = readPreShareSnapshot();
+    return carried ? { previousSnapshot: carried } : null;
+  });
+  // Gates the autosave subscriber: stays false during hash-decode so a shared
+  // scene's hydrate can't trigger an immediate write that overwrites the
+  // pre-share autosave (C6 race fix).
+  const [autosaveReady, setAutosaveReady] = useState(false);
   const threeStateRef = useRef<ThreeState | null>(null);
   const photoRequest = useBlockStore((s) => s.photoRequest);
   const flowsPanelOpen = useBlockStore((s) => s.flowsPanelOpen);
@@ -589,7 +660,8 @@ export default function App() {
               }
               return;
             }
-            case "g": e.preventDefault(); store.toggleShowGrid(); return;
+            // `g` is now bound to groupToggle in edit-mode keybinds (see keybindStore).
+            // Grid toggle moved to Shift+G — handled by the shift branch below.
             case "h": e.preventDefault(); store.toggleShowHints(); return;
             case "t": {
               e.preventDefault();
@@ -686,6 +758,13 @@ export default function App() {
         if (e.key === "?") {
           e.preventDefault();
           setKeybindEditorMode("general");
+          return;
+        }
+        // Shift+G toggles the grid (relocated from `g`, which now groups
+        // selected blocks via the edit-mode keybind). Global, mode-agnostic.
+        if (shift && key === "g") {
+          e.preventDefault();
+          store.toggleShowGrid();
           return;
         }
       }
@@ -802,14 +881,23 @@ export default function App() {
           }
           return;
         case "rotateCcw":
-        case "rotateCw": {
+        case "rotateCw":
+        case "rotateXCcw":
+        case "rotateXCw":
+        case "rotateYCcw":
+        case "rotateYCw":
+        case "flipX":
+        case "flipY":
+        case "flipZ": {
           if (store.selectedKeys.size === 0) return;
           e.preventDefault();
+          const { axis, operation } = ROTATION_ACTIONS[action as RotationActionName];
           const hovered = store.hoveredGridPos;
           const pivotOverride = hovered && store.selectedKeys.has(posKey(hovered)) ? hovered : null;
-          const result = store.rotateSelected(action === "rotateCw" ? "cw" : "ccw", pivotOverride);
+          const result = store.rotateSelected(axis, operation, pivotOverride);
           if (!result.ok) {
-            useValidationStore.getState().reportEphemeralError(`Rotation aborted: ${result.reason}`);
+            const verb = operation === "flip" ? "Flip" : "Rotation";
+            useValidationStore.getState().reportEphemeralError(`${verb} aborted: ${result.reason}`);
           }
           return;
         }
@@ -827,6 +915,25 @@ export default function App() {
               || (store.selectedKeys.size === 0 && store.selectedPortPositions.size === 1));
           if (single) store.cycleSelectedType(dir);
           else store.cycleArmedType(dir);
+          return;
+        }
+        case "groupToggle": {
+          e.preventDefault();
+          // One-time migration toast: `g` used to toggle the grid, now groups
+          // selected blocks (Shift+G is the new grid toggle). Surface once
+          // per browser via localStorage flag.
+          try {
+            if (!localStorage.getItem(GROUP_KEYMAP_MIGRATION_KEY)) {
+              useValidationStore.getState().reportEphemeralError(
+                "G now groups selected blocks. Use Shift+G to toggle the grid.",
+              );
+              localStorage.setItem(GROUP_KEYMAP_MIGRATION_KEY, "1");
+            }
+          } catch {
+            // localStorage unavailable (private mode etc.) — silently skip the
+            // migration toast; the action itself still runs.
+          }
+          store.groupToggle();
           return;
         }
       }
@@ -914,7 +1021,15 @@ export default function App() {
         if (raw) {
           const parsed: unknown = JSON.parse(raw);
           if (Array.isArray(parsed)) {
-            snapshot.blocks = parsed as SceneSnapshotV1["blocks"];
+            // Run the same validator the URL-share path uses — a buggy prior
+            // version, browser-extension tampering, or partial localStorage
+            // write could leave malformed blocks (especially malformed
+            // groupId values) that would otherwise bypass the GROUP_ID_RE
+            // gate. Drop the autosave entirely on a shape mismatch.
+            const candidate: SceneSnapshotV1 = { v: 1, blocks: parsed as SceneSnapshotV1["blocks"], portMeta: [], portPositions: [] };
+            if (isSceneSnapshotV1(candidate)) {
+              snapshot.blocks = candidate.blocks;
+            }
           }
         }
       } catch {
@@ -943,9 +1058,29 @@ export default function App() {
       }
     }
 
+    function resetTransientUI() {
+      // Recipient of a shared URL shouldn't inherit our build cursor / clipboard /
+      // paste preview — those are tied to coordinates that don't exist in the
+      // shared scene. Reset to a clean edit-mode pointer.
+      useBlockStore.setState({
+        mode: "edit",
+        armedTool: "pointer",
+        pipeVariant: null,
+        clipboard: null,
+        buildCursor: null,
+        portWarning: null,
+      });
+    }
+
+    // The banner is hydrated from the pre-share localStorage key in
+    // useState's initializer above; no explicit setSharedSceneBanner here.
     const sharedHash = parseSceneHashParam(window.location.hash);
     if (!sharedHash) {
       applySnapshot(readAutosaveSnapshot(), "hydrate");
+      // Boot finished synchronously; release the autosave subscriber. The
+      // async path below does the same on its terminal setAutosaveReady.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAutosaveReady(true);
       return;
     }
 
@@ -955,17 +1090,24 @@ export default function App() {
       const shared = await decodeSnapshotFromHash(window.location.hash);
       if (cancelled) return;
       if (shared) {
-        applySnapshot(shared, "hydrate");
-        clearShareHash();
         const hadAutosave =
           autosaveSnapshot.blocks.length > 0 || autosaveSnapshot.portPositions.length > 0;
+        // Persist the user's autosave to the pre-share key BEFORE applying the
+        // shared scene. The autosave subscriber (gated on autosaveReady) is
+        // still off here, but we also write before the apply so a refresh
+        // mid-flight doesn't strand the user with no recovery path.
         if (hadAutosave) {
+          writePreShareSnapshot(autosaveSnapshot);
           setSharedSceneBanner({ previousSnapshot: autosaveSnapshot });
         }
+        applySnapshot(shared, "hydrate");
+        resetTransientUI();
+        clearShareHash();
       } else {
         applySnapshot(autosaveSnapshot, "hydrate");
         clearShareHash();
       }
+      setAutosaveReady(true);
     })();
     return () => {
       cancelled = true;
@@ -973,6 +1115,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // Hold the subscriber off until the boot effect has finished hydrating.
+    // Otherwise the hydrate's `setState` would fire the subscriber and the
+    // debounced flush would overwrite the user's autosave with a half-loaded
+    // shared scene (or worse, an empty one if decode fails) — see C6 / C3.
+    if (!autosaveReady) return;
     let timeout: ReturnType<typeof setTimeout> | null = null;
     const flush = (blocks: Map<string, Block>) => {
       try {
@@ -1015,7 +1162,7 @@ export default function App() {
       }
       unsub();
     };
-  }, []);
+  }, [autosaveReady]);
 
   // Persist the Y-defect overlay toggle across sessions. Initial value is
   // hydrated in the store factory; this effect just writes back on changes.
@@ -1062,9 +1209,13 @@ export default function App() {
           previousSnapshot={sharedSceneBanner.previousSnapshot}
           onRestore={(snapshot) => {
             applySnapshot(snapshot, "load");
+            clearPreShareSnapshot();
             setSharedSceneBanner(null);
           }}
-          onDismiss={() => setSharedSceneBanner(null)}
+          onDismiss={() => {
+            clearPreShareSnapshot();
+            setSharedSceneBanner(null);
+          }}
         />
       )}
       <button
@@ -1126,6 +1277,7 @@ export default function App() {
         {!photoRequest && !flowVizMode && <InvalidBlockHighlights />}
         {!photoRequest && <LocatePulseHighlight />}
         {!photoRequest && !flowVizMode && <SelectionHighlights />}
+        {!photoRequest && !flowVizMode && <GroupOutlines />}
         {!photoRequest && !flowVizMode && <DragGhost />}
         {!photoRequest && !flowVizMode && <DragShadow />}
         {!photoRequest && !flowVizMode && <BuildCursor />}

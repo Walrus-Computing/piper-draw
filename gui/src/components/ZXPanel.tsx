@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBlockStore } from "../stores/blockStore";
+import { selectionGroupClassification, filterByGroup } from "../stores/groupSelectors";
 import { useFloatingPanel } from "../hooks/useFloatingPanel";
 import { ResizeGrip } from "../hooks/ResizeGrip";
 import {
@@ -318,7 +319,20 @@ export function ZXPanel({
     wasOpen.current = open;
   }, [open, flowsOpen, geometry, setGeometry, toolbarRef]);
 
-  const sig = useMemo(() => signature(blocks, portMeta), [blocks, portMeta]);
+  // Include the resolved group classification in `sig` so the debounced
+  // recompute fires when the user switches between groups (group-scoped ZX
+  // is filtered by selectedKeys → groupId in compute()). Without this,
+  // selecting a different group would leave a stale ZX diagram displayed.
+  const selectedKeys = useBlockStore((s) => s.selectedKeys);
+  const groupSig = useMemo(() => {
+    const cls = selectionGroupClassification(blocks, selectedKeys);
+    if (cls.kind === "all-same-group" || cls.kind === "single-grouped") return cls.groupId;
+    return "";
+  }, [blocks, selectedKeys]);
+  const sig = useMemo(
+    () => signature(blocks, portMeta) + "|g=" + groupSig,
+    [blocks, portMeta, groupSig],
+  );
 
   // Keep the `P1, P2, …` label allocation consistent with the Flows panel so
   // port names stay stable when both panels are used.
@@ -330,7 +344,16 @@ export function ZXPanel({
     async (doSimplify: boolean, doExtract: boolean) => {
       setLoading(true);
       const s = useBlockStore.getState();
-      const res = await computeZX(s.blocks, s.portMeta, doSimplify, doExtract);
+      // Group-scoped ZX: when the selection resolves to a single group,
+      // extract from that group's members only. Mirrors validate's filter
+      // behaviour. Boundary pipes whose other endpoint sits outside the
+      // group will appear as boundary vertices in the resulting ZX graph —
+      // documented as expected behaviour.
+      const cls = selectionGroupClassification(s.blocks, s.selectedKeys);
+      const blocksForZX = (cls.kind === "all-same-group" || cls.kind === "single-grouped")
+        ? filterByGroup(s.blocks, cls.groupId)
+        : s.blocks;
+      const res = await computeZX(blocksForZX, s.portMeta, doSimplify, doExtract);
       setResult(res);
       setLoading(false);
     },

@@ -109,3 +109,42 @@ skipIfNoCompression("encode/decode round-trip", () => {
     expect(await decodeSnapshotFromHash("#nothing-here")).toBe(null);
   });
 });
+
+skipIfNoCompression("decode-side hard caps", () => {
+  // Build a deflate-raw bomb directly via the platform API. `decompressedSize`
+  // bytes of zeros compresses to ~1 KiB, easily within the input cap, and the
+  // decoder must abort once the running output exceeds MAX_DECOMPRESSED_LEN.
+  async function makeDeflateBomb(decompressedSize: number): Promise<string> {
+    const bigInput = new Uint8Array(decompressedSize);
+    const cs = new CompressionStream("deflate-raw");
+    const writer = cs.writable.getWriter();
+    void writer.write(bigInput);
+    void writer.close();
+    const buf = await new Response(cs.readable).arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  }
+
+  it("rejects oversized hash params before touching DecompressionStream", async () => {
+    const huge = "A".repeat(20 * 1024); // 20 KiB, well past the 8 KiB cap
+    expect(await decodeSnapshotFromHash(`#scene=${huge}`)).toBe(null);
+  });
+
+  it("rejects a deflate bomb that decompresses past the 2 MiB cap", async () => {
+    // 3 MiB of zeros deflates to a tiny payload — fits under the input cap
+    // but blows the decompression cap, so the stream must abort with null.
+    const bomb = await makeDeflateBomb(3 * 1024 * 1024);
+    expect(bomb.length).toBeLessThan(8 * 1024);
+    expect(await decodeSnapshotFromHash(`#scene=${bomb}`)).toBe(null);
+  });
+
+  it("still accepts payloads comfortably under the decompression cap", async () => {
+    // 1 MiB of zeros — under the 2 MiB cap. Payload doesn't decode to a valid
+    // snapshot, but the decoder should run to completion and return null from
+    // the JSON.parse / shape-check, NOT from the size guard.
+    const benign = await makeDeflateBomb(1 * 1024 * 1024);
+    expect(await decodeSnapshotFromHash(`#scene=${benign}`)).toBe(null);
+  });
+});

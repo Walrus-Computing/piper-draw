@@ -2,7 +2,7 @@
   "name": "piper-draw-gui",
   "private": true,
   "license": "Apache-2.0",
-  "version": "0.0.0",
+  "version": "0.1.0.0",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -13,7 +13,7 @@
     "dev:backend": "cd .. && uv run uvicorn server:app --reload --port ${BACKEND_PORT:-8000}",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "node --require ./scripts/vitest-crypto-shim.cjs ./node_modules/vitest/vitest.mjs run --run",
+    "test": "node --require ./scripts/vitest-crypto-shim.cjs ./node_modules/vitest/vitest.mjs run",
     "test:watch": "node --require ./scripts/vitest-crypto-shim.cjs ./node_modules/vitest/vitest.mjs",
     "slop:diff": "node scripts/slop-diff.mjs",
     "preview": "vite preview"

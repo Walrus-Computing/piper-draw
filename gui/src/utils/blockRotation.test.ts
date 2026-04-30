@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  MATRICES,
+  ROT_X_180,
+  ROT_X_CCW,
+  ROT_X_CW,
+  ROT_Y_180,
+  ROT_Y_CCW,
+  ROT_Y_CW,
+  ROT_Z_180,
   ROT_Z_CCW,
   ROT_Z_CW,
+  rotateBlockAroundAxis,
   rotateBlockAroundZ,
   rotateBlockKind,
+  rotatePositionAroundAxis,
   rotatePositionAroundZ,
 } from "./blockRotation";
 import type { Block, Position3D } from "../types";
@@ -145,6 +155,248 @@ describe("ROT_Z_CCW / ROT_Z_CW", () => {
     for (let i = 0; i < 3; i++) {
       for (let j = 0; j < 3; j++) {
         expect(ROT_Z_CCW[i][j]).toBe(ROT_Z_CW[j][i]);
+      }
+    }
+  });
+});
+
+describe("rotateBlockKind — 90° X rotation", () => {
+  it("rotates cube types correctly under X CCW (Y/Z columns swap)", () => {
+    expect(rotateBlockKind("XZX", ROT_X_CCW)).toBe("XXZ");
+    expect(rotateBlockKind("XXZ", ROT_X_CCW)).toBe("XZX");
+    expect(rotateBlockKind("ZXZ", ROT_X_CCW)).toBe("ZZX");
+    expect(rotateBlockKind("ZZX", ROT_X_CCW)).toBe("ZXZ");
+    // Symmetric cubes are X-rotation invariant.
+    expect(rotateBlockKind("XZZ", ROT_X_CCW)).toBe("XZZ");
+    expect(rotateBlockKind("ZXX", ROT_X_CCW)).toBe("ZXX");
+  });
+
+  it("swaps O between Y- and Z-axis positions for pipes under X rotation", () => {
+    expect(rotateBlockKind("ZOX", ROT_X_CCW)).toBe("ZXO");
+    expect(rotateBlockKind("ZXO", ROT_X_CCW)).toBe("ZOX");
+    // X-axis pipes stay X-open (just basis chars permute).
+    expect(rotateBlockKind("OZX", ROT_X_CCW)).toBe("OXZ");
+    expect(rotateBlockKind("OXZ", ROT_X_CCW)).toBe("OZX");
+  });
+
+  it("preserves the Hadamard suffix under X rotation", () => {
+    expect(rotateBlockKind("OZXH", ROT_X_CCW)).toBe("OXZH");
+    expect(rotateBlockKind("ZOXH", ROT_X_CCW)).toBe("ZXOH");
+  });
+
+  it("rejects Y blocks under X rotation", () => {
+    expect(() => rotateBlockKind("Y", ROT_X_CCW)).toThrow(/can only rotate around the Z axis/);
+    expect(() => rotateBlockKind("Y", ROT_X_CW)).toThrow(/can only rotate around the Z axis/);
+  });
+});
+
+describe("rotateBlockKind — 90° Y rotation", () => {
+  it("rotates cube types correctly under Y CCW (X/Z columns swap)", () => {
+    expect(rotateBlockKind("XZZ", ROT_Y_CCW)).toBe("ZZX");
+    expect(rotateBlockKind("ZZX", ROT_Y_CCW)).toBe("XZZ");
+    expect(rotateBlockKind("ZXX", ROT_Y_CCW)).toBe("XXZ");
+    expect(rotateBlockKind("XXZ", ROT_Y_CCW)).toBe("ZXX");
+    // Symmetric cubes are Y-rotation invariant.
+    expect(rotateBlockKind("ZXZ", ROT_Y_CCW)).toBe("ZXZ");
+    expect(rotateBlockKind("XZX", ROT_Y_CCW)).toBe("XZX");
+  });
+
+  it("swaps O between X- and Z-axis positions for pipes under Y rotation", () => {
+    expect(rotateBlockKind("OZX", ROT_Y_CCW)).toBe("XZO");
+    expect(rotateBlockKind("XZO", ROT_Y_CCW)).toBe("OZX");
+    // Y-axis pipes stay Y-open under Y rotation.
+    expect(rotateBlockKind("ZOX", ROT_Y_CCW)).toBe("XOZ");
+    expect(rotateBlockKind("XOZ", ROT_Y_CCW)).toBe("ZOX");
+  });
+
+  it("preserves the Hadamard suffix under Y rotation", () => {
+    expect(rotateBlockKind("OZXH", ROT_Y_CCW)).toBe("XZOH");
+    expect(rotateBlockKind("ZOXH", ROT_Y_CCW)).toBe("XOZH");
+  });
+
+  it("rejects Y blocks under Y rotation", () => {
+    expect(() => rotateBlockKind("Y", ROT_Y_CCW)).toThrow(/can only rotate around the Z axis/);
+    expect(() => rotateBlockKind("Y", ROT_Y_CW)).toThrow(/can only rotate around the Z axis/);
+  });
+});
+
+describe("rotateBlockKind — 180° flips", () => {
+  it("preserves cube type strings under flip on any axis", () => {
+    // 180° matrices use abs values; basis chars are unchanged at each index.
+    for (const cube of ["XZZ", "ZXZ", "ZXX", "XXZ", "ZZX", "XZX"]) {
+      expect(rotateBlockKind(cube, ROT_X_180)).toBe(cube);
+      expect(rotateBlockKind(cube, ROT_Y_180)).toBe(cube);
+      expect(rotateBlockKind(cube, ROT_Z_180)).toBe(cube);
+    }
+  });
+
+  it("preserves pipe type strings under same-axis flip", () => {
+    // Flipping a pipe around its own open axis preserves its type.
+    expect(rotateBlockKind("OZX", ROT_X_180)).toBe("OZX");
+    expect(rotateBlockKind("ZOX", ROT_Y_180)).toBe("ZOX");
+    expect(rotateBlockKind("ZXO", ROT_Z_180)).toBe("ZXO");
+  });
+
+  it("allows Y blocks under Z flip (Z direction preserved)", () => {
+    expect(rotateBlockKind("Y", ROT_Z_180)).toBe("Y");
+  });
+
+  it("rejects Y blocks under X flip and Y flip (Z direction inverted)", () => {
+    expect(() => rotateBlockKind("Y", ROT_X_180)).toThrow(/can only rotate around the Z axis/);
+    expect(() => rotateBlockKind("Y", ROT_Y_180)).toThrow(/can only rotate around the Z axis/);
+  });
+});
+
+describe("rotatePositionAroundAxis", () => {
+  it("X CCW: Y → Z, Z → -Y, X fixed", () => {
+    expect(rotatePositionAroundAxis({ x: 3, y: 0, z: 0 }, origin, "x", "ccw", false)).toEqual({ x: 3, y: 0, z: 0 });
+    expect(rotatePositionAroundAxis({ x: 0, y: 3, z: 0 }, origin, "x", "ccw", false)).toEqual({ x: 0, y: 0, z: 3 });
+    expect(rotatePositionAroundAxis({ x: 0, y: 0, z: 3 }, origin, "x", "ccw", false)).toEqual({ x: 0, y: -3, z: 0 });
+  });
+
+  it("Y CCW: Z → X, X → -Z, Y fixed", () => {
+    expect(rotatePositionAroundAxis({ x: 0, y: 3, z: 0 }, origin, "y", "ccw", false)).toEqual({ x: 0, y: 3, z: 0 });
+    expect(rotatePositionAroundAxis({ x: 0, y: 0, z: 3 }, origin, "y", "ccw", false)).toEqual({ x: 3, y: 0, z: 0 });
+    expect(rotatePositionAroundAxis({ x: 3, y: 0, z: 0 }, origin, "y", "ccw", false)).toEqual({ x: 0, y: 0, z: -3 });
+  });
+
+  it("four CCW around X = identity for cube positions", () => {
+    let p: Position3D = { x: 3, y: 6, z: 9 };
+    for (let i = 0; i < 4; i++) p = rotatePositionAroundAxis(p, origin, "x", "ccw", false);
+    expect(p).toEqual({ x: 3, y: 6, z: 9 });
+  });
+
+  it("four CCW around Y = identity for cube positions", () => {
+    let p: Position3D = { x: 3, y: 6, z: 9 };
+    for (let i = 0; i < 4; i++) p = rotatePositionAroundAxis(p, origin, "y", "ccw", false);
+    expect(p).toEqual({ x: 3, y: 6, z: 9 });
+  });
+
+  it("canonicalizes pipe Y-coord under X CCW (z=1 → y=-1 → y=-2)", () => {
+    // Z-axis pipe at (0, 0, 1) → X CCW about origin → (0, -1, 0). y=-1 ≡ 2 mod 3 → canonicalize to -2.
+    expect(rotatePositionAroundAxis({ x: 0, y: 0, z: 1 }, origin, "x", "ccw", true)).toEqual({ x: 0, y: -2, z: 0 });
+  });
+
+  it("does not canonicalize cube positions (only pipes)", () => {
+    expect(rotatePositionAroundAxis({ x: 0, y: 0, z: 1 }, origin, "x", "ccw", false)).toEqual({ x: 0, y: -1, z: 0 });
+  });
+
+  it("canonicalizes pipe X-coord under Y CCW (x=1 → z=-1 → z=-2)", () => {
+    // X-axis pipe at (1, 0, 0) → Y CCW about origin → (0, 0, -1). z=-1 ≡ 2 mod 3 → canonicalize to -2.
+    expect(rotatePositionAroundAxis({ x: 1, y: 0, z: 0 }, origin, "y", "ccw", true)).toEqual({ x: 0, y: 0, z: -2 });
+  });
+
+  it("180° flip around X: leaves X fixed, negates Y and Z", () => {
+    expect(rotatePositionAroundAxis({ x: 3, y: 6, z: 9 }, origin, "x", "flip", false)).toEqual({ x: 3, y: -6, z: -9 });
+  });
+
+  it("180° flip canonicalizes both non-axis pipe coords when needed", () => {
+    // Pipe at (3, 1, 0) flipped around X about origin → (3, -1, 0). y=-1 ≡ 2 mod 3 → canonicalize to -2.
+    expect(rotatePositionAroundAxis({ x: 3, y: 1, z: 0 }, origin, "x", "flip", true)).toEqual({ x: 3, y: -2, z: 0 });
+  });
+
+  it("two flips around any axis = identity", () => {
+    const p: Position3D = { x: 6, y: 3, z: 9 };
+    for (const axis of ["x", "y", "z"] as const) {
+      const once = rotatePositionAroundAxis(p, origin, axis, "flip", false);
+      const twice = rotatePositionAroundAxis(once, origin, axis, "flip", false);
+      expect(twice).toEqual(p);
+    }
+  });
+});
+
+describe("rotateBlockAroundAxis", () => {
+  it("rotates a cube around X with type and position both transformed", () => {
+    const block: Block = { pos: { x: 0, y: 3, z: 0 }, type: "XZX" };
+    const rotated = rotateBlockAroundAxis(block, origin, "x", "ccw");
+    expect(rotated.pos).toEqual({ x: 0, y: 0, z: 3 });
+    expect(rotated.type).toBe("XXZ");
+  });
+
+  it("four CCW rotations around X = identity for a cube + pipe pair", () => {
+    const cube: Block = { pos: { x: 0, y: 3, z: 0 }, type: "XZZ" };
+    const pipe: Block = { pos: { x: 0, y: 1, z: 0 }, type: "ZOX" };
+    const rotate4 = (b: Block, axis: "x" | "y" | "z"): Block => {
+      let cur = b;
+      for (let i = 0; i < 4; i++) cur = rotateBlockAroundAxis(cur, origin, axis, "ccw");
+      return cur;
+    };
+    expect(rotate4(cube, "x")).toEqual(cube);
+    expect(rotate4(pipe, "x")).toEqual(pipe);
+  });
+
+  it("two flips around any axis = identity for a cube + pipe pair", () => {
+    const cube: Block = { pos: { x: 3, y: 6, z: 9 }, type: "XZZ" };
+    const pipe: Block = { pos: { x: 1, y: 0, z: 0 }, type: "OZX" };
+    for (const axis of ["x", "y", "z"] as const) {
+      const onceCube = rotateBlockAroundAxis(cube, origin, axis, "flip");
+      const twiceCube = rotateBlockAroundAxis(onceCube, origin, axis, "flip");
+      expect(twiceCube).toEqual(cube);
+      const oncePipe = rotateBlockAroundAxis(pipe, origin, axis, "flip");
+      const twicePipe = rotateBlockAroundAxis(oncePipe, origin, axis, "flip");
+      expect(twicePipe).toEqual(pipe);
+    }
+  });
+
+  it("flips Hadamard direction under X flip (ZOXH at -Y → XOZH at +Y)", () => {
+    // ZOXH is a Y-axis Hadamard pipe. X flip negates Y, so the pipe now points in
+    // -Y; rotateBlockKind first produces ZOXH (abs-magnitude), then
+    // adjustHadamardDirection swaps to its +Y equivalent XOZH.
+    const pipe: Block = { pos: { x: 0, y: 1, z: 0 }, type: "ZOXH" };
+    const rotated = rotateBlockAroundAxis(pipe, origin, "x", "flip");
+    expect(rotated.type).toBe("XOZH");
+  });
+
+  it("flips Hadamard direction under Y flip (ZXOH at +Z → XZOH at -Z)", () => {
+    // ZXOH is a Z-axis Hadamard pipe. Y flip negates Z, so the new pipe points
+    // -Z and adjustHadamardDirection swaps via HDM_INVERSE: ZXOH → XZOH.
+    const pipe: Block = { pos: { x: 0, y: 0, z: 1 }, type: "ZXOH" };
+    const rotated = rotateBlockAroundAxis(pipe, origin, "y", "flip");
+    expect(rotated.type).toBe("XZOH");
+  });
+
+  it("flips Hadamard direction under Z flip (OZXH at +X → OXZH at -X)", () => {
+    // OZXH is an X-axis Hadamard pipe. Z flip negates X (Z stays positive), so
+    // the new pipe points -X and adjustHadamardDirection swaps via HDM_INVERSE:
+    // OZXH → OXZH.
+    const pipe: Block = { pos: { x: 1, y: 0, z: 0 }, type: "OZXH" };
+    const rotated = rotateBlockAroundAxis(pipe, origin, "z", "flip");
+    expect(rotated.type).toBe("OXZH");
+  });
+
+  it("rejects rotation of Y blocks around X / Y axes", () => {
+    const y: Block = { pos: { x: 0, y: 0, z: 0 }, type: "Y" };
+    expect(() => rotateBlockAroundAxis(y, origin, "x", "ccw")).toThrow(/can only rotate around the Z axis/);
+    expect(() => rotateBlockAroundAxis(y, origin, "y", "cw")).toThrow(/can only rotate around the Z axis/);
+    expect(() => rotateBlockAroundAxis(y, origin, "x", "flip")).toThrow(/can only rotate around the Z axis/);
+    expect(() => rotateBlockAroundAxis(y, origin, "y", "flip")).toThrow(/can only rotate around the Z axis/);
+  });
+
+  it("allows Y blocks under Z rotation and Z flip", () => {
+    const y: Block = { pos: { x: 0, y: 3, z: 0 }, type: "Y" };
+    expect(rotateBlockAroundAxis(y, origin, "z", "ccw").type).toBe("Y");
+    expect(rotateBlockAroundAxis(y, origin, "z", "flip").type).toBe("Y");
+  });
+});
+
+describe("MATRICES table", () => {
+  it("has every (axis, operation) entry", () => {
+    for (const axis of ["x", "y", "z"] as const) {
+      for (const op of ["ccw", "cw", "flip"] as const) {
+        expect(MATRICES[axis][op]).toBeDefined();
+        expect(MATRICES[axis][op].length).toBe(3);
+      }
+    }
+  });
+
+  it("ccw and cw matrices are inverses (transposes)", () => {
+    for (const axis of ["x", "y", "z"] as const) {
+      const ccw = MATRICES[axis].ccw;
+      const cw = MATRICES[axis].cw;
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          expect(ccw[i][j]).toBe(cw[j][i]);
+        }
       }
     }
   });

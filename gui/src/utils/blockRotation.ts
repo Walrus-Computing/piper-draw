@@ -77,7 +77,7 @@ export function rotateBlockKind(kindStr: string, rot: number[][]): string {
   if (rotatedName.includes("!")) {
     if (!rotatedName.endsWith("!") || axesDirs["Z"] < 0) {
       throw new Error(
-        `Invalid rotation for ${kindStr} block: cultivation and Y blocks only allow rotation around Z axis.`,
+        `${kindStr} blocks can only rotate around the Z axis.`,
       );
     }
     return kindStr;
@@ -109,7 +109,7 @@ export function pipeDirectionIndex(kindStr: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// Z-axis rotation primitives (90° only)
+// Rotation primitives (X / Y / Z, 90° CCW/CW and 180° flips)
 // ---------------------------------------------------------------------------
 
 /** 90° counter-clockwise rotation around +Z. */
@@ -126,7 +126,67 @@ export const ROT_Z_CW: number[][] = [
   [0, 0, 1],
 ];
 
+/** 180° rotation around Z axis (same as two CCW). */
+export const ROT_Z_180: number[][] = [
+  [-1, 0, 0],
+  [0, -1, 0],
+  [0, 0, 1],
+];
+
+/** 90° CCW rotation around +X (right-hand rule: +Y → +Z). */
+export const ROT_X_CCW: number[][] = [
+  [1, 0, 0],
+  [0, 0, -1],
+  [0, 1, 0],
+];
+
+/** 90° CW rotation around +X (+Z → +Y). */
+export const ROT_X_CW: number[][] = [
+  [1, 0, 0],
+  [0, 0, 1],
+  [0, -1, 0],
+];
+
+/** 180° rotation around X axis. */
+export const ROT_X_180: number[][] = [
+  [1, 0, 0],
+  [0, -1, 0],
+  [0, 0, -1],
+];
+
+/** 90° CCW rotation around +Y (right-hand rule: +Z → +X). */
+export const ROT_Y_CCW: number[][] = [
+  [0, 0, 1],
+  [0, 1, 0],
+  [-1, 0, 0],
+];
+
+/** 90° CW rotation around +Y (+X → +Z). */
+export const ROT_Y_CW: number[][] = [
+  [0, 0, -1],
+  [0, 1, 0],
+  [1, 0, 0],
+];
+
+/** 180° rotation around Y axis. */
+export const ROT_Y_180: number[][] = [
+  [-1, 0, 0],
+  [0, 1, 0],
+  [0, 0, -1],
+];
+
+export type RotationAxis = "x" | "y" | "z";
+export type RotationOperation = "ccw" | "cw" | "flip";
+
+/** Backwards-compatible alias for the original Z-only rotation API. */
 export type RotationDirection = "cw" | "ccw";
+
+/** Lookup table: axis × operation → 3x3 matrix. */
+export const MATRICES: Record<RotationAxis, Record<RotationOperation, number[][]>> = {
+  x: { ccw: ROT_X_CCW, cw: ROT_X_CW, flip: ROT_X_180 },
+  y: { ccw: ROT_Y_CCW, cw: ROT_Y_CW, flip: ROT_Y_180 },
+  z: { ccw: ROT_Z_CCW, cw: ROT_Z_CW, flip: ROT_Z_180 },
+};
 
 function posMod(n: number, m: number): number {
   return ((n % m) + m) % m;
@@ -135,7 +195,7 @@ function posMod(n: number, m: number): number {
 /**
  * Canonicalize a grid coordinate so that pipe slots stay at `c ≡ 1 (mod 3)`.
  *
- * A 90° rotation around a cube-valid pivot can produce coordinates where a
+ * A rotation around a cube-valid pivot can produce coordinates where a
  * pipe's slot axis lands at `c ≡ 2 (mod 3)` — still physically between the
  * same two cubes, but stored non-canonically. Shifting by -1 moves it to the
  * canonical `≡ 1 (mod 3)` representation without crossing into a different
@@ -145,46 +205,53 @@ function canonicalizePipeCoord(c: number): number {
   return posMod(c, 3) === 2 ? c - 1 : c;
 }
 
-/** Rotate a grid position around `pivot` by 90° around +Z (CCW or CW). */
-export function rotatePositionAroundZ(
-  pos: Position3D,
-  pivot: Position3D,
-  direction: RotationDirection,
-  isPipe: boolean,
-): Position3D {
-  const dx = pos.x - pivot.x;
-  const dy = pos.y - pivot.y;
-  let nx: number, ny: number;
-  if (direction === "ccw") {
-    // (x, y) -> (-y, x) relative to pivot
-    nx = pivot.x - dy;
-    ny = pivot.y + dx;
-  } else {
-    // (x, y) -> (y, -x) relative to pivot
-    nx = pivot.x + dy;
-    ny = pivot.y - dx;
-  }
-  if (isPipe) {
-    nx = canonicalizePipeCoord(nx);
-    ny = canonicalizePipeCoord(ny);
-  }
-  return { x: nx, y: ny, z: pos.z };
+function applyMatrix(m: number[][], v: [number, number, number]): [number, number, number] {
+  return [
+    m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+    m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+    m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+  ];
 }
 
 /**
- * Rotate a block (position + type) 90° around +Z about `pivot`.
- *
- * Throws if the block's type cannot be rotated (e.g. a Y block with a pivot
- * that would move it off its own column — impossible for pure Z rotation, so
- * not actually reachable here, but the underlying rotateBlockKind throws on
- * bad matrices in general).
+ * Rotate a grid position around `pivot` by `operation` (90° CCW/CW or 180°)
+ * about the named `axis`. Pipes get their two non-axis coords canonicalized
+ * back to `c ≡ 1 (mod 3)` after the rotation.
  */
-export function rotateBlockAroundZ(
+export function rotatePositionAroundAxis(
+  pos: Position3D,
+  pivot: Position3D,
+  axis: RotationAxis,
+  operation: RotationOperation,
+  isPipe: boolean,
+): Position3D {
+  const m = MATRICES[axis][operation];
+  const [nx, ny, nz] = applyMatrix(m, [pos.x - pivot.x, pos.y - pivot.y, pos.z - pivot.z]);
+  let resX = pivot.x + nx;
+  let resY = pivot.y + ny;
+  let resZ = pivot.z + nz;
+  if (isPipe) {
+    if (axis !== "x") resX = canonicalizePipeCoord(resX);
+    if (axis !== "y") resY = canonicalizePipeCoord(resY);
+    if (axis !== "z") resZ = canonicalizePipeCoord(resZ);
+  }
+  return { x: resX, y: resY, z: resZ };
+}
+
+/**
+ * Rotate a block (position + type) about `pivot` around the named `axis` by
+ * `operation` (90° CCW/CW or 180°).
+ *
+ * Throws via `rotateBlockKind` when the rotation is invalid for the block
+ * type (e.g. a Y block under any non-Z-preserving rotation).
+ */
+export function rotateBlockAroundAxis(
   block: Block,
   pivot: Position3D,
-  direction: RotationDirection,
+  axis: RotationAxis,
+  operation: RotationOperation,
 ): Block {
-  const rot = direction === "ccw" ? ROT_Z_CCW : ROT_Z_CW;
+  const rot = MATRICES[axis][operation];
   const isPipe = isPipeType(block.type);
   // Slabs share the pipe-slot coord constraint (x,y ≡ 1 mod 3), so a Z-rotation
   // around a cube pivot can land them at c ≡ 2 (mod 3). Treat them the same as
@@ -205,15 +272,44 @@ export function rotateBlockAroundZ(
     }
   }
 
-  const newPos = rotatePositionAroundZ(block.pos, pivot, direction, needsCoordCanon);
+  const newPos = rotatePositionAroundAxis(block.pos, pivot, axis, operation, needsCoordCanon);
 
-  const newFaceColors = block.faceColors
-    ? rotateFaceColorsAroundZ(block.faceColors, block.type, direction)
-    : undefined;
-
-  const result: Block = { pos: newPos, type: newType as Block["type"] };
-  if (newFaceColors) result.faceColors = newFaceColors;
+  // Face-paint colors only rotate under a Z 90° (CCW/CW). Other axes/180°
+  // are not supported by the paint UI today, so face colors pass through
+  // unchanged in those cases. Spread `block` first so optional metadata
+  // (e.g. `groupId`) rides through; without it group membership would
+  // silently disappear on every rotate.
+  const result: Block = { ...block, pos: newPos, type: newType as Block["type"] };
+  if (block.faceColors) {
+    if (axis === "z" && operation !== "flip") {
+      const rotated = rotateFaceColorsAroundZ(block.faceColors, block.type, operation);
+      if (rotated) {
+        result.faceColors = rotated;
+      } else {
+        delete result.faceColors;
+      }
+    }
+  }
   return result;
+}
+
+/** Backwards-compatible alias: rotate a position 90° around +Z. */
+export function rotatePositionAroundZ(
+  pos: Position3D,
+  pivot: Position3D,
+  direction: RotationDirection,
+  isPipe: boolean,
+): Position3D {
+  return rotatePositionAroundAxis(pos, pivot, "z", direction, isPipe);
+}
+
+/** Backwards-compatible alias: rotate a block 90° around +Z. */
+export function rotateBlockAroundZ(
+  block: Block,
+  pivot: Position3D,
+  direction: RotationDirection,
+): Block {
+  return rotateBlockAroundAxis(block, pivot, "z", direction);
 }
 
 /**

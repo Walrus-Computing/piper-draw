@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useBlockStore, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
 import { useKeybindStore, type Mode as KeybindMode, type NavStyle } from "../stores/keybindStore";
-import { CUBE_TYPES, FREE_BUILD_PIPE_VARIANTS, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey, X_HEX, Z_HEX, H_HEX } from "../types";
+import { CUBE_TYPES, FREE_BUILD_PIPE_VARIANTS, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, determineCubeOptionsWithPipeRetype, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey, X_HEX, Z_HEX, H_HEX } from "../types";
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
@@ -274,10 +274,7 @@ export function Toolbar({
     if (pipeCount > 1) return "";
     const opts: string[] = pipeCount === 0
       ? [...CUBE_TYPES]
-      : (() => {
-          const result = determineCubeOptions(cursor, s.blocks);
-          return result.determined ? [result.type] : [...result.options];
-        })();
+      : determineCubeOptionsWithPipeRetype(cursor, s.blocks);
     // Y is a leaf: only valid with at most one attached (Z-open) pipe.
     if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", cursor, s.blocks)) opts.push("Y");
     return opts.join(",");
@@ -309,6 +306,9 @@ export function Toolbar({
     } else {
       return null;
     }
+    if (s.freeBuild) {
+      return `${currentType};1;${[...CUBE_TYPES, "Y"].join(",")}`;
+    }
     const coords: [number, number, number] = [pos.x, pos.y, pos.z];
     let pipeCount = 0;
     for (let axis = 0; axis < 3; axis++) {
@@ -322,8 +322,7 @@ export function Toolbar({
         }
       }
     }
-    const result = determineCubeOptions(pos, s.blocks);
-    const opts: string[] = result.determined ? [result.type] : [...result.options];
+    const opts: string[] = determineCubeOptionsWithPipeRetype(pos, s.blocks);
     // Y is a leaf: only valid with at most one attached (Z-open) pipe.
     if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", pos, s.blocks)) opts.push("Y");
     return `${currentType};${pipeCount < 2 ? "1" : "0"};${opts.join(",")}`;
@@ -350,6 +349,9 @@ export function Toolbar({
     const pipeBlock = s.blocks.get(k);
     if (!pipeBlock || !isPipeType(pipeBlock.type)) return null;
     const currentVariant = PIPE_TYPE_TO_VARIANT[pipeBlock.type as PipeType];
+    if (s.freeBuild) {
+      return `${currentVariant};${PIPE_VARIANTS.join(",")}`;
+    }
     const base = (pipeBlock.type as string).replace("H", "");
     const openAxis = base.indexOf("O") as 0 | 1 | 2;
     const pipeCoords: [number, number, number] = [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z];

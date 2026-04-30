@@ -5,6 +5,20 @@ export const SCENE_HASH_KEY = "scene";
 
 const COMPRESSION_FORMAT = "deflate-raw" as const;
 
+// Hard caps applied to decoder inputs. The encoder is uncapped because we only
+// compress data we trust (captureSnapshot from our own store).
+//
+// MAX_HASH_PARAM_LEN: ceiling on the base64url payload after `#scene=`. Comfortably
+// above the encoder's 6 KiB URL cap (Toolbar.SHARE_URL_MAX_LEN) and well below
+// browser hash limits, so a hostile URL can't force us to even start decoding a
+// huge blob. ~8 KiB also bounds the worst-case work in base64UrlToBytes/atob.
+//
+// MAX_DECOMPRESSED_LEN: cap on the decompressed output. deflate routinely hits
+// >1000:1 on repetitive payloads, so without a streaming guard a small URL can
+// expand to hundreds of MB. 2 MiB is roughly 50× the largest legitimate scene.
+const MAX_HASH_PARAM_LEN = 8 * 1024;
+const MAX_DECOMPRESSED_LEN = 2 * 1024 * 1024;
+
 export function isCompressionStreamSupported(): boolean {
   return (
     typeof CompressionStream !== "undefined" &&
@@ -12,10 +26,10 @@ export function isCompressionStreamSupported(): boolean {
   );
 }
 
-async function runStream(
-  input: Uint8Array,
-  transform: GenericTransformStream,
-): Promise<Uint8Array> {
+async function compress(input: Uint8Array): Promise<Uint8Array> {
+  // Typed as GenericTransformStream so writer.write accepts our untyped
+  // BufferSource without a TS5 narrowing fight on Uint8Array<ArrayBufferLike>.
+  const transform: GenericTransformStream = new CompressionStream(COMPRESSION_FORMAT);
   const writer = transform.writable.getWriter();
   // Swallow writer-side rejections so they don't become unhandled. The
   // canonical error surface is the readable side, which the caller awaits.
@@ -25,12 +39,46 @@ async function runStream(
   return new Uint8Array(buf);
 }
 
-async function compress(input: Uint8Array): Promise<Uint8Array> {
-  return runStream(input, new CompressionStream(COMPRESSION_FORMAT));
-}
+/**
+ * Decompresses `input` via DecompressionStream, aborting and returning null if
+ * the cumulative output exceeds `maxBytes`. Streamed reads keep memory bounded
+ * even when the source is a deflate bomb.
+ */
+async function decompressWithCap(
+  input: Uint8Array,
+  maxBytes: number,
+): Promise<Uint8Array | null> {
+  const transform: GenericTransformStream = new DecompressionStream(COMPRESSION_FORMAT);
+  const writer = transform.writable.getWriter();
+  writer.write(input).catch(() => {});
+  writer.close().catch(() => {});
 
-async function decompress(input: Uint8Array): Promise<Uint8Array> {
-  return runStream(input, new DecompressionStream(COMPRESSION_FORMAT));
+  const reader = transform.readable.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return null;
+  }
+
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.byteLength;
+  }
+  return out;
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {
@@ -77,9 +125,11 @@ export async function decodeSnapshotFromHash(
 ): Promise<SceneSnapshotV1 | null> {
   const param = parseSceneHashParam(hashOrUrl);
   if (!param) return null;
+  if (param.length > MAX_HASH_PARAM_LEN) return null;
   try {
     const bytes = base64UrlToBytes(param);
-    const decompressed = await decompress(bytes);
+    const decompressed = await decompressWithCap(bytes, MAX_DECOMPRESSED_LEN);
+    if (!decompressed) return null;
     const json = new TextDecoder().decode(decompressed);
     const parsed: unknown = JSON.parse(json);
     if (!isSceneSnapshotV1(parsed)) return null;

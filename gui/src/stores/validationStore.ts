@@ -3,6 +3,11 @@ import type { Position3D } from "../types";
 import { posKey } from "../types";
 import { useBlockStore } from "./blockStore";
 import { validateDiagram } from "../utils/validate";
+import {
+  selectionGroupClassification,
+  filterByGroup,
+  isTqecEligibleBlock,
+} from "./groupSelectors";
 
 export type ValidationStatus = "idle" | "loading" | "valid" | "invalid" | "error" | "aborted";
 
@@ -38,8 +43,35 @@ export const useValidationStore = create<ValidationStore>((set, get) => ({
     const version = ++requestVersion;
     set({ status: "loading", errors: [], invalidKeys: new Set(), selectedErrorKey: null });
 
-    const blocks = useBlockStore.getState().blocks;
-    const result = await validateDiagram(blocks);
+    const bs = useBlockStore.getState();
+    const blocks = bs.blocks;
+    // Group-scoped validate: when the selection resolves to a single group,
+    // filter to that group's members (per CEO plan: per-group verify). Pipes
+    // crossing the group boundary will still show port errors at the cut —
+    // documented behaviour, not a bug. With the slabs-only pre-check we
+    // surface a clearer toast instead of a misleading "valid" on an empty
+    // TQEC graph.
+    const cls = selectionGroupClassification(blocks, bs.selectedKeys);
+    let toValidate = blocks;
+    if (cls.kind === "all-same-group" || cls.kind === "single-grouped") {
+      const filtered = filterByGroup(blocks, cls.groupId);
+      let hasEligible = false;
+      for (const b of filtered.values()) {
+        if (isTqecEligibleBlock(b)) { hasEligible = true; break; }
+      }
+      if (filtered.size === 0) {
+        get().reportEphemeralError("Group is empty — nothing to verify.");
+        return;
+      }
+      if (!hasEligible) {
+        get().reportEphemeralError(
+          "This group contains only decorative elements. Nothing to verify.",
+        );
+        return;
+      }
+      toValidate = filtered;
+    }
+    const result = await validateDiagram(toValidate);
 
     // Ignore result if a newer request was started
     if (version !== requestVersion) return;

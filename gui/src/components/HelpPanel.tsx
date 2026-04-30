@@ -93,6 +93,11 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
             to rotate, drag to pan. Use the <b>Iso ▾</b> menu in the toolbar
             to snap to an axis-locked orthographic view.
           </li>
+          <li>
+            <b>Shortcuts</b> — every key binding is listed and rebindable in
+            the Customize panel; click <b>Customize</b> at the end of the hint
+            bar (or press <kbd>?</kbd>).
+          </li>
         </ul>
 
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Modes</h4>
@@ -107,6 +112,23 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
           <li>
             <b>Keyboard Build</b> — move a cursor with the keyboard to extend
             from the last block.
+          </li>
+        </ul>
+
+        <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Groups</h4>
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          <li>
+            Press <kbd>G</kbd> with 2+ blocks selected to group; press{" "}
+            <kbd>G</kbd> again to ungroup. Grouped blocks share a colored
+            dashed outline.
+          </li>
+          <li>
+            Click any member to select the whole group;{" "}
+            <kbd>Alt</kbd>+click drills in to a single block.
+          </li>
+          <li>
+            <b>Verify</b> and <b>ZX</b> automatically scope to the selected
+            group; copy/paste makes a fresh new group.
           </li>
         </ul>
 
