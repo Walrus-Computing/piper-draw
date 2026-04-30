@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createBlockGeometry, createYDefectEdges, getHiddenFaceMaskForPos, FACE_NEG_X, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_X, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, getOrderedPortPositions, CUBE_TYPES, PIPE_TYPES } from "./index";
+import { createBlockGeometry, createYDefectEdges, getHiddenFaceMaskForPos, FACE_NEG_X, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_X, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, getOrderedPortPositions, determineCubeOptions, determineCubeOptionsWithPipeRetype, computePipeRetypes, CUBE_TYPES, PIPE_TYPES } from "./index";
 import type { PipeType, CubeType, PortMeta } from "./index";
 import type { BlockType } from "./index";
 import { Vector3 } from "three";
@@ -657,5 +657,259 @@ describe("getOrderedPortPositions", () => {
     ]);
     const result = getOrderedPortPositions(blocks, explicitPorts, portMeta);
     expect(result.map((p) => p.x)).toEqual([0, 6, 3, 9]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wider cube-cycle helpers (allow adjacent pipes to retype)
+// ---------------------------------------------------------------------------
+
+describe("determineCubeOptionsWithPipeRetype", () => {
+  const ALL_CUBE_TYPES = [...CUBE_TYPES];
+
+  it("returns all cube types when no pipes are adjacent", () => {
+    const blocks = makeBlocks([]);
+    const opts = determineCubeOptionsWithPipeRetype({ x: 0, y: 0, z: 0 }, blocks);
+    expect(opts.sort()).toEqual(ALL_CUBE_TYPES.sort());
+  });
+
+  it("widens beyond determineCubeOptions when far-end is a port", () => {
+    // Single X-open pipe at +x; far-end (3,0,0) is empty (port).
+    // Narrow gate constrains T[1]=Z, T[2]=X → [ZZX, XZX] only.
+    // Wider gate accepts any T whose inferred pipe is valid AND far-end port can host
+    // some cube — i.e., excludes only T's where inferPipeType returns null.
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OZX" }]);
+
+    const narrow = determineCubeOptions({ x: 0, y: 0, z: 0 }, blocks);
+    const narrowList = narrow.determined ? [narrow.type] : narrow.options;
+    expect(narrowList.sort()).toEqual(["XZX", "ZZX"]);
+
+    const wider = determineCubeOptionsWithPipeRetype({ x: 0, y: 0, z: 0 }, blocks);
+    expect(wider.sort()).toEqual(["XXZ", "XZX", "ZXZ", "ZZX"]);
+  });
+
+  it("excludes cube types whose inferred pipe would not be a valid PIPE_TYPE (OZZ/OXX)", () => {
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OZX" }]);
+    const opts = determineCubeOptionsWithPipeRetype({ x: 0, y: 0, z: 0 }, blocks);
+    // XZZ → OZZ (invalid), ZXX → OXX (invalid) — both must be rejected.
+    expect(opts).not.toContain("XZZ");
+    expect(opts).not.toContain("ZXX");
+  });
+
+  it("respects a fixed-cube far-end (constrains the wider set)", () => {
+    // Pipe OZX at +x with fixed far-end cube ZZX at (3,0,0).
+    // Without H toggle the narrow constraint is T[1]=Z, T[2]=X → [ZZX, XZX].
+    // With H toggle a non-H pipe can become H, so the swapped far-end
+    // constraint T[1]=X, T[2]=Z is also reachable → adds [ZXZ, XXZ].
+    // XZZ and ZXX still rejected because inferPipeType(_, 0) is null.
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OZX" },
+      { x: 3, y: 0, z: 0, type: "ZZX" },
+    ]);
+    const opts = determineCubeOptionsWithPipeRetype({ x: 0, y: 0, z: 0 }, blocks);
+    expect(opts.sort()).toEqual(["XXZ", "XZX", "ZXZ", "ZZX"]);
+  });
+
+  it("wider set is symmetric across all 4 corners of a 4-corner-only square", () => {
+    // 4 ZZX corners directly connected by 4 pipes (no edge cubes between).
+    // This exercises the case where the cube is at the +2 (FAR) end of some
+    // adjacent pipes — naive `inferPipeType(T, axis) + maybeH` is wrong for
+    // far-end with H, so we must enumerate all valid pipe variants on the axis.
+    const blocks = makeBlocks([
+      { x: 0, y: 0, z: 0, type: "ZZX" },
+      { x: 3, y: 0, z: 0, type: "ZZX" },
+      { x: 0, y: 3, z: 0, type: "ZZX" },
+      { x: 3, y: 3, z: 0, type: "ZZX" },
+      { x: 1, y: 0, z: 0, type: "OZX" }, // bottom edge
+      { x: 1, y: 3, z: 0, type: "OZX" }, // top edge
+      { x: 0, y: 1, z: 0, type: "ZOX" }, // left edge
+      { x: 3, y: 1, z: 0, type: "ZOX" }, // right edge
+    ]);
+    const expected = ["XXZ", "ZZX"];
+    expect(determineCubeOptionsWithPipeRetype({ x: 0, y: 0, z: 0 }, blocks).sort()).toEqual(expected);
+    expect(determineCubeOptionsWithPipeRetype({ x: 3, y: 0, z: 0 }, blocks).sort()).toEqual(expected);
+    expect(determineCubeOptionsWithPipeRetype({ x: 0, y: 3, z: 0 }, blocks).sort()).toEqual(expected);
+    expect(determineCubeOptionsWithPipeRetype({ x: 3, y: 3, z: 0 }, blocks).sort()).toEqual(expected);
+  });
+
+  it("frees a corner cube of a 4-cube square via H-toggle on perpendicular pipes", () => {
+    // The user's scenario: a square frame of ZZX corners connected by OZX
+    // (X-axis) and ZOX (Y-axis) pipes. Without H toggle the corner is pinned
+    // to ZZX. With H toggle, adding H to BOTH adjacent pipes lets the corner
+    // become XXZ (and reverse).
+    const blocks = makeBlocks([
+      // Corner under test at (0,0,0) — not placed; we only care about the
+      // wider set at this position.
+      // Pipe1 along +x and far-end corner.
+      { x: 1, y: 0, z: 0, type: "OZX" },
+      { x: 3, y: 0, z: 0, type: "ZZX" },
+      // Pipe2 along +y and far-end corner.
+      { x: 0, y: 1, z: 0, type: "ZOX" },
+      { x: 0, y: 3, z: 0, type: "ZZX" },
+    ]);
+    // Narrow gate uniquely determines ZZX here.
+    const narrow = determineCubeOptions({ x: 0, y: 0, z: 0 }, blocks);
+    expect(narrow.determined).toBe(true);
+    if (narrow.determined) expect(narrow.type).toBe("ZZX");
+
+    // Wider gate offers ZZX (current, both pipes preserved) and XXZ
+    // (both pipes toggled to H). Other types are blocked: a single H toggle
+    // creates contradicting T[2] constraints, and XZZ/ZXX/ZXZ/XZX have at
+    // least one inferPipeType null on axis 0 or axis 1.
+    const wider = determineCubeOptionsWithPipeRetype({ x: 0, y: 0, z: 0 }, blocks);
+    expect(wider.sort()).toEqual(["XXZ", "ZZX"]);
+  });
+
+  it("considers H toggle when a non-H pipe alone cannot satisfy the candidate", () => {
+    // Pipe OXZ at +x, fixed far-end ZXZ.
+    // T=XZX without H toggle: inferred OZX at far-end ZXZ — no swap →
+    //   base[1]='Z' vs ZXZ[1]='X' conflict. With H toggle (OZXH): swap →
+    //   base[2]='X' vs ZXZ[1]='X' ✓ and base[1]='Z' vs ZXZ[2]='Z' ✓.
+    // So XZX is in the wider set thanks to H toggle.
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OXZ" },
+      { x: 3, y: 0, z: 0, type: "ZXZ" },
+    ]);
+    expect(determineCubeOptionsWithPipeRetype({ x: 0, y: 0, z: 0 }, blocks))
+      .toContain("XZX");
+  });
+
+  it("widens beyond narrow when two colinear pipes have port far-ends (CLAUDE.md scenario)", () => {
+    // Two X-open pipes flanking (0,0,0); both far-ends are ports.
+    // Narrow: both pipes impose T[1]=Z, T[2]=X → [ZZX, XZX].
+    // Wider: pipes can retype together → all 4 valid (excludes XZZ, ZXX whose inferred pipe is invalid).
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OZX" },
+      { x: -2, y: 0, z: 0, type: "OZX" },
+    ]);
+    const narrow = determineCubeOptions({ x: 0, y: 0, z: 0 }, blocks);
+    const narrowList = narrow.determined ? [narrow.type] : narrow.options;
+    expect(narrowList.sort()).toEqual(["XZX", "ZZX"]);
+
+    const wider = determineCubeOptionsWithPipeRetype({ x: 0, y: 0, z: 0 }, blocks);
+    expect(wider.sort()).toEqual(["XXZ", "XZX", "ZXZ", "ZZX"]);
+  });
+
+  it("rejects cube types with no valid retype across both H states for some pipe", () => {
+    // Pipe1 (X-axis) far-end ZXZ; Pipe2 (Y-axis) far-end ZZX.
+    // Without H-toggle, no T satisfies (T[2] must be both Z and X). With
+    // H-toggle the constraints relax: XXZ works (pipe2 toggled to H) and
+    // ZZX works (pipe1 toggled to H). XZZ/ZXZ/ZXX/XZX all hit a null
+    // `inferPipeType` on one of the two axes, so they remain rejected.
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OXZ" },
+      { x: 3, y: 0, z: 0, type: "ZXZ" },
+      { x: 0, y: 1, z: 0, type: "ZOX" },
+      { x: 0, y: 3, z: 0, type: "ZZX" },
+    ]);
+    const opts = determineCubeOptionsWithPipeRetype({ x: 0, y: 0, z: 0 }, blocks);
+    expect(opts.sort()).toEqual(["XXZ", "ZZX"]);
+  });
+
+  it("returns CUBE_TYPES order (deterministic)", () => {
+    const blocks = makeBlocks([]);
+    const opts = determineCubeOptionsWithPipeRetype({ x: 0, y: 0, z: 0 }, blocks);
+    // Sequence must match CUBE_TYPES ordering, not arbitrary.
+    expect(opts).toEqual([...CUBE_TYPES]);
+  });
+});
+
+describe("computePipeRetypes", () => {
+  it("returns [] when there are no adjacent pipes", () => {
+    const blocks = makeBlocks([]);
+    const updates = computePipeRetypes(blocks, { x: 0, y: 0, z: 0 }, "XZZ");
+    expect(updates).toEqual([]);
+  });
+
+  it("returns [] when the inferred pipe equals the existing pipe", () => {
+    // Pipe OZX at +x; T=ZZX gives inferPipeType(ZZX, 0) = OZX (no change).
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OZX" }]);
+    const updates = computePipeRetypes(blocks, { x: 0, y: 0, z: 0 }, "ZZX");
+    expect(updates).toEqual([]);
+  });
+
+  it("preserves Hadamard suffix on retype", () => {
+    // Pipe OZXH at +x; T=ZXZ gives base OXZ + H = OXZH (different from OZXH).
+    // Far-end is a port (no constraints), so retype succeeds.
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OZXH" }]);
+    const updates = computePipeRetypes(blocks, { x: 0, y: 0, z: 0 }, "ZXZ");
+    expect(updates).toEqual([
+      { key: "1,0,0", oldType: "OZXH", newType: "OXZH" },
+    ]);
+  });
+
+  it("returns null when inferPipeType yields an invalid PIPE_TYPE", () => {
+    // T=XZZ has same chars on Y/Z axes (Z,Z); infer for axis 0 = OZZ which is not in PIPE_TYPES.
+    // (With H-toggle, a single pipe + fixed far-end never rejects on far-end alone — the
+    // closed-axis multiset always matches between any valid T and any valid far-end cube,
+    // so one of the two H states always validates. inferPipeType null is the only way for
+    // computePipeRetypes to return null for a single-pipe configuration.)
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OZX" }]);
+    const updates = computePipeRetypes(blocks, { x: 0, y: 0, z: 0 }, "XZZ");
+    expect(updates).toBeNull();
+  });
+
+  it("returns updates for both colinear pipes when a cube cycle requires it", () => {
+    // Two OZX pipes at +x and -x; T=ZXZ requires both to become OXZ.
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OZX" },
+      { x: -2, y: 0, z: 0, type: "OZX" },
+    ]);
+    const updates = computePipeRetypes(blocks, { x: 0, y: 0, z: 0 }, "ZXZ");
+    expect(updates).not.toBeNull();
+    expect(updates!.sort((a, b) => a.key.localeCompare(b.key))).toEqual(
+      [
+        { key: "-2,0,0", oldType: "OZX", newType: "OXZ" },
+        { key: "1,0,0", oldType: "OZX", newType: "OXZ" },
+      ].sort((a, b) => a.key.localeCompare(b.key)),
+    );
+  });
+
+  it("toggles Hadamard on perpendicular pipes to free a corner cube of a square", () => {
+    // Corner cube being cycled from ZZX to XXZ. Both perpendicular pipes
+    // currently non-H; the only way to satisfy XXZ at this corner is to
+    // toggle H on both pipes (so the swapped far-end ZZX still validates).
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OZX" },
+      { x: 3, y: 0, z: 0, type: "ZZX" },
+      { x: 0, y: 1, z: 0, type: "ZOX" },
+      { x: 0, y: 3, z: 0, type: "ZZX" },
+    ]);
+    const updates = computePipeRetypes(blocks, { x: 0, y: 0, z: 0 }, "XXZ");
+    expect(updates).not.toBeNull();
+    expect(updates!.sort((a, b) => a.key.localeCompare(b.key))).toEqual(
+      [
+        { key: "0,1,0", oldType: "ZOX", newType: "XOZH" },
+        { key: "1,0,0", oldType: "OZX", newType: "OXZH" },
+      ].sort((a, b) => a.key.localeCompare(b.key)),
+    );
+  });
+
+  it("prefers H-preserved when both H states would validate (no unnecessary toggle)", () => {
+    // Far-end is a port (open both ways), so both OZX (preserved) and OZXH
+    // (toggled) satisfy the constraints for T=XZX. Helper should pick the
+    // preserved variant — no spurious Hadamard introduction.
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OZX" }]);
+    const updates = computePipeRetypes(blocks, { x: 0, y: 0, z: 0 }, "XZX");
+    // T=XZX, axis 0: inferred = OZX. Pipe is already OZX → no change.
+    expect(updates).toEqual([]);
+  });
+
+  it("removes Hadamard when cycling back to a type that no longer needs it", () => {
+    // Inverse of the corner-square: pipes are H, target cube prefers no-H.
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OXZH" },
+      { x: 3, y: 0, z: 0, type: "ZZX" },
+      { x: 0, y: 1, z: 0, type: "XOZH" },
+      { x: 0, y: 3, z: 0, type: "ZZX" },
+    ]);
+    const updates = computePipeRetypes(blocks, { x: 0, y: 0, z: 0 }, "ZZX");
+    expect(updates).not.toBeNull();
+    expect(updates!.sort((a, b) => a.key.localeCompare(b.key))).toEqual(
+      [
+        { key: "0,1,0", oldType: "XOZH", newType: "ZOX" },
+        { key: "1,0,0", oldType: "OXZH", newType: "OZX" },
+      ].sort((a, b) => a.key.localeCompare(b.key)),
+    );
   });
 });

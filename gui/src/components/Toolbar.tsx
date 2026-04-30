@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useBlockStore, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
 import { useKeybindStore, type Mode as KeybindMode, type NavStyle } from "../stores/keybindStore";
-import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
+import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, determineCubeOptionsWithPipeRetype, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
 import { downloadDae } from "../utils/daeExport";
 import { triggerDaeImport } from "../utils/daeImport";
@@ -195,10 +195,7 @@ export function Toolbar({
     if (pipeCount > 1) return "";
     const opts: string[] = pipeCount === 0
       ? [...CUBE_TYPES]
-      : (() => {
-          const result = determineCubeOptions(cursor, s.blocks);
-          return result.determined ? [result.type] : [...result.options];
-        })();
+      : determineCubeOptionsWithPipeRetype(cursor, s.blocks);
     // Y is a leaf: only valid with at most one attached (Z-open) pipe.
     if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", cursor, s.blocks)) opts.push("Y");
     return opts.join(",");
@@ -246,8 +243,7 @@ export function Toolbar({
         }
       }
     }
-    const result = determineCubeOptions(pos, s.blocks);
-    const opts: string[] = result.determined ? [result.type] : [...result.options];
+    const opts: string[] = determineCubeOptionsWithPipeRetype(pos, s.blocks);
     // Y is a leaf: only valid with at most one attached (Z-open) pipe.
     if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", pos, s.blocks)) opts.push("Y");
     return `${currentType};${pipeCount < 2 ? "1" : "0"};${opts.join(",")}`;
