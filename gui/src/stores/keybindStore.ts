@@ -41,7 +41,8 @@ export type EditAction =
   | "cyclePrev"
   | "cycleNext"
   | "copy"
-  | "paste";
+  | "paste"
+  | "groupToggle";
 
 export type ActionForMode = {
   build: BuildAction;
@@ -71,6 +72,7 @@ export const ACTIONS: { [M in Mode]: readonly ActionForMode[M][] } = {
     "undo", "redo", "stepForward", "stepBack", "nudgeUp", "nudgeDown",
     "cyclePrev", "cycleNext",
     "copy", "paste",
+    "groupToggle",
   ],
 };
 
@@ -113,6 +115,7 @@ export const ACTION_LABELS: { [M in Mode]: Record<ActionForMode[M], string> } = 
     cycleNext: "Next block / pipe",
     copy: "Copy selection",
     paste: "Paste",
+    groupToggle: "Group / ungroup selection",
   },
 };
 
@@ -155,6 +158,7 @@ export const DEFAULT_BINDINGS: { [M in Mode]: Record<ActionForMode[M], KeyBindin
     cycleNext: { key: "arrowright" },
     copy: { key: "c", ctrl: true },
     paste: { key: "v", ctrl: true },
+    groupToggle: { key: "g" },
   },
 };
 

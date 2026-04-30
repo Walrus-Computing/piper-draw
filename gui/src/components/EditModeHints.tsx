@@ -54,9 +54,14 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
       [`Hold ${bindingToLabel(b.holdToDelete)}`, "Click-to-delete"],
       [bindingToLabel(b.deleteSelection), "Delete selected"],
       [bindingToLabel(b.clearSelection), "Clear selection"],
-      [bindingToLabel(b.copy), "Copy selection"],
-      [bindingToLabel(b.paste), "Paste"],
+      [`${bindingToLabel(b.copy)}/${bindingToLabel(b.paste)}`, "Copy / paste"],
     );
+    // Group hint surfaces only when a selection exists — that's the only
+    // moment the action is meaningful, which is also the moment users
+    // discover it.
+    if (hasSelection) {
+      hints.push([bindingToLabel(b.groupToggle), "Group / ungroup"]);
+    }
     if (hasSelection) {
       hints.push([
         `${bindingToLabel(b.nudgeUp)}/${bindingToLabel(b.nudgeDown)}`,

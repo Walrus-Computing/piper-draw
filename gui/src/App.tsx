@@ -23,6 +23,7 @@ import { ValidationToast } from "./components/ValidationToast";
 import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { LocatePulseHighlight } from "./components/LocatePulseHighlight";
 import { SelectionHighlights } from "./components/SelectionHighlights";
+import { GroupOutlines } from "./components/GroupOutlines";
 import { BuildCursor } from "./components/BuildCursor";
 import { SelectModePointer, type ThreeState } from "./components/SelectModePointer";
 import { DragGhost } from "./components/DragGhost";
@@ -104,6 +105,9 @@ const AUTOSAVE_DEBOUNCE_MS = 500;
 // otherwise the autosave subscriber overwrites the original autosave with the
 // shared scene within AUTOSAVE_DEBOUNCE_MS.
 const PRE_SHARE_SNAPSHOT_KEY = "piper-draw:autosave:pre-share:v1";
+// One-time flag for the group/grid keymap migration toast (g moved from grid
+// toggle to group toggle; grid moved to Shift+G). Show once per browser.
+const GROUP_KEYMAP_MIGRATION_KEY = "piper-draw:group-keymap-migration-shown";
 
 function readPreShareSnapshot(): SceneSnapshotV1 | null {
   try {
@@ -656,7 +660,8 @@ export default function App() {
               }
               return;
             }
-            case "g": e.preventDefault(); store.toggleShowGrid(); return;
+            // `g` is now bound to groupToggle in edit-mode keybinds (see keybindStore).
+            // Grid toggle moved to Shift+G — handled by the shift branch below.
             case "h": e.preventDefault(); store.toggleShowHints(); return;
             case "t": {
               e.preventDefault();
@@ -753,6 +758,13 @@ export default function App() {
         if (e.key === "?") {
           e.preventDefault();
           setKeybindEditorMode("general");
+          return;
+        }
+        // Shift+G toggles the grid (relocated from `g`, which now groups
+        // selected blocks via the edit-mode keybind). Global, mode-agnostic.
+        if (shift && key === "g") {
+          e.preventDefault();
+          store.toggleShowGrid();
           return;
         }
       }
@@ -905,6 +917,25 @@ export default function App() {
           else store.cycleArmedType(dir);
           return;
         }
+        case "groupToggle": {
+          e.preventDefault();
+          // One-time migration toast: `g` used to toggle the grid, now groups
+          // selected blocks (Shift+G is the new grid toggle). Surface once
+          // per browser via localStorage flag.
+          try {
+            if (!localStorage.getItem(GROUP_KEYMAP_MIGRATION_KEY)) {
+              useValidationStore.getState().reportEphemeralError(
+                "G now groups selected blocks. Use Shift+G to toggle the grid.",
+              );
+              localStorage.setItem(GROUP_KEYMAP_MIGRATION_KEY, "1");
+            }
+          } catch {
+            // localStorage unavailable (private mode etc.) — silently skip the
+            // migration toast; the action itself still runs.
+          }
+          store.groupToggle();
+          return;
+        }
       }
     };
     window.addEventListener("keydown", handler);
@@ -990,7 +1021,15 @@ export default function App() {
         if (raw) {
           const parsed: unknown = JSON.parse(raw);
           if (Array.isArray(parsed)) {
-            snapshot.blocks = parsed as SceneSnapshotV1["blocks"];
+            // Run the same validator the URL-share path uses — a buggy prior
+            // version, browser-extension tampering, or partial localStorage
+            // write could leave malformed blocks (especially malformed
+            // groupId values) that would otherwise bypass the GROUP_ID_RE
+            // gate. Drop the autosave entirely on a shape mismatch.
+            const candidate: SceneSnapshotV1 = { v: 1, blocks: parsed as SceneSnapshotV1["blocks"], portMeta: [], portPositions: [] };
+            if (isSceneSnapshotV1(candidate)) {
+              snapshot.blocks = candidate.blocks;
+            }
           }
         }
       } catch {
@@ -1238,6 +1277,7 @@ export default function App() {
         {!photoRequest && !flowVizMode && <InvalidBlockHighlights />}
         {!photoRequest && <LocatePulseHighlight />}
         {!photoRequest && !flowVizMode && <SelectionHighlights />}
+        {!photoRequest && !flowVizMode && <GroupOutlines />}
         {!photoRequest && !flowVizMode && <DragGhost />}
         {!photoRequest && !flowVizMode && <DragShadow />}
         {!photoRequest && !flowVizMode && <BuildCursor />}

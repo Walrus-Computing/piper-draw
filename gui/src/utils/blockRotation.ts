@@ -257,7 +257,10 @@ export function rotateBlockAroundAxis(
 
   const newPos = rotatePositionAroundAxis(block.pos, pivot, axis, operation, isPipe);
 
-  return { pos: newPos, type: newType as Block["type"] };
+  // Spread `block` first so optional metadata (e.g. `groupId`) rides through;
+  // rotation only mutates pos and type. Without the spread, group membership
+  // would silently disappear on every rotate.
+  return { ...block, pos: newPos, type: newType as Block["type"] };
 }
 
 /** Backwards-compatible alias: rotate a position 90° around +Z. */

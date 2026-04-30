@@ -115,6 +115,23 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
           </li>
         </ul>
 
+        <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Groups</h4>
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          <li>
+            Press <kbd>G</kbd> with 2+ blocks selected to group; press{" "}
+            <kbd>G</kbd> again to ungroup. Grouped blocks share a colored
+            dashed outline.
+          </li>
+          <li>
+            Click any member to select the whole group;{" "}
+            <kbd>Alt</kbd>+click drills in to a single block.
+          </li>
+          <li>
+            <b>Verify</b> and <b>ZX</b> automatically scope to the selected
+            group; copy/paste makes a fresh new group.
+          </li>
+        </ul>
+
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Analysis</h4>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
           <li><b>Verify (tqec)</b> — check that the diagram is a valid TQEC block graph via the <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a> package.</li>

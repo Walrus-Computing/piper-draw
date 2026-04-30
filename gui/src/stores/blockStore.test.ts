@@ -2057,4 +2057,250 @@ describe("blockStore", () => {
       expect(s.hiddenFaces.size).toBe(0);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Group elements feature — covers the seven-row `g` truth table, undo/redo
+  // of group-create / ungroup, auto-dissolve on delete, copy/paste preserving
+  // grouping with fresh nanoids per source group, and groupId surviving
+  // through type-changing mutators (flip, rotate-selection move).
+  // -------------------------------------------------------------------------
+  describe("group actions", () => {
+    function placeCubes(positions: Array<{ x: number; y: number; z: number }>) {
+      const s = useBlockStore.getState();
+      for (const p of positions) s.addBlock(p);
+    }
+
+    function selectKeys(keys: string[]) {
+      useBlockStore.setState({ selectedKeys: new Set(keys) });
+    }
+
+    it("groupSelected stamps a fresh groupId on all members", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0"]);
+      useBlockStore.getState().groupSelected(useBlockStore.getState().selectedKeys);
+      const blocks = useBlockStore.getState().blocks;
+      const g1 = blocks.get("0,0,0")?.groupId;
+      const g2 = blocks.get("3,0,0")?.groupId;
+      expect(g1).toBeDefined();
+      expect(g1).toMatch(/^[0-9a-z]{8}$/);
+      expect(g1).toBe(g2);
+    });
+
+    it("groupSelected is a no-op for <2 members", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }]);
+      selectKeys(["0,0,0"]);
+      useBlockStore.getState().groupSelected(useBlockStore.getState().selectedKeys);
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.groupId).toBeUndefined();
+    });
+
+    it("ungroupSelected clears groupId on all members of that group", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }, { x: 6, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0", "6,0,0"]);
+      useBlockStore.getState().groupSelected(useBlockStore.getState().selectedKeys);
+      const gid = useBlockStore.getState().blocks.get("0,0,0")!.groupId!;
+      useBlockStore.getState().ungroupSelected(gid);
+      const blocks = useBlockStore.getState().blocks;
+      expect(blocks.get("0,0,0")?.groupId).toBeUndefined();
+      expect(blocks.get("3,0,0")?.groupId).toBeUndefined();
+      expect(blocks.get("6,0,0")?.groupId).toBeUndefined();
+    });
+
+    it("groupToggle on all-ungrouped selection creates a group", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0"]);
+      useBlockStore.getState().groupToggle();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.groupId).toBeDefined();
+    });
+
+    it("groupToggle on all-same-group selection ungroups", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0"]);
+      useBlockStore.getState().groupToggle(); // create
+      useBlockStore.getState().groupToggle(); // dissolve
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.groupId).toBeUndefined();
+    });
+
+    it("groupToggle no-ops on empty selection", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }]);
+      selectKeys([]);
+      const before = useBlockStore.getState().history.length;
+      useBlockStore.getState().groupToggle();
+      expect(useBlockStore.getState().history.length).toBe(before);
+    });
+
+    it("groupToggle no-ops on single ungrouped block", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }]);
+      selectKeys(["0,0,0"]);
+      const before = useBlockStore.getState().history.length;
+      useBlockStore.getState().groupToggle();
+      expect(useBlockStore.getState().history.length).toBe(before);
+    });
+
+    it("groupToggle no-ops on mixed (grouped + ungrouped) selection", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }, { x: 6, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0"]);
+      useBlockStore.getState().groupToggle(); // group those two
+      selectKeys(["0,0,0", "6,0,0"]); // mixed: grouped + ungrouped
+      const before = useBlockStore.getState().history.length;
+      useBlockStore.getState().groupToggle();
+      expect(useBlockStore.getState().history.length).toBe(before);
+    });
+
+    it("undo and redo of group-create round-trip cleanly", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0"]);
+      useBlockStore.getState().groupSelected(useBlockStore.getState().selectedKeys);
+      const gid = useBlockStore.getState().blocks.get("0,0,0")?.groupId;
+      expect(gid).toBeDefined();
+
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.groupId).toBeUndefined();
+      expect(useBlockStore.getState().blocks.get("3,0,0")?.groupId).toBeUndefined();
+
+      useBlockStore.getState().redo();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.groupId).toBe(gid);
+      expect(useBlockStore.getState().blocks.get("3,0,0")?.groupId).toBe(gid);
+    });
+
+    it("undo/redo of ungroup round-trip cleanly", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0"]);
+      useBlockStore.getState().groupSelected(useBlockStore.getState().selectedKeys);
+      const gid = useBlockStore.getState().blocks.get("0,0,0")!.groupId!;
+      useBlockStore.getState().ungroupSelected(gid);
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.groupId).toBeUndefined();
+
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.groupId).toBe(gid);
+
+      useBlockStore.getState().redo();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.groupId).toBeUndefined();
+    });
+
+    it("auto-dissolves a group when delete leaves only 1 member", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }, { x: 6, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0", "6,0,0"]);
+      useBlockStore.getState().groupSelected(useBlockStore.getState().selectedKeys);
+      const gid = useBlockStore.getState().blocks.get("0,0,0")!.groupId!;
+      // Delete two members → only one survivor → group dissolves.
+      selectKeys(["0,0,0", "3,0,0"]);
+      useBlockStore.getState().deleteSelected();
+      const survivor = useBlockStore.getState().blocks.get("6,0,0");
+      expect(survivor).toBeDefined();
+      expect(survivor!.groupId).toBeUndefined();
+
+      // Undo restores the deleted blocks AND the survivor's groupId.
+      useBlockStore.getState().undo();
+      const restored = useBlockStore.getState().blocks;
+      expect(restored.get("0,0,0")?.groupId).toBe(gid);
+      expect(restored.get("3,0,0")?.groupId).toBe(gid);
+      expect(restored.get("6,0,0")?.groupId).toBe(gid);
+    });
+
+    it("does NOT dissolve a group when ≥2 members remain", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }, { x: 6, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0", "6,0,0"]);
+      useBlockStore.getState().groupSelected(useBlockStore.getState().selectedKeys);
+      const gid = useBlockStore.getState().blocks.get("0,0,0")?.groupId;
+      selectKeys(["0,0,0"]); // delete just one
+      useBlockStore.getState().deleteSelected();
+      const blocks = useBlockStore.getState().blocks;
+      expect(blocks.get("3,0,0")?.groupId).toBe(gid);
+      expect(blocks.get("6,0,0")?.groupId).toBe(gid);
+    });
+
+    it("flipSelected preserves groupId", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0"]);
+      useBlockStore.getState().groupSelected(useBlockStore.getState().selectedKeys);
+      const gid = useBlockStore.getState().blocks.get("0,0,0")?.groupId;
+      useBlockStore.getState().flipSelected();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.groupId).toBe(gid);
+      expect(useBlockStore.getState().blocks.get("3,0,0")?.groupId).toBe(gid);
+    });
+
+    it("copySelection puts groupId into clipboard", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0"]);
+      useBlockStore.getState().groupSelected(useBlockStore.getState().selectedKeys);
+      const gid = useBlockStore.getState().blocks.get("0,0,0")?.groupId;
+      useBlockStore.getState().copySelection();
+      const clip = useBlockStore.getState().clipboard;
+      expect(clip).toBeDefined();
+      expect(clip!.size).toBe(2);
+      for (const b of clip!.values()) {
+        expect(b.groupId).toBe(gid);
+      }
+    });
+
+    it("rotateSelected preserves groupId on all rotated members (regression — rotateBlockAroundAxis used to drop it)", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0"]);
+      useBlockStore.getState().groupSelected(useBlockStore.getState().selectedKeys);
+      const gid = useBlockStore.getState().blocks.get("0,0,0")!.groupId!;
+      const r = useBlockStore.getState().rotateSelected("z", "ccw");
+      expect(r.ok).toBe(true);
+      // Every block in the post-rotation scene should still belong to the group.
+      let count = 0;
+      for (const b of useBlockStore.getState().blocks.values()) {
+        expect(b.groupId).toBe(gid);
+        count++;
+      }
+      expect(count).toBe(2);
+    });
+
+    it("redo of auto-dissolve re-clears the survivor's groupId", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }, { x: 6, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0", "6,0,0"]);
+      useBlockStore.getState().groupSelected(useBlockStore.getState().selectedKeys);
+      selectKeys(["0,0,0", "3,0,0"]);
+      useBlockStore.getState().deleteSelected();
+      useBlockStore.getState().undo();
+      useBlockStore.getState().redo();
+      expect(useBlockStore.getState().blocks.get("6,0,0")?.groupId).toBeUndefined();
+    });
+
+    it("removeBlock (single-block path) auto-dissolves a group when surviving members < 2", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0"]);
+      useBlockStore.getState().groupSelected(useBlockStore.getState().selectedKeys);
+      const gid = useBlockStore.getState().blocks.get("0,0,0")!.groupId!;
+      // Single-block delete via removeBlock — must restore the ≥2-member invariant.
+      useBlockStore.getState().removeBlock({ x: 0, y: 0, z: 0 });
+      const survivor = useBlockStore.getState().blocks.get("3,0,0");
+      expect(survivor).toBeDefined();
+      expect(survivor!.groupId).toBeUndefined();
+
+      // Undo restores both the deleted block and the survivor's groupId.
+      useBlockStore.getState().undo();
+      const restored = useBlockStore.getState().blocks;
+      expect(restored.get("0,0,0")?.groupId).toBe(gid);
+      expect(restored.get("3,0,0")?.groupId).toBe(gid);
+
+      // Redo re-clears the survivor's groupId.
+      useBlockStore.getState().redo();
+      expect(useBlockStore.getState().blocks.get("3,0,0")?.groupId).toBeUndefined();
+    });
+
+    it("groupToggle no-ops on multi-group selection (≥2 selected, all grouped, multiple groups)", () => {
+      placeCubes([{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }, { x: 6, y: 0, z: 0 }, { x: 9, y: 0, z: 0 }]);
+      selectKeys(["0,0,0", "3,0,0"]);
+      useBlockStore.getState().groupToggle();
+      selectKeys(["6,0,0", "9,0,0"]);
+      useBlockStore.getState().groupToggle();
+      const gA = useBlockStore.getState().blocks.get("0,0,0")?.groupId;
+      const gB = useBlockStore.getState().blocks.get("6,0,0")?.groupId;
+      expect(gA).toBeDefined();
+      expect(gB).toBeDefined();
+      expect(gA).not.toBe(gB);
+
+      selectKeys(["0,0,0", "6,0,0"]);
+      const before = useBlockStore.getState().history.length;
+      useBlockStore.getState().groupToggle();
+      expect(useBlockStore.getState().history.length).toBe(before);
+      // Both groups must be intact after the no-op.
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.groupId).toBe(gA);
+      expect(useBlockStore.getState().blocks.get("6,0,0")?.groupId).toBe(gB);
+    });
+  });
 });
