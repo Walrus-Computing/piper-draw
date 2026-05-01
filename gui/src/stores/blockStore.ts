@@ -52,15 +52,11 @@ import {
   withoutGroupId,
 } from "./groupSelectors";
 
-// Toast helper: lazy-resolves validationStore via dynamic import to avoid the
-// circular-import landmine (validationStore subscribes to blockStore at module
-// init time, so a static import here would hoist that subscription before
-// useBlockStore is defined and crash module load — surfaced by the test suite).
-function reportGroupToast(msg: string): void {
-  void import("./validationStore").then((m) => {
-    m.useValidationStore.getState().reportEphemeralError(msg);
-  });
-}
+// Group toasts route through the shared toast bus's `info` channel — they are
+// non-destructive (do not clobber `validationStore.status: "invalid"` from a
+// prior verify, fixing R7). The bus itself has no dependency on validationStore,
+// so the old dynamic-import workaround for the circular dependency is gone.
+import { toastBus } from "../utils/toastBus";
 
 /**
  * Walk `blocksAfter` (post-delete state), find any group that just dropped
@@ -110,7 +106,7 @@ function applyAutoDissolve(
 function dissolveToast(autoDissolvedFor: ReadonlyArray<{ priorGroupId: string }>): void {
   if (autoDissolvedFor.length === 0) return;
   const n = new Set(autoDissolvedFor.map((a) => a.priorGroupId)).size;
-  reportGroupToast(
+  toastBus.info.emit(
     n === 1
       ? "Group dissolved (only 1 member left)"
       : `${n} groups dissolved (only 1 member each)`,
@@ -2755,7 +2751,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     switch (cls.kind) {
       case "empty":
       case "single-ungrouped":
-        reportGroupToast("Select 2+ blocks to group");
+        toastBus.info.emit("Select 2+ blocks to group");
         return;
       case "single-grouped":
       case "all-same-group":
@@ -2765,12 +2761,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         get().groupSelected(state.selectedKeys);
         return;
       case "mixed-grouped-ungrouped":
-        reportGroupToast(
+        toastBus.info.emit(
           "Selection mixes grouped and ungrouped blocks. Ungroup first or select only ungrouped.",
         );
         return;
       case "multi-group":
-        reportGroupToast(
+        toastBus.info.emit(
           "Selection spans multiple groups. Ungroup first.",
         );
         return;

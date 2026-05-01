@@ -47,7 +47,7 @@ import {
   actionToWasdKey,
   type KeyBinding,
 } from "./stores/keybindStore";
-import { useValidationStore } from "./stores/validationStore";
+import { toastBus } from "./utils/toastBus";
 import type { RotationAxis, RotationOperation } from "./utils/blockRotation";
 import { wasdToBuildDirection, tqecToThree, posKey, blockTqecSize, type Block, type IsoAxis, type ViewMode } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
@@ -898,7 +898,7 @@ export default function App() {
           const result = store.rotateSelected(axis, operation, pivotOverride);
           if (!result.ok) {
             const verb = operation === "flip" ? "Flip" : "Rotation";
-            useValidationStore.getState().reportEphemeralError(`${verb} aborted: ${result.reason}`);
+            toastBus.error.emit(`${verb} aborted: ${result.reason}`);
           }
           return;
         }
@@ -925,7 +925,9 @@ export default function App() {
           // per browser via localStorage flag.
           try {
             if (!localStorage.getItem(GROUP_KEYMAP_MIGRATION_KEY)) {
-              useValidationStore.getState().reportEphemeralError(
+              // Migration notice = info, not error — don't clobber an
+              // in-progress verify's invalid-block highlights.
+              toastBus.info.emit(
                 "G now groups selected blocks. Use Shift+G to toggle the grid.",
               );
               localStorage.setItem(GROUP_KEYMAP_MIGRATION_KEY, "1");

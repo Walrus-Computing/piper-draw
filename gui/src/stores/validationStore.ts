@@ -3,6 +3,7 @@ import type { Position3D } from "../types";
 import { posKey } from "../types";
 import { useBlockStore } from "./blockStore";
 import { validateDiagram } from "../utils/validate";
+import { toastBus } from "../utils/toastBus";
 import {
   selectionGroupClassification,
   filterByGroup,
@@ -133,6 +134,13 @@ export const useValidationStore = create<ValidationStore>((set, get) => ({
     });
   },
 }));
+
+// Subscribe the validation store to the shared toast bus's error channel.
+// Producers (blockStore, App.tsx) emit through `toastBus.error.emit(msg)` and
+// this listener mutates store state — replaces the old dynamic-import smell.
+toastBus.error.subscribe((msg) => {
+  useValidationStore.getState().reportEphemeralError(msg);
+});
 
 // ---------------------------------------------------------------------------
 // Smart per-position error removal when blocks change
