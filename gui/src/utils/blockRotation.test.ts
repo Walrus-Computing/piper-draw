@@ -13,6 +13,7 @@ import {
   rotateBlockAroundAxis,
   rotateBlockAroundZ,
   rotateBlockKind,
+  rotateFaceKeyedRecordAroundZ,
   rotatePositionAroundAxis,
   rotatePositionAroundZ,
 } from "./blockRotation";
@@ -399,5 +400,90 @@ describe("MATRICES table", () => {
         }
       }
     }
+  });
+});
+
+describe("rotateFaceKeyedRecordAroundZ — generic face-keyed annotations", () => {
+  it("permutes cube face indices CCW: 0→5, 1→4, 4→0, 5→1; Y faces (2,3) invariant", () => {
+    const marks: Record<string, "X" | "Z"> = { "0": "X", "1": "Z", "2": "X", "3": "Z", "4": "X", "5": "Z" };
+    const rotated = rotateFaceKeyedRecordAroundZ(marks, "XZZ", "ccw");
+    expect(rotated).toEqual({ "5": "X", "4": "Z", "2": "X", "3": "Z", "0": "X", "1": "Z" });
+  });
+
+  it("permutes cube face indices CW: 0→4, 1→5, 4→1, 5→0", () => {
+    const marks: Record<string, "X" | "Z"> = { "0": "X", "1": "X", "4": "Z", "5": "Z" };
+    const rotated = rotateFaceKeyedRecordAroundZ(marks, "XZZ", "cw");
+    expect(rotated).toEqual({ "4": "X", "5": "X", "1": "Z", "0": "Z" });
+  });
+
+  it("preserves value type T (works for paint colors as well as basis tags)", () => {
+    const colors: Record<string, string> = { "0": "#ff0000", "1": "#00ff00" };
+    const rotated = rotateFaceKeyedRecordAroundZ(colors, "XZZ", "ccw");
+    expect(rotated).toEqual({ "5": "#ff0000", "4": "#00ff00" });
+  });
+
+  it("flips Hadamard below↔above on the open-axis when the open axis is X (TQEC X = Three.js X, threeOpen=0)", () => {
+    // OZXH: X-open Hadamard pipe. Under CCW (TQEC X→Y, threeOpen=0 → flips).
+    // The wall faces (not on the open axis) are Y/Z faces and -Y/-Z faces;
+    // their below/above suffix tracks the open-axis position, which flips.
+    const marks: Record<string, "X" | "Z"> = { "2:below": "X", "3:above": "Z" };
+    const rotated = rotateFaceKeyedRecordAroundZ(marks, "OZXH", "ccw");
+    // Face indices 2,3 are Y faces, invariant under Z-rotation. Strip flips.
+    expect(rotated).toEqual({ "2:above": "X", "3:below": "Z" });
+  });
+
+  it("does NOT flip below/above on a vertical (Y-open) pipe under Z-rotation", () => {
+    // ZXOH: Z-open in TQEC, which maps to Y-open in Three.js (threeOpen=1).
+    // Vertical pipes are rotation-invariant for the strip suffix.
+    const marks: Record<string, "X" | "Z"> = { "0:below": "X", "1:above": "Z" };
+    const rotated = rotateFaceKeyedRecordAroundZ(marks, "ZXOH", "ccw");
+    // Faces 0,1 (X faces) under CCW Z-rotation: 0→5, 1→4. Strips unchanged.
+    expect(rotated).toEqual({ "5:below": "X", "4:above": "Z" });
+  });
+
+  it("flips Y-twist below↔above just like Hadamard (same open-axis convention)", () => {
+    const marks: Record<string, "X" | "Z"> = { "2:below": "X", "2:above": "Z" };
+    const rotated = rotateFaceKeyedRecordAroundZ(marks, "OZXY", "ccw");
+    expect(rotated).toEqual({ "2:above": "X", "2:below": "Z" });
+  });
+
+  it("returns undefined for empty input", () => {
+    expect(rotateFaceKeyedRecordAroundZ({}, "XZZ", "ccw")).toBeUndefined();
+  });
+});
+
+describe("rotateBlockAroundZ — face-annotation propagation", () => {
+  it("propagates faceCorrSurface through rotation with face-index permutation", () => {
+    const block: Block = {
+      pos: { x: 0, y: 0, z: 0 },
+      type: "XZZ",
+      faceCorrSurface: { "0": "X", "5": "Z" },
+    };
+    const rotated = rotateBlockAroundZ(block, origin, "ccw");
+    expect(rotated.faceCorrSurface).toEqual({ "5": "X", "1": "Z" });
+  });
+
+  it("propagates faceColors and faceCorrSurface together with H/Y strip-flip semantics", () => {
+    const block: Block = {
+      pos: { x: 1, y: 0, z: 0 },
+      type: "OZXH",
+      faceColors: { "2:below": "#ff0000" },
+      faceCorrSurface: { "3:above": "X" },
+    };
+    const rotated = rotateBlockAroundZ(block, origin, "ccw");
+    // Strips flip on threeOpen=0 (X-open) under CCW.
+    expect(rotated.faceColors).toEqual({ "2:above": "#ff0000" });
+    expect(rotated.faceCorrSurface).toEqual({ "3:below": "X" });
+  });
+
+  it("four CCW rotations is identity on a block with marks", () => {
+    const block: Block = {
+      pos: { x: 3, y: 0, z: 0 },
+      type: "XZZ",
+      faceCorrSurface: { "0": "X", "4": "Z" },
+    };
+    let cur = block;
+    for (let i = 0; i < 4; i++) cur = rotateBlockAroundZ(cur, origin, "ccw");
+    expect(cur).toEqual(block);
   });
 });

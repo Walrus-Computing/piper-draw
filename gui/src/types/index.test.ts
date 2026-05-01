@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { blockTqecSize, createBlockGeometry, createYDefectEdges, getHiddenFaceMaskForPos, FACE_NEG_X, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_X, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, getOrderedPortPositions, determineCubeOptions, determineCubeOptionsWithPipeRetype, computePipeRetypes, CUBE_TYPES, PIPE_TYPES } from "./index";
-import type { PipeType, CubeType, PortMeta } from "./index";
+import { blockTqecSize, createBlockGeometry, createYDefectEdges, getHiddenFaceMaskForPos, FACE_NEG_X, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_X, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, getOrderedPortPositions, determineCubeOptions, determineCubeOptionsWithPipeRetype, computePipeRetypes, CUBE_TYPES, PIPE_TYPES, deriveFaceKey } from "./index";
+import type { PipeType, CubeType, PortMeta, Block } from "./index";
 import type { BlockType } from "./index";
 import { Vector3 } from "three";
 
@@ -1004,5 +1004,49 @@ describe("computePipeRetypes", () => {
         { key: "1,0,0", oldType: "OXZH", newType: "OZX" },
       ].sort((a, b) => a.key.localeCompare(b.key)),
     );
+  });
+});
+
+describe("deriveFaceKey", () => {
+  // Cube XZZ at TQEC (0,0,0) → Three.js center (0.5, 0.5, -0.5), half-extents (0.5, 0.5, 0.5).
+  const cube: Block = { pos: { x: 0, y: 0, z: 0 }, type: "XZZ" };
+
+  it("returns '0'..'5' for cube faces (no sub-strip)", () => {
+    expect(deriveFaceKey(cube, new Vector3(1, 0, 0), new Vector3(1.0, 0.5, -0.5))).toBe("0");
+    expect(deriveFaceKey(cube, new Vector3(-1, 0, 0), new Vector3(0.0, 0.5, -0.5))).toBe("1");
+    expect(deriveFaceKey(cube, new Vector3(0, 1, 0), new Vector3(0.5, 1.0, -0.5))).toBe("2");
+    expect(deriveFaceKey(cube, new Vector3(0, -1, 0), new Vector3(0.5, 0.0, -0.5))).toBe("3");
+    expect(deriveFaceKey(cube, new Vector3(0, 0, 1), new Vector3(0.5, 0.5, 0.0))).toBe("4");
+    expect(deriveFaceKey(cube, new Vector3(0, 0, -1), new Vector3(0.5, 0.5, -1.0))).toBe("5");
+  });
+
+  it("returns the face index for slabs (per-face granularity in v1)", () => {
+    const slab: Block = { pos: { x: 1, y: 1, z: 0 }, type: "slab" };
+    expect(deriveFaceKey(slab, new Vector3(0, 1, 0), new Vector3(2, 1.0, -2))).toBe("2");
+    expect(deriveFaceKey(slab, new Vector3(1, 0, 0), new Vector3(3, 0.5, -2))).toBe("0");
+  });
+
+  it("returns null for the open-axis end faces of a pipe", () => {
+    const pipe: Block = { pos: { x: 1, y: 0, z: 0 }, type: "OZX" };
+    expect(deriveFaceKey(pipe, new Vector3(1, 0, 0), new Vector3(3, 0.5, -0.5))).toBeNull();
+    expect(deriveFaceKey(pipe, new Vector3(-1, 0, 0), new Vector3(1, 0.5, -0.5))).toBeNull();
+  });
+
+  it("returns just the face index for non-band pipes (no Hadamard / Y-twist)", () => {
+    const pipe: Block = { pos: { x: 1, y: 0, z: 0 }, type: "OZX" };
+    expect(deriveFaceKey(pipe, new Vector3(0, 1, 0), new Vector3(2, 1.0, -0.5))).toBe("2");
+  });
+
+  it("returns sub-strip keys for Hadamard pipes (band/below/above)", () => {
+    const pipe: Block = { pos: { x: 1, y: 0, z: 0 }, type: "OZXH" };
+    expect(deriveFaceKey(pipe, new Vector3(0, 1, 0), new Vector3(2.0, 1.0, -0.5))).toBe("2:band");
+    expect(deriveFaceKey(pipe, new Vector3(0, 1, 0), new Vector3(1.1, 1.0, -0.5))).toBe("2:below");
+    expect(deriveFaceKey(pipe, new Vector3(0, 1, 0), new Vector3(2.9, 1.0, -0.5))).toBe("2:above");
+  });
+
+  it("returns sub-strip keys for Y-twist pipes (split at 0, no band)", () => {
+    const pipe: Block = { pos: { x: 1, y: 0, z: 0 }, type: "OZXY" };
+    expect(deriveFaceKey(pipe, new Vector3(0, 1, 0), new Vector3(1.5, 1.0, -0.5))).toBe("2:below");
+    expect(deriveFaceKey(pipe, new Vector3(0, 1, 0), new Vector3(2.5, 1.0, -0.5))).toBe("2:above");
   });
 });

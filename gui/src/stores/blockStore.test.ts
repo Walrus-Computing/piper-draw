@@ -2370,4 +2370,169 @@ describe("blockStore", () => {
       expect(useBlockStore.getState().blocks.get("6,0,0")?.groupId).toBe(gB);
     });
   });
+
+  describe("markCorrSurface", () => {
+    it("adds a new mark with basis X", () => {
+      const s = useBlockStore.getState();
+      s.addBlock({ x: 0, y: 0, z: 0 });
+      s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "X");
+      const block = useBlockStore.getState().blocks.get("0,0,0")!;
+      expect(block.faceCorrSurface).toEqual({ "0": "X" });
+    });
+
+    it("toggling same basis on a marked face removes the mark", () => {
+      const s = useBlockStore.getState();
+      s.addBlock({ x: 0, y: 0, z: 0 });
+      s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "X");
+      s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", null);
+      const block = useBlockStore.getState().blocks.get("0,0,0")!;
+      expect(block.faceCorrSurface).toBeUndefined();
+    });
+
+    it("switching to other basis replaces the mark", () => {
+      const s = useBlockStore.getState();
+      s.addBlock({ x: 0, y: 0, z: 0 });
+      s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "X");
+      s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "Z");
+      const block = useBlockStore.getState().blocks.get("0,0,0")!;
+      expect(block.faceCorrSurface).toEqual({ "0": "Z" });
+    });
+
+    it("preserves marks on other faces when one is removed", () => {
+      const s = useBlockStore.getState();
+      s.addBlock({ x: 0, y: 0, z: 0 });
+      s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "X");
+      s.markCorrSurface({ x: 0, y: 0, z: 0 }, "1", "Z");
+      s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", null);
+      const block = useBlockStore.getState().blocks.get("0,0,0")!;
+      expect(block.faceCorrSurface).toEqual({ "1": "Z" });
+    });
+
+    it("no-ops on a missing block (no throw, no history entry)", () => {
+      const s = useBlockStore.getState();
+      const before = useBlockStore.getState().history.length;
+      expect(() => s.markCorrSurface({ x: 99, y: 99, z: 99 }, "0", "X")).not.toThrow();
+      expect(useBlockStore.getState().history.length).toBe(before);
+    });
+
+    it("no-ops on unmarking a face that has no mark (no history entry)", () => {
+      const s = useBlockStore.getState();
+      s.addBlock({ x: 0, y: 0, z: 0 });
+      const before = useBlockStore.getState().history.length;
+      s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", null);
+      expect(useBlockStore.getState().history.length).toBe(before);
+    });
+
+    it("undo restores the prior mark state", () => {
+      const s = useBlockStore.getState();
+      s.addBlock({ x: 0, y: 0, z: 0 });
+      s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "X");
+      s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "Z");
+      useBlockStore.getState().undo();
+      const block = useBlockStore.getState().blocks.get("0,0,0")!;
+      expect(block.faceCorrSurface).toEqual({ "0": "X" });
+    });
+
+    it("redo replays the mark", () => {
+      const s = useBlockStore.getState();
+      s.addBlock({ x: 0, y: 0, z: 0 });
+      s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "X");
+      useBlockStore.getState().undo();
+      useBlockStore.getState().redo();
+      const block = useBlockStore.getState().blocks.get("0,0,0")!;
+      expect(block.faceCorrSurface).toEqual({ "0": "X" });
+    });
+
+    it("supports sub-strip face keys for H pipes", () => {
+      // Hydrate a Hadamard pipe directly so we don't depend on the placement
+      // pipeline (which requires neighbouring cubes & exact coordinates that
+      // change with future placement rules).
+      const pipe: Block = { pos: { x: 1, y: 0, z: 0 }, type: "OZXH" };
+      const blocks = new Map<string, Block>([["1,0,0", pipe]]);
+      useBlockStore.setState({
+        blocks,
+        spatialIndex: buildSpatialIndex(blocks),
+        hiddenFaces: new Map(),
+      });
+      const s = useBlockStore.getState();
+      s.markCorrSurface({ x: 1, y: 0, z: 0 }, "2:band", "X");
+      s.markCorrSurface({ x: 1, y: 0, z: 0 }, "2:below", "Z");
+      const after = useBlockStore.getState().blocks.get("1,0,0")!;
+      expect(after.faceCorrSurface).toEqual({ "2:band": "X", "2:below": "Z" });
+    });
+  });
+
+  describe("setArmedCorrSurface", () => {
+    it("sets armedTool, corrBasis, and auto-enables corrSurfaceVizMode", () => {
+      useBlockStore.setState({ corrSurfaceVizMode: false });
+      useBlockStore.getState().setArmedCorrSurface("X");
+      const s = useBlockStore.getState();
+      expect(s.armedTool).toBe("corr-surface");
+      expect(s.corrBasis).toBe("X");
+      expect(s.corrSurfaceVizMode).toBe(true);
+    });
+
+    it("switching from corr-x to corr-z keeps armedTool, swaps basis", () => {
+      useBlockStore.getState().setArmedCorrSurface("X");
+      useBlockStore.getState().setArmedCorrSurface("Z");
+      const s = useBlockStore.getState();
+      expect(s.armedTool).toBe("corr-surface");
+      expect(s.corrBasis).toBe("Z");
+    });
+
+    it("corrBasis persists after arming a different tool", () => {
+      useBlockStore.getState().setArmedCorrSurface("Z");
+      useBlockStore.getState().setArmedTool("pointer");
+      const s = useBlockStore.getState();
+      expect(s.armedTool).toBe("pointer");
+      // Re-arming corr-surface uses the most recent basis the user chose
+      // (D8 ergonomics — like paint's paintColor, basis persists).
+      expect(s.corrBasis).toBe("Z");
+    });
+
+    it("clears selection-related ephemeral state per the stale-zustand pitfall", () => {
+      useBlockStore.setState({
+        selectedKeys: new Set(["0,0,0"]),
+        hoveredGridPos: { x: 1, y: 2, z: 3 },
+      });
+      useBlockStore.getState().setArmedCorrSurface("X");
+      const s = useBlockStore.getState();
+      expect(s.selectedKeys.size).toBe(0);
+      expect(s.hoveredGridPos).toBeNull();
+    });
+  });
+
+  describe("setCorrSurfaceVizMode", () => {
+    it("toggles independently of armed tool", () => {
+      useBlockStore.getState().setCorrSurfaceVizMode(true);
+      expect(useBlockStore.getState().corrSurfaceVizMode).toBe(true);
+      useBlockStore.getState().setCorrSurfaceVizMode(false);
+      expect(useBlockStore.getState().corrSurfaceVizMode).toBe(false);
+    });
+  });
+
+  describe("face-annotation preservation through bulk operations", () => {
+    it("paintFace overrides survive copy/paste roundtrip", () => {
+      const s = useBlockStore.getState();
+      s.addBlock({ x: 0, y: 0, z: 0 });
+      s.paintFace({ x: 0, y: 0, z: 0 }, "0", "#abcdef");
+      s.selectBlock({ x: 0, y: 0, z: 0 }, false);
+      s.copySelection();
+      const clipboard = useBlockStore.getState().clipboard;
+      expect(clipboard).not.toBeNull();
+      const entry = Array.from(clipboard!.values())[0];
+      expect(entry.faceColors).toEqual({ "0": "#abcdef" });
+    });
+
+    it("faceCorrSurface survives copy/paste roundtrip", () => {
+      const s = useBlockStore.getState();
+      s.addBlock({ x: 0, y: 0, z: 0 });
+      s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "X");
+      s.selectBlock({ x: 0, y: 0, z: 0 }, false);
+      s.copySelection();
+      const clipboard = useBlockStore.getState().clipboard;
+      const entry = Array.from(clipboard!.values())[0];
+      expect(entry.faceCorrSurface).toEqual({ "0": "X" });
+    });
+  });
 });

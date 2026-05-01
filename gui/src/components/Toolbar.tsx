@@ -193,6 +193,10 @@ export function Toolbar({
   const paintColor = useBlockStore((s) => s.paintColor);
   const setPaintColor = useBlockStore((s) => s.setPaintColor);
   const [paintPickerOpen, setPaintPickerOpen] = useState(false);
+  const corrBasis = useBlockStore((s) => s.corrBasis);
+  const setArmedCorrSurface = useBlockStore((s) => s.setArmedCorrSurface);
+  const corrSurfaceVizMode = useBlockStore((s) => s.corrSurfaceVizMode);
+  const setCorrSurfaceVizMode = useBlockStore((s) => s.setCorrSurfaceVizMode);
   const setPaletteDragging = useBlockStore((s) => s.setPaletteDragging);
   const cycleBlock = useBlockStore((s) => s.cycleBlock);
   const cyclePipe = useBlockStore((s) => s.cyclePipe);
@@ -826,6 +830,51 @@ export function Toolbar({
           ))}
         </div>
       </div>
+
+      {/* Manual correlation-surface authoring (always available in edit mode,
+          per D9 — used to derive surface rules empirically). */}
+      {mode === "edit" && (
+        <>
+          <div style={{ width: 1, background: "#ddd" }} />
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <span style={groupLabelStyle}>Surfaces</span>
+            <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
+              <button
+                key="corr-x"
+                onClick={() => setArmedCorrSurface("X")}
+                title="Mark a face as part of an X correlation surface"
+                style={{
+                  ...blockBtnStyle(armedTool === "corr-surface" && corrBasis === "X"),
+                  background: armedTool === "corr-surface" && corrBasis === "X" ? "#ff7f7f" : "#ffe2e2",
+                  color: "#5a0000",
+                }}
+              >
+                Corr X
+              </button>
+              <button
+                key="corr-z"
+                onClick={() => setArmedCorrSurface("Z")}
+                title="Mark a face as part of a Z correlation surface"
+                style={{
+                  ...blockBtnStyle(armedTool === "corr-surface" && corrBasis === "Z"),
+                  background: armedTool === "corr-surface" && corrBasis === "Z" ? "#7396ff" : "#dde6ff",
+                  color: "#001a5a",
+                }}
+              >
+                Corr Z
+              </button>
+              <button
+                key="corr-viz"
+                onClick={() => setCorrSurfaceVizMode(!corrSurfaceVizMode)}
+                title={corrSurfaceVizMode ? "Hide manual surface marks" : "Show manual surface marks"}
+                style={blockBtnStyle(corrSurfaceVizMode)}
+              >
+                {corrSurfaceVizMode ? "Hide" : "Show"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Free-build-only group: Slab + Paint */}
       {freeBuild && mode === "edit" && (

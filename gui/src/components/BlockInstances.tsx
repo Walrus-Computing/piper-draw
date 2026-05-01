@@ -20,9 +20,7 @@ import {
   getAdjacentPos,
   posKey,
   VARIANT_AXIS_MAP,
-  faceIndexFromNormal,
-  TQEC_TO_THREE_AXIS,
-  H_BAND_HALF_HEIGHT,
+  deriveFaceKey,
 } from "../types";
 import type { BlockType, CubeType, Block, FaceMask, Position3D, PipeVariant } from "../types";
 import { posInActiveSlice } from "../utils/isoView";
@@ -401,33 +399,22 @@ function TypedInstances({
       if (armed === "paint") {
         if (!e.face) return;
         const block = b[e.instanceId];
-        const faceIdx = faceIndexFromNormal(e.face.normal);
-        let key = String(faceIdx);
-        if (isPipeType(block.type)) {
-          // Strip both possible band-style suffixes ("H" for Hadamard, "Y" for Y-twist)
-          // before reading the open-axis position.
-          const base = block.type.length > 3 ? block.type.slice(0, 3) : block.type;
-          const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
-          const threeOpen = TQEC_TO_THREE_AXIS[tqecOpen];
-          // Open-axis faces have no rendered geometry — ignore the click.
-          if ((faceIdx >> 1) === threeOpen) return;
-          const isHad = block.type.endsWith("H");
-          const isYTwist = block.type.endsWith("Y") && block.type.length === 4;
-          if (isHad || isYTwist) {
-            const [cx, cy, cz] = tqecToThree(block.pos, block.type);
-            const local: [number, number, number] = [
-              e.point.x - cx,
-              e.point.y - cy,
-              e.point.z - cz,
-            ];
-            const t = local[threeOpen];
-            const strip = isHad
-              ? (t < -H_BAND_HALF_HEIGHT ? "below" : t > H_BAND_HALF_HEIGHT ? "above" : "band")
-              : (t < 0 ? "below" : "above");
-            key = `${faceIdx}:${strip}`;
-          }
-        }
+        const key = deriveFaceKey(block, e.face.normal, e.point);
+        if (key === null) return;
         store.paintFace(block.pos, key, store.paintColor);
+        return;
+      }
+      if (armed === "corr-surface") {
+        if (!e.face) return;
+        const block = b[e.instanceId];
+        const key = deriveFaceKey(block, e.face.normal, e.point);
+        if (key === null) return;
+        // Click semantics (D8): same basis on a marked face → unmark; other
+        // basis → switch; unmarked → mark with the armed basis.
+        const cur = block.faceCorrSurface?.[key];
+        const armedBasis = store.corrBasis;
+        const next = cur === armedBasis ? null : armedBasis;
+        store.markCorrSurface(block.pos, key, next);
         return;
       }
       // Place mode: try replacing the clicked block if the selected type

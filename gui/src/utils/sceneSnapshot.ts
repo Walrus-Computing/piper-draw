@@ -108,9 +108,59 @@ export function isSceneSnapshotV1(value: unknown): value is SceneSnapshotV1 {
 
 export type ApplyMode = "load" | "hydrate";
 
+/**
+ * Sanitize a block's optional face-keyed annotations (faceColors,
+ * faceCorrSurface) on snapshot load. Drops malformed payloads (non-object,
+ * wrong value types, etc.) silently rather than throwing — older or
+ * tampered snapshots should still load with the geometry intact.
+ */
+function sanitizeBlock(block: Block): Block {
+  let out: Block = block;
+  if (block.faceColors !== undefined) {
+    if (typeof block.faceColors !== "object" || block.faceColors === null || Array.isArray(block.faceColors)) {
+      out = { ...out, faceColors: undefined };
+      delete (out as { faceColors?: unknown }).faceColors;
+    } else {
+      const cleaned: Record<string, string> = {};
+      for (const [k, v] of Object.entries(block.faceColors)) {
+        if (typeof v === "string") cleaned[k] = v;
+      }
+      if (Object.keys(cleaned).length === 0) {
+        out = { ...out };
+        delete out.faceColors;
+      } else if (cleaned !== block.faceColors) {
+        out = { ...out, faceColors: cleaned };
+      }
+    }
+  }
+  if (block.faceCorrSurface !== undefined) {
+    if (typeof block.faceCorrSurface !== "object" || block.faceCorrSurface === null || Array.isArray(block.faceCorrSurface)) {
+      out = { ...out };
+      delete out.faceCorrSurface;
+    } else {
+      const cleaned: Record<string, "X" | "Z"> = {};
+      for (const [k, v] of Object.entries(block.faceCorrSurface)) {
+        if (v === "X" || v === "Z") cleaned[k] = v;
+      }
+      if (Object.keys(cleaned).length === 0) {
+        out = { ...out };
+        delete out.faceCorrSurface;
+      } else if (cleaned !== block.faceCorrSurface) {
+        out = { ...out, faceCorrSurface: cleaned };
+      }
+    }
+  }
+  return out;
+}
+
 export function applySnapshot(snapshot: SceneSnapshotV1, mode: ApplyMode = "hydrate"): void {
   const store = useBlockStore.getState();
-  const blocks = new Map<string, Block>(snapshot.blocks);
+  // Sanitize each block (drops malformed faceColors/faceCorrSurface payloads,
+  // translates legacy schemas if needed) before installing.
+  const blocks = new Map<string, Block>();
+  for (const [key, block] of snapshot.blocks) {
+    blocks.set(key, sanitizeBlock(block));
+  }
   const portMeta = new Map(snapshot.portMeta);
   const portPositions = new Set(snapshot.portPositions);
   if (mode === "load") {

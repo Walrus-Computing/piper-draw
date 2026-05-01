@@ -180,4 +180,45 @@ describe("round-trip: export → import", () => {
       expect(imported.get(key)!.type).toBe(type);
     }
   });
+
+  it("logs info when faceCorrSurface marks are dropped on export", () => {
+    const blocks = new Map<string, Block>([
+      [
+        "0,0,0",
+        {
+          pos: { x: 0, y: 0, z: 0 },
+          type: "XZZ",
+          faceCorrSurface: { "0": "X" },
+        },
+      ],
+    ]);
+    const messages: string[] = [];
+    const origInfo = console.info;
+    console.info = (msg: string) => {
+      messages.push(msg);
+    };
+    try {
+      exportBlocksToDae(blocks);
+    } finally {
+      console.info = origInfo;
+    }
+    expect(messages.some((m) => m.includes("manual correlation-surface marks"))).toBe(true);
+  });
+
+  it("does not include faceCorrSurface data anywhere in the exported XML", () => {
+    const blocks = new Map<string, Block>([
+      [
+        "0,0,0",
+        {
+          pos: { x: 0, y: 0, z: 0 },
+          type: "XZZ",
+          faceCorrSurface: { "0": "X", "5": "Z" },
+        },
+      ],
+    ]);
+    const xml = exportBlocksToDae(blocks);
+    expect(xml).not.toContain("faceCorrSurface");
+    // Sanity: the cube itself still exports
+    expect(xml).toContain('name="xzz"');
+  });
 });
