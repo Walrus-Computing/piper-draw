@@ -6,6 +6,16 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.1.2.1] - 2026-05-01
+
+### Added
+- Weekly file-size tracker. A new GitHub Actions workflow
+  (`.github/workflows/weekly-metrics.yml`) runs every Monday at 09:00 UTC,
+  measures the LOC of the six hot files against the CEO tech-debt plan
+  targets, and posts a comment on a stable tracking issue. Works as a
+  schedule-independent backup to the gstack `/retro` routine, so the trend is
+  recorded even when the agent run is skipped or fails (per Codex #9 finding).
+
 ## [0.1.2.0] - 2026-05-01
 
 ### Added
