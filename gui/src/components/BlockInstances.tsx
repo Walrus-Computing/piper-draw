@@ -20,6 +20,9 @@ import {
   getAdjacentPos,
   posKey,
   VARIANT_AXIS_MAP,
+  faceIndexFromNormal,
+  TQEC_TO_THREE_AXIS,
+  H_BAND_HALF_HEIGHT,
 } from "../types";
 import type { BlockType, CubeType, Block, FaceMask, Position3D, PipeVariant } from "../types";
 import { posInActiveSlice } from "../utils/isoView";
@@ -71,6 +74,22 @@ export function getCachedGeometry(blockType: BlockType, hiddenFaces: FaceMask): 
   return geo;
 }
 
+/**
+ * Sorted-key serialisation of a block's face-color overrides — used as part
+ * of the rendering group key so two blocks of the same type/hiddenFaces but
+ * different paint state don't share an InstancedMesh.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function faceColorsKey(faceColors: Record<string, string> | undefined): string {
+  if (!faceColors) return "";
+  const keys = Object.keys(faceColors);
+  if (keys.length === 0) return "";
+  keys.sort();
+  let s = "";
+  for (const k of keys) s += `${k}=${faceColors[k]};`;
+  return s;
+}
+
 // eslint-disable-next-line react-refresh/only-export-components
 export function getCachedEdges(blockType: BlockType, hiddenFaces: FaceMask): THREE.BufferGeometry {
   const key = `${blockType}:${hiddenFaces}`;
@@ -98,12 +117,15 @@ function TypedInstances({
   hiddenFaces,
   allBlocks,
   dimmed,
+  faceColors,
 }: {
   cubeType: BlockType;
   blocks: Block[];
   hiddenFaces: FaceMask;
   allBlocks: Map<string, Block>;
   dimmed: boolean;
+  /** Face-color overrides shared across every block in this group (group key includes the override hash). */
+  faceColors?: Record<string, string>;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const blocksRef = useRef(blocks);
@@ -118,7 +140,21 @@ function TypedInstances({
   if (maxCount !== capacity) setCapacity(maxCount);
 
   const pipe = isPipeType(cubeType);
-  const geometry = getCachedGeometry(cubeType, hiddenFaces);
+  // Geometry is freshly built (no cache) when the group has face-color overrides
+  // — caching by override hash would unbounded-grow the cache.
+  const geometry = useMemo(
+    () => (faceColors
+      ? createBlockGeometry(cubeType, hiddenFaces, undefined, faceColors)
+      : getCachedGeometry(cubeType, hiddenFaces)),
+    [cubeType, hiddenFaces, faceColors],
+  );
+  useEffect(() => {
+    // Dispose the per-group geometry on unmount/recreation only if it's not
+    // owned by the shared cache.
+    return () => {
+      if (faceColors) geometry.dispose();
+    };
+  }, [geometry, faceColors]);
   const fullBoxGeometry = pipe ? getCachedFullBox(cubeType) : null;
   const material = useMemo(
     () => new THREE.MeshLambertMaterial({
@@ -240,6 +276,14 @@ function TypedInstances({
       // Port-conversion tool: no ghost preview on existing blocks — the click
       // either removes the cube or does nothing (and sets a warning).
       store.setHoveredGridPos(null);
+    } else if (store.mode === "edit" && armed === "slab") {
+      // Slab tool: never face-adjacent — the placement target is the gap
+      // between pipes on the ground plane, handled by GridPlane.
+      store.setHoveredGridPos(null);
+    } else if (store.mode === "edit" && armed === "paint") {
+      // Paint tool: hover does nothing yet (face-level hover preview is
+      // out of scope for v1). Clicks paint the face under the cursor.
+      store.setHoveredGridPos(null);
     } else {
       // Place mode: check if we can replace the hovered block itself
       const hovered = b[e.instanceId];
@@ -351,6 +395,41 @@ function TypedInstances({
         store.convertBlockToPort(b[e.instanceId].pos);
         return;
       }
+      // Slab tool: clicking an existing block is a no-op — slabs only go in
+      // the gap between 4 pipes on the ground plane.
+      if (armed === "slab") return;
+      if (armed === "paint") {
+        if (!e.face) return;
+        const block = b[e.instanceId];
+        const faceIdx = faceIndexFromNormal(e.face.normal);
+        let key = String(faceIdx);
+        if (isPipeType(block.type)) {
+          // Strip both possible band-style suffixes ("H" for Hadamard, "Y" for Y-twist)
+          // before reading the open-axis position.
+          const base = block.type.length > 3 ? block.type.slice(0, 3) : block.type;
+          const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
+          const threeOpen = TQEC_TO_THREE_AXIS[tqecOpen];
+          // Open-axis faces have no rendered geometry — ignore the click.
+          if ((faceIdx >> 1) === threeOpen) return;
+          const isHad = block.type.endsWith("H");
+          const isYTwist = block.type.endsWith("Y") && block.type.length === 4;
+          if (isHad || isYTwist) {
+            const [cx, cy, cz] = tqecToThree(block.pos, block.type);
+            const local: [number, number, number] = [
+              e.point.x - cx,
+              e.point.y - cy,
+              e.point.z - cz,
+            ];
+            const t = local[threeOpen];
+            const strip = isHad
+              ? (t < -H_BAND_HALF_HEIGHT ? "below" : t > H_BAND_HALF_HEIGHT ? "above" : "band")
+              : (t < 0 ? "below" : "above");
+            key = `${faceIdx}:${strip}`;
+          }
+        }
+        store.paintFace(block.pos, key, store.paintColor);
+        return;
+      }
       // Place mode: try replacing the clicked block if the selected type
       // is valid at the clicked block's position
       const clicked = b[e.instanceId];
@@ -408,6 +487,7 @@ export function BlockInstances() {
       type: BlockType;
       hiddenFaces: FaceMask;
       dimmed: boolean;
+      faceColors?: Record<string, string>;
       blocks: Block[];
     };
     const map = new Map<string, Group>();
@@ -416,7 +496,8 @@ export function BlockInstances() {
       const dimmed =
         flowVizMode ||
         (viewMode.kind === "iso" && !posInActiveSlice(viewMode, block.pos));
-      const key = `${block.type}:${hf}:${dimmed ? 1 : 0}`;
+      const fcKey = faceColorsKey(block.faceColors);
+      const key = `${block.type}:${hf}:${dimmed ? 1 : 0}:${fcKey}`;
       const existing = map.get(key);
       if (existing) {
         existing.blocks.push(block);
@@ -425,6 +506,7 @@ export function BlockInstances() {
           type: block.type,
           hiddenFaces: hf,
           dimmed,
+          faceColors: block.faceColors,
           blocks: [block],
         });
       }
@@ -442,6 +524,7 @@ export function BlockInstances() {
           blocks={group.blocks}
           allBlocks={blocks}
           dimmed={group.dimmed}
+          faceColors={group.faceColors}
         />
       ))}
     </>

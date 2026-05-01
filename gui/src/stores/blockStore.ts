@@ -15,6 +15,9 @@ import {
   hasPipeColorConflict,
   hasYCubePipeAxisConflict,
   isPipeType,
+  isSlabType,
+  isYTwistPipe,
+  FREE_BUILD_PIPE_VARIANTS,
   isValidBlockPos,
   isValidPos,
   resolvePipeType,
@@ -43,6 +46,7 @@ import {
   flipBlockType,
   PLACEABLE_ORDER,
   currentPlaceableIndex,
+  H_HEX,
 } from "../types";
 import { rotateBlockAroundAxis, type RotationAxis, type RotationOperation } from "../utils/blockRotation";
 import {
@@ -118,13 +122,13 @@ function dissolveToast(autoDissolvedFor: ReadonlyArray<{ priorGroupId: string }>
 }
 
 export type Mode = "edit" | "build";
-export type ArmedTool = "pointer" | "cube" | "pipe" | "port" | "paste";
+export type ArmedTool = "pointer" | "cube" | "pipe" | "port" | "paste" | "slab" | "paint";
 
 const MAX_HISTORY = 100;
 
 /** Canonical X-open PipeType for each variant, used as cubeType fallback. */
 const PIPE_VARIANT_CANONICAL: Record<PipeVariant, BlockType> = {
-  ZX: "OZX", XZ: "OXZ", ZXH: "OZXH", XZH: "OXZH",
+  ZX: "OZX", XZ: "OXZ", ZXH: "OZXH", XZH: "OXZH", ZXY: "OZXY", XZY: "OXZY",
 };
 
 // ---------------------------------------------------------------------------
@@ -341,6 +345,19 @@ interface BlockStore {
   setCubeType: (cubeType: BlockType) => void;
   setPipeVariant: (variant: PipeVariant) => void;
   setPlacePort: (on: boolean) => void;
+  setArmedSlab: (on: boolean) => void;
+  /** Toggle the free-build face-paint tool. */
+  setArmedPaint: (on: boolean) => void;
+  /** Active hex color (`"#rrggbb"`) used by the next paint click. */
+  paintColor: string;
+  setPaintColor: (hex: string) => void;
+  /**
+   * Apply the current paint color to a single face of the block at `pos`.
+   * `faceKey` is `"0".."5"` for cubes/Y/slabs/non-Hadamard pipes, or
+   * `"<faceIdx>:below"|"band"|"above"` for Hadamard pipes (per-strip).
+   * Pushes a `replace` undo command so undo/redo round-trips through Block.
+   */
+  paintFace: (pos: Position3D, faceKey: string, color: string) => void;
   /** Cycle the armed placeable by ±1 within PLACEABLE_ORDER (Drag / Drop mode only). */
   cycleArmedType: (dir: -1 | 1) => void;
   /**
@@ -673,7 +690,7 @@ function mergeBlocksWithDelta(
   //           Source groups with fewer than 2 survivors leave their
   //           remaining placement ungrouped (matches the dissolve-<2 rule).
   const mergedBlocks = new Map(state.blocks);
-  const placed: Array<{ key: string; pos: Position3D; type: BlockType; sourceGroupId: string | undefined }> = [];
+  const placed: Array<{ key: string; pos: Position3D; type: BlockType; sourceGroupId: string | undefined; faceColors: Record<string, string> | undefined }> = [];
   for (const b of incoming.values()) {
     const newPos: Position3D = {
       x: b.pos.x + delta.x,
@@ -683,7 +700,7 @@ function mergeBlocksWithDelta(
     if (!isValidPos(newPos, b.type)) continue;
     const newKey = posKey(newPos);
     if (mergedBlocks.has(newKey)) continue;
-    placed.push({ key: newKey, pos: newPos, type: b.type, sourceGroupId: b.groupId });
+    placed.push({ key: newKey, pos: newPos, type: b.type, sourceGroupId: b.groupId, faceColors: b.faceColors });
     // Reserve the slot so subsequent incoming entries can't collide on the same key.
     mergedBlocks.set(newKey, { pos: newPos, type: b.type });
   }
@@ -704,9 +721,9 @@ function mergeBlocksWithDelta(
   const entries: Array<{ key: string; block: Block }> = [];
   for (const p of placed) {
     const remappedGid = p.sourceGroupId ? sourceGroupToNew.get(p.sourceGroupId) : undefined;
-    const newBlock: Block = remappedGid
-      ? { pos: p.pos, type: p.type, groupId: remappedGid }
-      : { pos: p.pos, type: p.type };
+    const newBlock: Block = { pos: p.pos, type: p.type };
+    if (remappedGid) newBlock.groupId = remappedGid;
+    if (p.faceColors) newBlock.faceColors = p.faceColors;
     mergedBlocks.set(p.key, newBlock);
     entries.push({ key: p.key, block: newBlock });
   }
@@ -842,7 +859,21 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   lastBuildAxis: null,
 
   freeBuild: false,
-  toggleFreeBuild: () => set((s) => ({ freeBuild: !s.freeBuild })),
+  toggleFreeBuild: () => set((s) => {
+    const next = !s.freeBuild;
+    // Disarm slab and paint when leaving free-build, since their toolbar buttons hide.
+    if (!next && (s.armedTool === "slab" || s.armedTool === "paint")) {
+      return { freeBuild: next, armedTool: "pointer" as ArmedTool };
+    }
+    // Disarm Y-twist pipe variants when leaving free-build (toolbar buttons hide).
+    if (!next && s.armedTool === "pipe" && s.pipeVariant != null && FREE_BUILD_PIPE_VARIANTS.has(s.pipeVariant)) {
+      return { freeBuild: next, armedTool: "pointer" as ArmedTool, pipeVariant: null };
+    }
+    return { freeBuild: next };
+  }),
+
+  paintColor: "#ff7f7f",
+  setPaintColor: (hex) => set({ paintColor: hex }),
 
   showGrid: true,
   showHints: true,
@@ -971,18 +1002,71 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   setCubeType: (cubeType) => set({ cubeType, armedTool: "cube", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
   setPipeVariant: (variant) => set({ pipeVariant: variant, cubeType: PIPE_VARIANT_CANONICAL[variant], armedTool: "pipe", portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null }),
   setPlacePort: (on) => set({ armedTool: on ? "port" : "pointer", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, ...(on ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null } : {}) }),
+  setArmedSlab: (on) => set({ armedTool: on ? "slab" : "pointer", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, ...(on ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null } : {}) }),
+  setArmedPaint: (on) => set({ armedTool: on ? "paint" : "pointer", pipeVariant: null, portWarning: null, hoveredGridPos: null, hoveredBlockType: null, hoveredInvalid: false, hoveredInvalidReason: null, hoveredReplace: false, ...(on ? { selectedKeys: new Set<string>(), selectedPortPositions: new Set<string>(), selectionPivot: null } : {}) }),
+  paintFace: (pos, faceKey, color) => set((state) => {
+    const key = posKey(pos);
+    const oldBlock = state.blocks.get(key);
+    if (!oldBlock) return state;
+    let nextOverrides: Record<string, string> = { ...(oldBlock.faceColors ?? {}) };
+    nextOverrides[faceKey] = color;
+
+    // Auto-promote: a Hadamard pipe whose yellow band is painted away from H_HEX
+    // no longer mediates the X↔Z basis switch on its walls — the geometric
+    // equivalent is a Y-twist (magenta seam, no band strip). Convert the type
+    // and drop the now-orphaned ":band" overrides since Y-twist has no band.
+    let newType: BlockType = oldBlock.type;
+    const isHadBand = isPipeType(oldBlock.type)
+      && oldBlock.type.endsWith("H")
+      && faceKey.endsWith(":band")
+      && color.toLowerCase() !== H_HEX.toLowerCase();
+    if (isHadBand) {
+      newType = (oldBlock.type.slice(0, -1) + "Y") as BlockType;
+      const stripped: Record<string, string> = {};
+      for (const [k, v] of Object.entries(nextOverrides)) {
+        if (!k.endsWith(":band")) stripped[k] = v;
+      }
+      nextOverrides = stripped;
+    }
+
+    const newBlock: Block = { ...oldBlock, type: newType, faceColors: nextOverrides };
+    const removed = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, key, oldBlock);
+    const { blocks, hiddenFaces } = doAdd(removed.blocks, state.spatialIndex, removed.hiddenFaces, key, newBlock);
+    const cmd: UndoCommand = { kind: "replace", key, oldBlock, newBlock };
+    return {
+      blocks,
+      hiddenFaces,
+      history: [...state.history, cmd].slice(-MAX_HISTORY),
+      future: [],
+    };
+  }),
   cycleArmedType: (dir) => {
     const s = get();
     if (s.mode !== "edit") return;
     const cur = currentPlaceableIndex(s.armedTool, s.cubeType, s.pipeVariant);
     const N = PLACEABLE_ORDER.length;
-    const next = cur === -1
+    let next = cur === -1
       ? (dir === 1 ? 0 : N - 1)
       : (((cur + dir) % N) + N) % N;
+    // Skip free-build-only placeables (slab, Y-twist pipe variants) when not in
+    // free-build mode. A bounded re-step loop lands on a legal placeable.
+    const isGated = (idx: number) => {
+      const p = PLACEABLE_ORDER[idx];
+      if (p.kind === "slab") return true;
+      if (p.kind === "pipe" && FREE_BUILD_PIPE_VARIANTS.has(p.variant)) return true;
+      return false;
+    };
+    if (!s.freeBuild) {
+      let guard = N;
+      while (isGated(next) && guard-- > 0) {
+        next = (((next + dir) % N) + N) % N;
+      }
+    }
     const target = PLACEABLE_ORDER[next];
     if (target.kind === "port") s.setPlacePort(true);
     else if (target.kind === "cube") s.setCubeType(target.cubeType);
-    else s.setPipeVariant(target.variant);
+    else if (target.kind === "pipe") s.setPipeVariant(target.variant);
+    else s.setArmedSlab(true);
   },
   cycleSelectedType: (dir, target) => {
     const state = get();
@@ -1001,11 +1085,19 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const pipeCoords: [number, number, number] = [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z];
           const currentVariant = PIPE_TYPE_TO_VARIANT[oldType];
 
+          // Y-twist variants are free-build only — exclude them from the cycle
+          // when the gate is off so R-key / arrow-key cycling can't land there.
+          const cycleVariants = s.freeBuild
+            ? PIPE_VARIANTS
+            : PIPE_VARIANTS.filter(v => !FREE_BUILD_PIPE_VARIANTS.has(v));
           const validVariants: PipeVariant[] = [];
           if (s.freeBuild) {
-            for (const v of PIPE_VARIANTS) validVariants.push(v);
+            // Free-build bypasses neighbor color/option validation; every
+            // cycleVariant (= all PIPE_VARIANTS, including Y-twist) is
+            // selectable.
+            for (const v of cycleVariants) validVariants.push(v);
           } else {
-            for (const v of PIPE_VARIANTS) {
+            for (const v of cycleVariants) {
               const candidate = VARIANT_AXIS_MAP[v][openAxis];
               const tmp = new Map(s.blocks);
               tmp.set(pipeKey, { pos: pipeBlock.pos, type: candidate });
@@ -1029,7 +1121,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           }
 
           const cycle: PipeVariant[] = [];
-          for (const v of PIPE_VARIANTS) {
+          for (const v of cycleVariants) {
             if (v === currentVariant || validVariants.includes(v)) cycle.push(v);
           }
           if (cycle.length <= 1) return s;
@@ -1049,6 +1141,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const newType = VARIANT_AXIS_MAP[nextVariant][openAxis];
           let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, pipeKey, pipeBlock));
+          // Spread preserves free-build face-paint overrides through pipe variant cycling.
           ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, pipeKey, { ...pipeBlock, type: newType }));
 
           const cmd: UndoCommand = { kind: "pipe-cycle", pipeKey, oldType, newType };
@@ -1166,7 +1259,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (existingBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, key, existingBlock));
         }
-        // Preserve `groupId` (and any future Block metadata) when cycling type.
+        // Spread preserves `groupId`, free-build face-paint overrides, and any
+        // other Block metadata when cycling type.
         newBlock = existingBlock
           ? { ...existingBlock, type: nextOpt.type }
           : { pos, type: nextOpt.type };
@@ -1382,6 +1476,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (!resolved) return state;
         blockType = resolved;
       }
+      // Slab tool overrides cubeType — armed-tool dictates the placed kind.
+      if (store.armedTool === "slab") {
+        blockType = "slab";
+      }
 
       const key = posKey(pos);
       const existing = state.blocks.get(key);
@@ -1397,9 +1495,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         return state;
       }
       if (hasBlockOverlap(pos, blockType, state.blocks, state.spatialIndex, existing ? key : undefined)) return state;
+      // Slabs and Y-twist pipes are free-build only; reject if the gate is off.
+      if (isSlabType(blockType) && !store.freeBuild) return state;
+      if (isYTwistPipe(blockType) && !store.freeBuild) return state;
       if (!store.freeBuild) {
         if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, state.blocks)) return state;
-        if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
+        if (!isPipeType(blockType) && blockType !== "Y" && !isSlabType(blockType) && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
         if (hasYCubePipeAxisConflict(blockType, pos, state.blocks)) return state;
       }
 
@@ -2866,6 +2967,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (!block) continue;
         const newType = flipBlockType(block.type);
         if (newType === block.type) continue;
+        // Spread preserves free-build face-paint overrides and groupId through F-flip.
         entries.push({ key, oldBlock: block, newBlock: { ...block, type: newType } });
       }
       if (entries.length === 0) return state;
@@ -3139,6 +3241,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (!old) continue;
         const newPos: Position3D = { x: old.pos.x + delta.x, y: old.pos.y + delta.y, z: old.pos.z + delta.z };
         if (!isValidPos(newPos, old.type)) return state;
+        // Spread preserves free-build face-paint overrides and groupId through drag/nudge.
         entries.push({ oldKey, oldBlock: old, newKey: posKey(newPos), newBlock: { ...old, pos: newPos } });
       }
       if (entries.length === 0) return state;
@@ -3936,8 +4039,13 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     const openAxis = oldBase.indexOf("O") as 0 | 1 | 2;
     const pipeCoords: [number, number, number] = [pipeBlock.pos.x, pipeBlock.pos.y, pipeBlock.pos.z];
 
-    // Compute all candidate pipe types for this axis (one per toolbar variant)
-    const allCandidates = PIPE_VARIANTS.map(v => VARIANT_AXIS_MAP[v][openAxis]);
+    // Compute all candidate pipe types for this axis (one per toolbar variant).
+    // Y-twist variants are free-build only — exclude them from the cycle when
+    // the gate is off so the R-key can't land there.
+    const cycleVariants = state.freeBuild
+      ? PIPE_VARIANTS
+      : PIPE_VARIANTS.filter(v => !FREE_BUILD_PIPE_VARIANTS.has(v));
+    const allCandidates = cycleVariants.map(v => VARIANT_AXIS_MAP[v][openAxis]);
 
     // Filter to valid candidates: both neighbor cubes must have valid options
     // In free build mode, all candidates are valid
@@ -3991,7 +4099,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       // Toggle pipe
       ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, pipeKey, pipeBlock));
-      // Preserve `groupId` (and any other Block metadata) when toggling pipe type.
+      // Spread preserves `groupId`, free-build face-paint overrides, and any
+      // other Block metadata when toggling pipe type.
       const newPipeBlock: Block = { ...pipeBlock, type: newPipeType };
       ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, pipeKey, newPipeBlock));
 

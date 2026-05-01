@@ -5,12 +5,14 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
 import {
   snapGroundPos,
+  snapGroundPosSlab,
   snapInPlane,
   hasBlockOverlap,
   hasCubeColorConflict,
   hasPipeColorConflict,
   hasYCubePipeAxisConflict,
   isValidPos,
+  isValidSlabPos,
   isPipeType,
   resolvePipeType,
   posKey,
@@ -106,6 +108,28 @@ export function GridPlane() {
       }
       return;
     }
+    // Paint tool: targets faces of existing blocks, never the empty plane.
+    if (store.armedTool === "paint") {
+      setHoveredGridPos(null);
+      return;
+    }
+    // Slab tool: XY-plane only — snap to the gap centre between 4 pipes
+    // (both x and y at 3k+1). Iso views are not supported for slabs in v1.
+    if (store.armedTool === "slab") {
+      if (viewMode.kind !== "persp") { setHoveredGridPos(null); return; }
+      const pos = snapGroundPosSlab(e.point.x, -e.point.z);
+      const key = posKey(pos);
+      const existing = store.blocks.get(key);
+      const isReplace = !!(existing && existing.type !== "slab");
+      if (existing && existing.type === "slab") {
+        setHoveredGridPos(null);
+      } else if (!isValidSlabPos(pos) || hasBlockOverlap(pos, "slab", store.blocks, store.spatialIndex, existing ? key : undefined)) {
+        setHoveredGridPos(pos, "slab", true, undefined, isReplace);
+      } else {
+        setHoveredGridPos(pos, "slab", false, undefined, isReplace);
+      }
+      return;
+    }
     const forPipe = store.pipeVariant !== null;
     const pos = snapForViewMode(viewMode, e.point, forPipe);
 
@@ -173,6 +197,15 @@ export function GridPlane() {
       store.addPortAt(pos);
       return;
     }
+    // Slab tool (perspective view, XY plane only).
+    if (store.armedTool === "slab") {
+      if (viewMode.kind !== "persp") return;
+      const pos = snapGroundPosSlab(e.point.x, -e.point.z);
+      addBlock(pos);
+      return;
+    }
+    // Paint tool: empty-plane click is a no-op.
+    if (store.armedTool === "paint") return;
     const forPipe = store.pipeVariant !== null;
     const pos = snapForViewMode(viewMode, e.point, forPipe);
     addBlock(pos);

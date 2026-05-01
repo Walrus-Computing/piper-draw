@@ -1,14 +1,19 @@
 import type { Block, Position3D } from "../types";
-import { isPipeType } from "../types";
+import { isPipeType, isSlabType, SLAB_TYPE, TQEC_TO_THREE_AXIS } from "../types";
 
 // ---------------------------------------------------------------------------
-// Hadamard direction equivalences (same as tqec's adjust_hadamards_direction)
+// Hadamard direction equivalences (same as tqec's adjust_hadamards_direction).
+// Y-twist pipes share the same colour-flip convention, so the same equivalences
+// apply with the H suffix swapped for Y.
 // ---------------------------------------------------------------------------
 
 export const HDM_EQUIVALENCES: Record<string, string> = {
   ZXOH: "XZOH",
   XOZH: "ZOXH",
   OXZH: "OZXH",
+  ZXOY: "XZOY",
+  XOZY: "ZOXY",
+  OXZY: "OZXY",
 };
 
 export const HDM_INVERSE: Record<string, string> = Object.fromEntries(
@@ -49,6 +54,9 @@ export function getAxesDirections(rot: number[][]): Record<string, number> {
  * Port of tqec's `rotate_block_kind_by_matrix`.
  */
 export function rotateBlockKind(kindStr: string, rot: number[][]): string {
+  // Slabs are rotation-invariant in XY (two horizontal squares), so the type
+  // never changes — only the position rotates around Z elsewhere.
+  if (kindStr === SLAB_TYPE) return kindStr;
   const isY = kindStr === "Y";
   // For Y blocks, use "Y-!" as the base for the rotation check
   const originalName = isY ? "Y-!" : kindStr.slice(0, 3);
@@ -75,9 +83,14 @@ export function rotateBlockKind(kindStr: string, rot: number[][]): string {
     return kindStr;
   }
 
-  // Hadamard: append 'H' if original had it
+  // Suffix preservation: H (Hadamard) or Y (free-build Y-twist). Both attach to
+  // pipes only; cube types never end in H or Y, and the bare "Y" block was
+  // already returned above. The geometry/colour-flip convention is the same
+  // for both, so rotation handles them identically.
   if (kindStr.endsWith("H")) {
     rotatedName += "H";
+  } else if (kindStr.endsWith("Y") && kindStr.length > 1) {
+    rotatedName += "Y";
   }
 
   return rotatedName.toUpperCase();
@@ -240,13 +253,17 @@ export function rotateBlockAroundAxis(
 ): Block {
   const rot = MATRICES[axis][operation];
   const isPipe = isPipeType(block.type);
+  // Slabs share the pipe-slot coord constraint (x,y ≡ 1 mod 3), so a Z-rotation
+  // around a cube pivot can land them at c ≡ 2 (mod 3). Treat them the same as
+  // pipes for the canonicalization step.
+  const needsCoordCanon = isPipe || isSlabType(block.type);
 
   let newType = rotateBlockKind(block.type, rot);
 
-  // Hadamard pipes: after rotation, if the pipe now points in the negative
-  // direction along its open axis, swap to the canonical equivalent so
-  // rendering stays consistent. Mirrors daeImport.ts behavior.
-  if (isPipe && newType.endsWith("H")) {
+  // Colour-flip pipes (Hadamard or Y-twist): after rotation, if the pipe now
+  // points in the negative direction along its axis, swap to the canonical
+  // equivalent so rendering stays consistent. Mirrors daeImport.ts behavior.
+  if (isPipe && (newType.endsWith("H") || newType.endsWith("Y"))) {
     const axesDirs = getAxesDirections(rot);
     const dirIdx = pipeDirectionIndex(newType);
     const dirLabel = ["X", "Y", "Z"][dirIdx];
@@ -255,12 +272,25 @@ export function rotateBlockAroundAxis(
     }
   }
 
-  const newPos = rotatePositionAroundAxis(block.pos, pivot, axis, operation, isPipe);
+  const newPos = rotatePositionAroundAxis(block.pos, pivot, axis, operation, needsCoordCanon);
 
-  // Spread `block` first so optional metadata (e.g. `groupId`) rides through;
-  // rotation only mutates pos and type. Without the spread, group membership
-  // would silently disappear on every rotate.
-  return { ...block, pos: newPos, type: newType as Block["type"] };
+  // Face-paint colors only rotate under a Z 90° (CCW/CW). Other axes/180°
+  // are not supported by the paint UI today, so face colors pass through
+  // unchanged in those cases. Spread `block` first so optional metadata
+  // (e.g. `groupId`) rides through; without it group membership would
+  // silently disappear on every rotate.
+  const result: Block = { ...block, pos: newPos, type: newType as Block["type"] };
+  if (block.faceColors) {
+    if (axis === "z" && operation !== "flip") {
+      const rotated = rotateFaceColorsAroundZ(block.faceColors, block.type, operation);
+      if (rotated) {
+        result.faceColors = rotated;
+      } else {
+        delete result.faceColors;
+      }
+    }
+  }
+  return result;
 }
 
 /** Backwards-compatible alias: rotate a position 90° around +Z. */
@@ -280,4 +310,82 @@ export function rotateBlockAroundZ(
   direction: RotationDirection,
 ): Block {
   return rotateBlockAroundAxis(block, pivot, "z", direction);
+}
+
+/**
+ * Z-axis 90° rotation permutes Three.js face indices on the X/Z axes
+ * (TQEC X↔Y, which `TQEC_TO_THREE_AXIS=[0,2,1]` maps to Three.js X↔Z).
+ * Y faces (indices 2, 3) are invariant.
+ *
+ * Three.js face order: 0=+X 1=-X 2=+Y 3=-Y 4=+Z 5=-Z.
+ *
+ * CCW (TQEC X→Y, Y→-X) maps to Three.js (+X→-Z, -X→+Z, +Z→+X, -Z→-X):
+ *   0→5, 1→4, 4→0, 5→1
+ * CW: inverse — 0→4, 1→5, 4→1, 5→0.
+ */
+const FACE_PERM_CCW = [5, 4, 2, 3, 0, 1] as const;
+const FACE_PERM_CW = [4, 5, 2, 3, 1, 0] as const;
+
+/**
+ * Rotate Hadamard strip suffix under a Z-rotation.
+ *
+ * `createPipeGeometry` uses `:below` for the strip at the negative end of the
+ * pipe's Three.js open axis and `:above` for the positive end. Under a
+ * Three.js Y-axis 90° rotation (= TQEC Z-rotation), a horizontal pipe's open
+ * axis swaps between Three.js X and Three.js Z, and one of those swaps also
+ * inverts the open-axis sign — so the physical "below" end can land at the
+ * new pipe's "above" end. Vertical pipes (Three.js openAxis=1) are
+ * rotation-invariant. The flip pattern (worked out by tracing object-space
+ * points through `(x,z) → (z,-x)` for CCW and the inverse for CW):
+ *
+ *   CCW: flips iff original Three.js openAxis === 0 (X-open in TQEC).
+ *   CW:  flips iff original Three.js openAxis === 2 (Z-open / Y-open in TQEC).
+ */
+function flipHStrip(strip: string, threeOpenAxis: 0 | 1 | 2, direction: RotationDirection): string {
+  if (strip === "band" || threeOpenAxis === 1) return strip;
+  const flip = direction === "ccw" ? threeOpenAxis === 0 : threeOpenAxis === 2;
+  if (!flip) return strip;
+  return strip === "below" ? "above" : strip === "above" ? "below" : strip;
+}
+
+function rotateFaceColorsAroundZ(
+  faceColors: Record<string, string>,
+  blockType: Block["type"],
+  direction: RotationDirection,
+): Record<string, string> | undefined {
+  const perm = direction === "ccw" ? FACE_PERM_CCW : FACE_PERM_CW;
+  let threeOpenAxis: 0 | 1 | 2 | null = null;
+  // Hadamard ("H") and Y-twist ("Y") pipes have per-strip face keys whose
+  // below/above suffix is sign-relative to the open-axis end of the pipe.
+  const isHadamard = isPipeType(blockType) && blockType.endsWith("H");
+  const isYTwist = isPipeType(blockType) && blockType.endsWith("Y") && blockType.length === 4;
+  if (isHadamard || isYTwist) {
+    const base = blockType.length > 3 ? blockType.slice(0, 3) : blockType;
+    const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
+    threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpen] as 0 | 1 | 2;
+  }
+  const out: Record<string, string> = {};
+  for (const [key, hex] of Object.entries(faceColors)) {
+    const colon = key.indexOf(":");
+    if (colon === -1) {
+      const idx = Number(key);
+      if (Number.isInteger(idx) && idx >= 0 && idx < 6) {
+        out[String(perm[idx])] = hex;
+      } else {
+        out[key] = hex;
+      }
+    } else {
+      const idx = Number(key.slice(0, colon));
+      const strip = key.slice(colon + 1);
+      const newStrip = threeOpenAxis !== null
+        ? flipHStrip(strip, threeOpenAxis, direction)
+        : strip;
+      if (Number.isInteger(idx) && idx >= 0 && idx < 6) {
+        out[`${perm[idx]}:${newStrip}`] = hex;
+      } else {
+        out[key] = hex;
+      }
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
 }
