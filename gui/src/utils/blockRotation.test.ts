@@ -452,35 +452,51 @@ describe("rotateFaceKeyedRecordAroundZ — generic face-keyed annotations", () =
   });
 });
 
-describe("rotateBlockAroundZ — face-annotation propagation", () => {
-  it("propagates faceCorrSurface through rotation with face-index permutation", () => {
+describe("rotateBlockAroundZ — corrSurfaceMarks (axis-keyed) propagation", () => {
+  it("permutes axis indices: 0 ↔ 2, 1 invariant", () => {
+    // Cube at origin with marks on axis 0 (X-perpendicular slice) and axis 2.
     const block: Block = {
       pos: { x: 0, y: 0, z: 0 },
       type: "XZZ",
-      faceCorrSurface: { "0": "X", "5": "Z" },
+      corrSurfaceMarks: { "0": "X", "2": "Z" },
     };
     const rotated = rotateBlockAroundZ(block, origin, "ccw");
-    expect(rotated.faceCorrSurface).toEqual({ "5": "X", "1": "Z" });
+    // Z-rotation swaps Three.js X (0) ↔ Z (2); Y (1) is invariant.
+    expect(rotated.corrSurfaceMarks).toEqual({ "2": "X", "0": "Z" });
   });
 
-  it("propagates faceColors and faceCorrSurface together with H/Y strip-flip semantics", () => {
+  it("Y axis (1) is invariant under Z-rotation for both directions", () => {
+    const block: Block = {
+      pos: { x: 0, y: 0, z: 0 },
+      type: "XZZ",
+      corrSurfaceMarks: { "1": "X" },
+    };
+    expect(rotateBlockAroundZ(block, origin, "ccw").corrSurfaceMarks).toEqual({ "1": "X" });
+    expect(rotateBlockAroundZ(block, origin, "cw").corrSurfaceMarks).toEqual({ "1": "X" });
+  });
+
+  it("propagates faceColors and corrSurfaceMarks together with H/Y strip-flip", () => {
+    // OZXH pipe: open axis = Three.js X (axis 0). Mark on axis 1 (Y wall),
+    // ":above" strip — TQEC half above the geometric center along open axis.
     const block: Block = {
       pos: { x: 1, y: 0, z: 0 },
       type: "OZXH",
-      faceColors: { "2:below": "#ff0000" },
-      faceCorrSurface: { "3:above": "X" },
+      faceColors: { "2:below": "#ff0000" }, // paint stays face-keyed
+      corrSurfaceMarks: { "1:above": "X" }, // corr-surface is axis-keyed
     };
     const rotated = rotateBlockAroundZ(block, origin, "ccw");
-    // Strips flip on threeOpen=0 (X-open) under CCW.
+    // CCW with threeOpen=0 (X-open) → strip suffix flips below↔above.
+    // faceColors face 2 (Y, invariant) keeps faceIdx, strip flips: below→above.
     expect(rotated.faceColors).toEqual({ "2:above": "#ff0000" });
-    expect(rotated.faceCorrSurface).toEqual({ "3:below": "X" });
+    // corrSurfaceMarks axis 1 invariant; strip above→below.
+    expect(rotated.corrSurfaceMarks).toEqual({ "1:below": "X" });
   });
 
-  it("four CCW rotations is identity on a block with marks", () => {
+  it("four CCW rotations is identity on a block with axis-keyed marks", () => {
     const block: Block = {
       pos: { x: 3, y: 0, z: 0 },
       type: "XZZ",
-      faceCorrSurface: { "0": "X", "4": "Z" },
+      corrSurfaceMarks: { "0": "X", "2": "Z" },
     };
     let cur = block;
     for (let i = 0; i < 4; i++) cur = rotateBlockAroundZ(cur, origin, "ccw");

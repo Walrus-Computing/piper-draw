@@ -109,7 +109,7 @@ skipIfNoCompression("encode/decode round-trip", () => {
     expect(await decodeSnapshotFromHash("#nothing-here")).toBe(null);
   });
 
-  it("round-trips faceColors and faceCorrSurface annotations", async () => {
+  it("round-trips faceColors and corrSurfaceMarks annotations", async () => {
     const blocks: Array<[string, Block]> = [
       [
         "0,0,0",
@@ -117,7 +117,7 @@ skipIfNoCompression("encode/decode round-trip", () => {
           pos: { x: 0, y: 0, z: 0 },
           type: "XZZ",
           faceColors: { "0": "#abcdef", "5": "#123456" },
-          faceCorrSurface: { "0": "X", "2": "Z" },
+          corrSurfaceMarks: { "0": "X", "2": "Z" },
         },
       ],
     ];
@@ -127,14 +127,14 @@ skipIfNoCompression("encode/decode round-trip", () => {
     expect(decoded).toEqual(original);
   });
 
-  it("round-trips faceCorrSurface with sub-strip keys on Hadamard pipes", async () => {
+  it("round-trips corrSurfaceMarks with sub-strip axis keys on Hadamard pipes", async () => {
     const blocks: Array<[string, Block]> = [
       [
         "1,0,0",
         {
           pos: { x: 1, y: 0, z: 0 },
           type: "OZXH",
-          faceCorrSurface: { "2:band": "X", "2:below": "Z", "2:above": "X" },
+          corrSurfaceMarks: { "1:band": "X", "1:below": "Z", "1:above": "X" },
         },
       ],
     ];

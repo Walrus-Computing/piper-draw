@@ -289,12 +289,12 @@ export function rotateBlockAroundAxis(
         delete result.faceColors;
       }
     }
-    if (block.faceCorrSurface) {
-      const rotated = rotateFaceCorrSurfaceAroundZ(block.faceCorrSurface, block.type, operation);
+    if (block.corrSurfaceMarks) {
+      const rotated = rotateAxisKeyedRecordAroundZ(block.corrSurfaceMarks, block.type, operation);
       if (rotated) {
-        result.faceCorrSurface = rotated;
+        result.corrSurfaceMarks = rotated;
       } else {
-        delete result.faceCorrSurface;
+        delete result.corrSurfaceMarks;
       }
     }
   }
@@ -359,8 +359,7 @@ function flipHStrip(strip: string, threeOpenAxis: 0 | 1 | 2, direction: Rotation
 /**
  * Generic Z-rotation for any face-keyed annotation `Record<string, T>`.
  * Permutes face indices, flips H/Y-twist below↔above strips per axis, and
- * passes values through unchanged. Used by `rotateFaceColorsAroundZ` (paint)
- * and `rotateFaceCorrSurfaceAroundZ` (manual correlation marks).
+ * passes values through unchanged. Used by `rotateFaceColorsAroundZ` (paint).
  */
 export function rotateFaceKeyedRecordAroundZ<T>(
   record: Record<string, T>,
@@ -412,10 +411,52 @@ function rotateFaceColorsAroundZ(
   return rotateFaceKeyedRecordAroundZ(faceColors, blockType, direction);
 }
 
-function rotateFaceCorrSurfaceAroundZ(
-  faceCorrSurface: Record<string, "X" | "Z">,
+/**
+ * Z-axis 90° rotation permutes Three.js axis indices: X (0) ↔ Z (2),
+ * Y (1) is invariant. Same permutation under both CCW and CW (rotation
+ * direction affects the position-vector signs, not the axis labels).
+ */
+const AXIS_PERM_Z_ROT = [2, 1, 0] as const;
+
+/**
+ * Generic Z-rotation for any axis-keyed annotation `Record<string, T>` —
+ * the per-axis schema for `corrSurfaceMarks`. Permutes the axis index
+ * (0 ↔ 2, Y invariant) and flips H/Y-twist `below ↔ above` strip suffixes
+ * the same way as the face-keyed helper. Bare strings that aren't valid
+ * axis-keys pass through unchanged (defensive — they shouldn't exist).
+ */
+export function rotateAxisKeyedRecordAroundZ<T>(
+  record: Record<string, T>,
   blockType: Block["type"],
   direction: RotationDirection,
-): Record<string, "X" | "Z"> | undefined {
-  return rotateFaceKeyedRecordAroundZ(faceCorrSurface, blockType, direction);
+): Record<string, T> | undefined {
+  let threeOpenAxis: 0 | 1 | 2 | null = null;
+  const isHadamard = isPipeType(blockType) && blockType.endsWith("H");
+  const isYTwist = isPipeType(blockType) && blockType.endsWith("Y") && blockType.length === 4;
+  if (isHadamard || isYTwist) {
+    const base = blockType.length > 3 ? blockType.slice(0, 3) : blockType;
+    const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
+    threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpen] as 0 | 1 | 2;
+  }
+  const out: Record<string, T> = {};
+  for (const [key, value] of Object.entries(record)) {
+    const colon = key.indexOf(":");
+    const axisStr = colon === -1 ? key : key.slice(0, colon);
+    const axis = Number(axisStr);
+    if (!Number.isInteger(axis) || axis < 0 || axis > 2) {
+      out[key] = value;
+      continue;
+    }
+    const newAxis = AXIS_PERM_Z_ROT[axis];
+    if (colon === -1) {
+      out[String(newAxis)] = value;
+    } else {
+      const strip = key.slice(colon + 1);
+      const newStrip = threeOpenAxis !== null
+        ? flipHStrip(strip, threeOpenAxis, direction)
+        : strip;
+      out[`${newAxis}:${newStrip}`] = value;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }

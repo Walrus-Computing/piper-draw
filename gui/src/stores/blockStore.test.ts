@@ -2377,16 +2377,16 @@ describe("blockStore", () => {
       s.addBlock({ x: 0, y: 0, z: 0 });
       s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "X");
       const block = useBlockStore.getState().blocks.get("0,0,0")!;
-      expect(block.faceCorrSurface).toEqual({ "0": "X" });
+      expect(block.corrSurfaceMarks).toEqual({ "0": "X" });
     });
 
-    it("toggling same basis on a marked face removes the mark", () => {
+    it("toggling same basis on a marked slice removes the mark", () => {
       const s = useBlockStore.getState();
       s.addBlock({ x: 0, y: 0, z: 0 });
       s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "X");
       s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", null);
       const block = useBlockStore.getState().blocks.get("0,0,0")!;
-      expect(block.faceCorrSurface).toBeUndefined();
+      expect(block.corrSurfaceMarks).toBeUndefined();
     });
 
     it("switching to other basis replaces the mark", () => {
@@ -2395,17 +2395,17 @@ describe("blockStore", () => {
       s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "X");
       s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "Z");
       const block = useBlockStore.getState().blocks.get("0,0,0")!;
-      expect(block.faceCorrSurface).toEqual({ "0": "Z" });
+      expect(block.corrSurfaceMarks).toEqual({ "0": "Z" });
     });
 
-    it("preserves marks on other faces when one is removed", () => {
+    it("preserves marks on other axes when one is removed", () => {
       const s = useBlockStore.getState();
       s.addBlock({ x: 0, y: 0, z: 0 });
       s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "X");
       s.markCorrSurface({ x: 0, y: 0, z: 0 }, "1", "Z");
       s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", null);
       const block = useBlockStore.getState().blocks.get("0,0,0")!;
-      expect(block.faceCorrSurface).toEqual({ "1": "Z" });
+      expect(block.corrSurfaceMarks).toEqual({ "1": "Z" });
     });
 
     it("no-ops on a missing block (no throw, no history entry)", () => {
@@ -2415,7 +2415,7 @@ describe("blockStore", () => {
       expect(useBlockStore.getState().history.length).toBe(before);
     });
 
-    it("no-ops on unmarking a face that has no mark (no history entry)", () => {
+    it("no-ops on unmarking a slice that has no mark (no history entry)", () => {
       const s = useBlockStore.getState();
       s.addBlock({ x: 0, y: 0, z: 0 });
       const before = useBlockStore.getState().history.length;
@@ -2430,7 +2430,7 @@ describe("blockStore", () => {
       s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "Z");
       useBlockStore.getState().undo();
       const block = useBlockStore.getState().blocks.get("0,0,0")!;
-      expect(block.faceCorrSurface).toEqual({ "0": "X" });
+      expect(block.corrSurfaceMarks).toEqual({ "0": "X" });
     });
 
     it("redo replays the mark", () => {
@@ -2440,10 +2440,10 @@ describe("blockStore", () => {
       useBlockStore.getState().undo();
       useBlockStore.getState().redo();
       const block = useBlockStore.getState().blocks.get("0,0,0")!;
-      expect(block.faceCorrSurface).toEqual({ "0": "X" });
+      expect(block.corrSurfaceMarks).toEqual({ "0": "X" });
     });
 
-    it("supports sub-strip face keys for H pipes", () => {
+    it("supports sub-strip axis keys for H pipes", () => {
       // Hydrate a Hadamard pipe directly so we don't depend on the placement
       // pipeline (which requires neighbouring cubes & exact coordinates that
       // change with future placement rules).
@@ -2455,10 +2455,10 @@ describe("blockStore", () => {
         hiddenFaces: new Map(),
       });
       const s = useBlockStore.getState();
-      s.markCorrSurface({ x: 1, y: 0, z: 0 }, "2:band", "X");
-      s.markCorrSurface({ x: 1, y: 0, z: 0 }, "2:below", "Z");
+      s.markCorrSurface({ x: 1, y: 0, z: 0 }, "1:band", "X");
+      s.markCorrSurface({ x: 1, y: 0, z: 0 }, "1:below", "Z");
       const after = useBlockStore.getState().blocks.get("1,0,0")!;
-      expect(after.faceCorrSurface).toEqual({ "2:band": "X", "2:below": "Z" });
+      expect(after.corrSurfaceMarks).toEqual({ "1:band": "X", "1:below": "Z" });
     });
   });
 
@@ -2524,7 +2524,7 @@ describe("blockStore", () => {
       expect(entry.faceColors).toEqual({ "0": "#abcdef" });
     });
 
-    it("faceCorrSurface survives copy/paste roundtrip", () => {
+    it("corrSurfaceMarks survives copy/paste roundtrip", () => {
       const s = useBlockStore.getState();
       s.addBlock({ x: 0, y: 0, z: 0 });
       s.markCorrSurface({ x: 0, y: 0, z: 0 }, "0", "X");
@@ -2532,7 +2532,7 @@ describe("blockStore", () => {
       s.copySelection();
       const clipboard = useBlockStore.getState().clipboard;
       const entry = Array.from(clipboard!.values())[0];
-      expect(entry.faceCorrSurface).toEqual({ "0": "X" });
+      expect(entry.corrSurfaceMarks).toEqual({ "0": "X" });
     });
   });
 });

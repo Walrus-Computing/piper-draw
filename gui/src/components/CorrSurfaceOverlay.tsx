@@ -2,17 +2,18 @@ import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
 import { X_COLOR, Z_COLOR } from "../types";
-import { emitSliceQuad, parseFaceKey } from "../utils/corrSurfaceGeom";
+import { emitSliceQuad, parseSliceKey } from "../utils/corrSurfaceGeom";
 
 /**
- * Renders manual correlation-surface marks (Block.faceCorrSurface) as red (X)
- * or blue (Z) internal centerline cross-sections — the same shape TQEC's
+ * Renders manual correlation-surface marks (Block.corrSurfaceMarks) as red
+ * (X) or blue (Z) internal centerline cross-sections — the same shape TQEC's
  * /api/flows returns for analyzed scenes. Mirrors FlowSurfaceOverlay's
  * palette so manual and TQEC-computed surfaces look identical.
  *
- * Returns null unless `corrSurfaceVizMode` is on. Marks are deduped per
- * (block, slice-axis, strip) so clicking +Y and -Y of the same pipe don't
- * render two overlapping quads — both clicks address the same Y-axis slice.
+ * Returns null unless `corrSurfaceVizMode` is on. Per-axis storage means each
+ * key in `corrSurfaceMarks` uniquely identifies one slice — no render-time
+ * dedupe needed (the click handler normalizes face index → axis at write
+ * time).
  */
 export function CorrSurfaceOverlay() {
   const corrSurfaceVizMode = useBlockStore((s) => s.corrSurfaceVizMode);
@@ -23,20 +24,13 @@ export function CorrSurfaceOverlay() {
     const xPositions: number[] = [];
     const zPositions: number[] = [];
     for (const block of blocks.values()) {
-      const marks = block.faceCorrSurface;
+      const marks = block.corrSurfaceMarks;
       if (!marks) continue;
-      // Dedupe by (slice-axis, strip): both +Y and -Y faces of the same pipe
-      // point at the same internal slice. The first mark in iteration order wins.
-      const seen = new Set<string>();
       for (const [key, basis] of Object.entries(marks)) {
-        const parsed = parseFaceKey(key);
+        const parsed = parseSliceKey(key);
         if (!parsed) continue;
-        const sliceAxis = parsed.faceIdx >> 1;
-        const dedupeKey = `${sliceAxis}:${parsed.strip ?? ""}`;
-        if (seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
         const target = basis === "X" ? xPositions : zPositions;
-        emitSliceQuad(target, block, parsed.faceIdx, parsed.strip);
+        emitSliceQuad(target, block, parsed.axis, parsed.strip);
       }
     }
     const build = (positions: number[]): THREE.BufferGeometry | null => {

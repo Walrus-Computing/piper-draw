@@ -79,7 +79,7 @@ export function exportBlocksToDae(blocks: Map<string, Block>): string {
     if (isSlabType(block.type)) droppedSlabs++;
     else if (isYTwistPipe(block.type)) droppedYTwist++;
     if (block.faceColors && Object.keys(block.faceColors).length > 0) droppedFaceColors++;
-    if (block.faceCorrSurface && Object.keys(block.faceCorrSurface).length > 0) droppedCorrMarks++;
+    if (block.corrSurfaceMarks && Object.keys(block.corrSurfaceMarks).length > 0) droppedCorrMarks++;
   }
   if (droppedSlabs > 0) {
     console.info(`[daeExport] dropped ${droppedSlabs} slab(s) — slabs are not represented in .dae`);

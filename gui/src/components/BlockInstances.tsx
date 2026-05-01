@@ -22,6 +22,7 @@ import {
   VARIANT_AXIS_MAP,
   deriveFaceKey,
 } from "../types";
+import { deriveSliceKey } from "../utils/corrSurfaceGeom";
 import type { BlockType, CubeType, Block, FaceMask, Position3D, PipeVariant } from "../types";
 import { posInActiveSlice } from "../utils/isoView";
 
@@ -278,9 +279,9 @@ function TypedInstances({
       // Slab tool: never face-adjacent — the placement target is the gap
       // between pipes on the ground plane, handled by GridPlane.
       store.setHoveredGridPos(null);
-    } else if (store.mode === "edit" && armed === "paint") {
-      // Paint tool: hover does nothing yet (face-level hover preview is
-      // out of scope for v1). Clicks paint the face under the cursor.
+    } else if (store.mode === "edit" && (armed === "paint" || armed === "corr-surface")) {
+      // Face-targeting tools: hover does nothing (no placement preview, no
+      // face-level hover preview yet). Clicks mark the face under the cursor.
       store.setHoveredGridPos(null);
     } else {
       // Place mode: check if we can replace the hovered block itself
@@ -407,14 +408,16 @@ function TypedInstances({
       if (armed === "corr-surface") {
         if (!e.face) return;
         const block = b[e.instanceId];
-        const key = deriveFaceKey(block, e.face.normal, e.point);
-        if (key === null) return;
-        // Click semantics (D8): same basis on a marked face → unmark; other
-        // basis → switch; unmarked → mark with the armed basis.
-        const cur = block.faceCorrSurface?.[key];
+        const axisKey = deriveSliceKey(block, e.face.normal, e.point);
+        if (axisKey === null) return;
+        // Click semantics: same basis on a marked slice → unmark; other
+        // basis → switch; unmarked → mark with the armed basis. +Y and -Y
+        // of the same pipe both address the same axis-key, so clicks on
+        // either side dedupe by construction.
+        const cur = block.corrSurfaceMarks?.[axisKey];
         const armedBasis = store.corrBasis;
         const next = cur === armedBasis ? null : armedBasis;
-        store.markCorrSurface(block.pos, key, next);
+        store.markCorrSurface(block.pos, axisKey, next);
         return;
       }
       // Place mode: try replacing the clicked block if the selected type
