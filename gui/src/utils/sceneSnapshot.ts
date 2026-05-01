@@ -21,6 +21,9 @@ const PORT_POSITION_RE = /^-?\d+,-?\d+,-?\d+$/;
 // setPortLabel actually accepts; rejects newlines/NUL that the validator
 // would otherwise let through.
 const LABEL_RE = /^[\x20-\x7E]+$/;
+// Group IDs are 8-char lowercase alphanumerics (newGroupId in groupSelectors).
+// Validate to reject hostile URL-share payloads with crafted groupId values.
+const GROUP_ID_RE = /^[0-9a-z]{8}$/;
 const VALID_BLOCK_TYPES: ReadonlySet<BlockType> = new Set<BlockType>([
   ...CUBE_TYPES,
   ...PIPE_TYPES,
@@ -67,6 +70,10 @@ export function isSceneSnapshotV1(value: unknown): value is SceneSnapshotV1 {
     if (!block.pos || typeof block.pos !== "object") return false;
     const { x, y, z } = block.pos;
     if (!isFiniteCoord(x) || !isFiniteCoord(y) || !isFiniteCoord(z)) return false;
+    if (block.groupId !== undefined) {
+      if (typeof block.groupId !== "string") return false;
+      if (!GROUP_ID_RE.test(block.groupId)) return false;
+    }
   }
   const seenLabels = new Set<string>();
   for (const entry of v.portMeta) {

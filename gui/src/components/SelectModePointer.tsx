@@ -133,8 +133,9 @@ export function SelectModePointer({
     if (!state) return;
     try {
       state.target.releasePointerCapture(state.pointerId);
-    } catch {
+    } catch (err) {
       // capture may have been released already
+      void err;
     }
     if (state.kind === "selection") {
       useBlockStore.getState().setDragState({ isDragging: false, delta: null, valid: true });
@@ -253,8 +254,9 @@ export function SelectModePointer({
       }
       try {
         target.setPointerCapture(e.pointerId);
-      } catch {
+      } catch (err) {
         // Some browsers reject capture during certain input phases
+        void err;
       }
     },
     [isSelectActive, threeStateRef, controlsRef],
@@ -356,8 +358,9 @@ export function SelectModePointer({
 
       try {
         state.target.releasePointerCapture(state.pointerId);
-      } catch {
+      } catch (err) {
         // already released
+        void err;
       }
       if (controlsRef.current) {
         controlsRef.current.enableRotate = restoreRotate();
@@ -401,7 +404,55 @@ export function SelectModePointer({
           canvasRect.height,
           screenRect,
         );
-        store.selectBlocks(keys, e.shiftKey, portKeys);
+        // Plain marquee fans out to entire groups when any member is touched.
+        // Alt+marquee suppresses the fan-out for a one-shot literal-set
+        // selection (drill-in escape hatch). Subsequent plain clicks/marquees
+        // re-engage the normal group-aware behaviour.
+        //
+        // Build a single groupId → members index in one O(scene) pass, then
+        // resolve fan-out in O(1) per touched key. Avoids the O(K * scene)
+        // pattern flagged by the perf review.
+        let finalKeys = keys;
+        if (!e.altKey) {
+          // Collect distinct groupIds present among touched keys.
+          const touchedGroups = new Set<string>();
+          for (const k of keys) {
+            const gid = blocks.get(k)?.groupId;
+            if (gid) touchedGroups.add(gid);
+          }
+          if (touchedGroups.size > 0) {
+            const membersByGroup = new Map<string, string[]>();
+            for (const [k, b] of blocks) {
+              if (b.groupId && touchedGroups.has(b.groupId)) {
+                let list = membersByGroup.get(b.groupId);
+                if (!list) {
+                  list = [];
+                  membersByGroup.set(b.groupId, list);
+                }
+                list.push(k);
+              }
+            }
+            const seen = new Set<string>();
+            const expanded: string[] = [];
+            for (const k of keys) {
+              if (seen.has(k)) continue;
+              const blk = blocks.get(k);
+              if (blk?.groupId) {
+                for (const m of membersByGroup.get(blk.groupId) ?? []) {
+                  if (!seen.has(m)) {
+                    expanded.push(m);
+                    seen.add(m);
+                  }
+                }
+              } else {
+                expanded.push(k);
+                seen.add(k);
+              }
+            }
+            finalKeys = expanded;
+          }
+        }
+        store.selectBlocks(finalKeys, e.shiftKey, portKeys);
         return;
       }
 

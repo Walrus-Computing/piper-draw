@@ -25,6 +25,13 @@ export type EditAction =
   | "holdToDelete"
   | "rotateCcw"
   | "rotateCw"
+  | "rotateXCcw"
+  | "rotateXCw"
+  | "rotateYCcw"
+  | "rotateYCw"
+  | "flipX"
+  | "flipY"
+  | "flipZ"
   | "undo"
   | "redo"
   | "stepForward"
@@ -34,7 +41,8 @@ export type EditAction =
   | "cyclePrev"
   | "cycleNext"
   | "copy"
-  | "paste";
+  | "paste"
+  | "groupToggle";
 
 export type ActionForMode = {
   build: BuildAction;
@@ -59,9 +67,12 @@ export const ACTIONS: { [M in Mode]: readonly ActionForMode[M][] } = {
   edit: [
     "selectAll", "deleteSelection", "clearSelection", "flipColors", "holdToDelete",
     "rotateCcw", "rotateCw",
+    "rotateXCcw", "rotateXCw", "rotateYCcw", "rotateYCw",
+    "flipX", "flipY", "flipZ",
     "undo", "redo", "stepForward", "stepBack", "nudgeUp", "nudgeDown",
     "cyclePrev", "cycleNext",
     "copy", "paste",
+    "groupToggle",
   ],
 };
 
@@ -87,6 +98,13 @@ export const ACTION_LABELS: { [M in Mode]: Record<ActionForMode[M], string> } = 
     holdToDelete: "Hold to delete on click",
     rotateCcw: "Rotate CCW (Z)",
     rotateCw: "Rotate CW (Z)",
+    rotateXCcw: "Rotate CCW (X)",
+    rotateXCw: "Rotate CW (X)",
+    rotateYCcw: "Rotate CCW (Y)",
+    rotateYCw: "Rotate CW (Y)",
+    flipX: "Flip 180° (X)",
+    flipY: "Flip 180° (Y)",
+    flipZ: "Flip 180° (Z)",
     undo: "Undo",
     redo: "Redo",
     stepForward: "Step forward (iso)",
@@ -97,6 +115,7 @@ export const ACTION_LABELS: { [M in Mode]: Record<ActionForMode[M], string> } = 
     cycleNext: "Next block / pipe",
     copy: "Copy selection",
     paste: "Paste",
+    groupToggle: "Group / ungroup selection",
   },
 };
 
@@ -122,6 +141,13 @@ export const DEFAULT_BINDINGS: { [M in Mode]: Record<ActionForMode[M], KeyBindin
     holdToDelete: { key: "x" },
     rotateCcw: { key: "r" },
     rotateCw: { key: "r", shift: true },
+    rotateXCcw: { key: "e" },
+    rotateXCw: { key: "e", shift: true },
+    rotateYCcw: { key: "y" },
+    rotateYCw: { key: "y", shift: true },
+    flipX: { key: "b" },
+    flipY: { key: "n" },
+    flipZ: { key: "m" },
     undo: { key: "z", ctrl: true },
     redo: { key: "z", ctrl: true, shift: true },
     stepForward: { key: "arrowup" },
@@ -132,6 +158,7 @@ export const DEFAULT_BINDINGS: { [M in Mode]: Record<ActionForMode[M], KeyBindin
     cycleNext: { key: "arrowright" },
     copy: { key: "c", ctrl: true },
     paste: { key: "v", ctrl: true },
+    groupToggle: { key: "g" },
   },
 };
 
@@ -275,8 +302,13 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: "piper-draw-keybinds",
-      version: 13,
-      migrate: () => ({ bindings: cloneDefaults() }),
+      version: 15,
+      // Pass-through: schema is additive across versions (new EditActions only
+      // get appended). The `merge` step below starts from `cloneDefaults()` and
+      // walks the action list, picking up any persisted user bindings for
+      // existing actions while letting new actions fall back to defaults — no
+      // need to wipe state on migration.
+      migrate: (persisted) => persisted as KeybindState,
       merge: (persisted, current) => {
         const p = persisted as Partial<KeybindState>;
         const cur = current as KeybindState;

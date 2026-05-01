@@ -27,6 +27,8 @@ import {
   computePipePos,
   inferPipeType,
   determineCubeOptions,
+  determineCubeOptionsWithPipeRetype,
+  computePipeRetypes,
   cameraAzimuthForDirection,
   canonicalCubeForPort,
   countAttachedPipes,
@@ -42,7 +44,78 @@ import {
   PLACEABLE_ORDER,
   currentPlaceableIndex,
 } from "../types";
-import { rotateBlockAroundZ } from "../utils/blockRotation";
+import { rotateBlockAroundAxis, type RotationAxis, type RotationOperation } from "../utils/blockRotation";
+import {
+  newGroupId as genNewGroupId,
+  selectionGroupClassification,
+  groupMembers as listGroupMembers,
+  withoutGroupId,
+} from "./groupSelectors";
+
+// Toast helper: lazy-resolves validationStore via dynamic import to avoid the
+// circular-import landmine (validationStore subscribes to blockStore at module
+// init time, so a static import here would hoist that subscription before
+// useBlockStore is defined and crash module load — surfaced by the test suite).
+function reportGroupToast(msg: string): void {
+  void import("./validationStore").then((m) => {
+    m.useValidationStore.getState().reportEphemeralError(msg);
+  });
+}
+
+/**
+ * Walk `blocksAfter` (post-delete state), find any group that just dropped
+ * below 2 members, and clear the lone survivor's `groupId`. Returns the
+ * possibly-mutated blocks Map plus the list of survivors-restorable on
+ * undo. Pure helper — called from any code path that deletes blocks
+ * (deleteSelected, removeBlock single-and-cascade) so the ≥2-member
+ * invariant holds across every delete path, not just the multi-select one.
+ */
+function applyAutoDissolve(
+  blocksAfter: Map<string, Block>,
+  deletedEntries: ReadonlyArray<{ key: string; block: Block }>,
+): { blocks: Map<string, Block>; autoDissolvedFor: Array<{ survivorKey: string; priorGroupId: string }> } {
+  const affectedGroupIds = new Set<string>();
+  for (const e of deletedEntries) {
+    if (e.block.groupId) affectedGroupIds.add(e.block.groupId);
+  }
+  const autoDissolvedFor: Array<{ survivorKey: string; priorGroupId: string }> = [];
+  if (affectedGroupIds.size === 0) return { blocks: blocksAfter, autoDissolvedFor };
+
+  const survivorsByGroup = new Map<string, string[]>();
+  for (const [k, b] of blocksAfter) {
+    if (b.groupId && affectedGroupIds.has(b.groupId)) {
+      let list = survivorsByGroup.get(b.groupId);
+      if (!list) {
+        list = [];
+        survivorsByGroup.set(b.groupId, list);
+      }
+      list.push(k);
+    }
+  }
+  let result = blocksAfter;
+  for (const gid of affectedGroupIds) {
+    const survivors = survivorsByGroup.get(gid) ?? [];
+    if (survivors.length === 0 || survivors.length >= 2) continue;
+    if (result === blocksAfter) result = new Map(blocksAfter);
+    for (const k of survivors) {
+      const b = result.get(k);
+      if (!b) continue;
+      result.set(k, withoutGroupId(b));
+      autoDissolvedFor.push({ survivorKey: k, priorGroupId: gid });
+    }
+  }
+  return { blocks: result, autoDissolvedFor };
+}
+
+function dissolveToast(autoDissolvedFor: ReadonlyArray<{ priorGroupId: string }>): void {
+  if (autoDissolvedFor.length === 0) return;
+  const n = new Set(autoDissolvedFor.map((a) => a.priorGroupId)).size;
+  reportGroupToast(
+    n === 1
+      ? "Group dissolved (only 1 member left)"
+      : `${n} groups dissolved (only 1 member each)`,
+  );
+}
 
 export type Mode = "edit" | "build";
 export type ArmedTool = "pointer" | "cube" | "pipe" | "port" | "paste";
@@ -92,10 +165,49 @@ export type BuildStep = {
 
 type UndoCommand =
   | { kind: "add"; key: string; block: Block }
-  | { kind: "remove"; key: string; block: Block }
-  | { kind: "bulk-remove"; entries: Array<{ key: string; block: Block }>; portKeys?: string[] }
+  | {
+      kind: "remove";
+      key: string;
+      block: Block;
+      /** Auto-dissolve survivors recorded so undo can restamp groupId. See bulk-remove. */
+      autoDissolvedFor?: Array<{ survivorKey: string; priorGroupId: string }>;
+    }
+  | {
+      kind: "bulk-remove";
+      entries: Array<{ key: string; block: Block }>;
+      portKeys?: string[];
+      /**
+       * Records groups that auto-dissolved as a side effect of this delete
+       * (because their surviving member count fell below 2). Each entry is a
+       * surviving block whose `groupId` was cleared during the delete; on
+       * undo, restore that block's `groupId` after re-adding the deleted
+       * blocks. See plan: Locked Edge-Case Behaviors → Block-lifecycle.
+       */
+      autoDissolvedFor?: Array<{ survivorKey: string; priorGroupId: string }>;
+    }
   | { kind: "bulk-add"; entries: Array<{ key: string; block: Block }> }
   | { kind: "bulk-move"; entries: Array<{ oldKey: string; oldBlock: Block; newKey: string; newBlock: Block }> }
+  | {
+      /**
+       * `groupSelected` (g-keystroke when ≥2 ungrouped selected) stamps a
+       * shared `newGroupId` onto each member. `prevGroupId` is recorded for
+       * audit symmetry though for v1 it is always `undefined` because the
+       * keystroke truth-table only triggers createGroup on all-ungrouped
+       * selections.
+       */
+      kind: "group-create";
+      entries: Array<{ key: string; prevGroupId: string | undefined }>;
+      newGroupId: string;
+    }
+  | {
+      /**
+       * `ungroupSelected` clears the `groupId` from every block where it
+       * matches the target. Each entry preserves the prior `groupId` so undo
+       * can restamp it.
+       */
+      kind: "ungroup";
+      entries: Array<{ key: string; groupId: string }>;
+    }
   | { kind: "clear"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask>; savedUndetermined: Map<string, UndeterminedCubeInfo> }
   | { kind: "load"; savedBlocks: Map<string, Block>; savedHiddenFaces: Map<string, FaceMask>; savedUndetermined: Map<string, UndeterminedCubeInfo>;
       savedPortMeta: Map<string, PortMeta>; savedPortPositions: Set<string>;
@@ -108,7 +220,8 @@ type UndoCommand =
   | { kind: "cube-cycle"; cubeKey: string; cubePos: Position3D;
       oldPlacedType: CubeType | "Y" | null; newPlacedType: CubeType | "Y" | null;
       oldPipes?: Array<{ key: string; oldType: PipeType; newType: PipeType }>;
-      oldUndetermined?: UndeterminedCubeInfo; newUndetermined?: UndeterminedCubeInfo }
+      oldUndetermined?: UndeterminedCubeInfo; newUndetermined?: UndeterminedCubeInfo;
+      undeterminedNeighbors?: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> }
   | { kind: "replace"; key: string; oldBlock: Block; newBlock: Block }
   | { kind: "add-port"; key: string }
   | { kind: "remove-port"; key: string }
@@ -119,7 +232,11 @@ type UndoCommand =
       prevSelectedKeys: string[]; nextSelectedKeys: string[] }
   | { kind: "edit-type-cycle"; key: string; pos: Position3D;
       oldBlock: Block | null; newBlock: Block | null;
-      oldPortMarker: boolean; newPortMarker: boolean };
+      oldPortMarker: boolean; newPortMarker: boolean;
+      oldPipes?: Array<{ key: string; oldType: PipeType; newType: PipeType }>;
+      prevSelectedKeys: string[]; nextSelectedKeys: string[];
+      prevSelectedPortPositions: string[]; nextSelectedPortPositions: string[];
+      undeterminedNeighbors?: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> };
 
 interface BlockStore {
   blocks: Map<string, Block>;
@@ -171,8 +288,10 @@ interface BlockStore {
   portPositions: Set<string>;
   /** Pivot used by rotateSelected, cached across subsequent rotations of the same
    * selection so that 4×CCW returns to identity even when the selection bbox is
-   * not cube-grid-aligned. Cleared whenever the selection itself changes. */
-  selectionPivot: Position3D | null;
+   * not cube-grid-aligned. Cleared whenever the selection itself changes. The
+   * axis is stored alongside so that switching rotation axis recomputes the
+   * pivot rather than reusing a stale one. */
+  selectionPivot: { pos: Position3D; axis: RotationAxis } | null;
 
   /** Clipboard populated by `copySelection`. Entries are normalized so the
    * selection's bounding-box min corner sits at (0,0,0). In-memory only —
@@ -288,9 +407,38 @@ interface BlockStore {
   clearSelection: () => void;
   deleteSelected: () => void;
   flipSelected: () => void;
-  rotateSelected: (direction: "cw" | "ccw", pivotOverride?: Position3D | null) => { ok: true } | { ok: false; reason: string };
+  rotateSelected: (axis: RotationAxis, operation: RotationOperation, pivotOverride?: Position3D | null) => { ok: true } | { ok: false; reason: string };
   selectAll: () => void;
   selectBlocks: (keys: string[], additive: boolean, portKeys?: string[]) => void;
+
+  /**
+   * Stamp a fresh `groupId` onto every block in `memberKeys`. Caller is
+   * responsible for ensuring all members are currently ungrouped — the
+   * `groupToggle` action's classifier enforces this. No-op if `memberKeys`
+   * has fewer than 2 entries (a one-block "group" is meaningless).
+   */
+  groupSelected: (memberKeys: ReadonlySet<string>) => void;
+
+  /**
+   * Clear the `groupId` from every block where it matches `groupId`. No-op
+   * if no blocks currently belong to this group.
+   */
+  ungroupSelected: (groupId: string) => void;
+
+  /**
+   * Toggle grouping based on the current selection's classification:
+   * - all-ungrouped (≥2 members)         → groupSelected
+   * - all-same-group / single-grouped    → ungroupSelected on that group
+   * - empty / single-ungrouped           → toast (no-op)
+   * - mixed-grouped-ungrouped            → toast (no-op)
+   * - multi-group                        → toast (no-op)
+   *
+   * Returns a transient hint string consumed by the toast surface, or null
+   * for the success cases. (Toast wiring goes through `validationStore`'s
+   * ephemeral-error channel for v1.)
+   */
+  groupToggle: () => void;
+
   togglePortSelection: (pos: Position3D, additive: boolean) => void;
   clearPortSelection: () => void;
   /** Allocate fresh `P1`, `P2`, ... labels for any port position missing an entry. Idempotent. */
@@ -427,6 +575,8 @@ function syncPortsAndPromote(
     if (curBlocks.has(key)) return;
     const canonical = canonicalCubeForPort(pos, curBlocks);
     if (!canonical) return;
+    // Auto-promoted blocks intentionally start ungrouped (`groupId` undefined).
+    // Group membership requires explicit user action via the `g` keystroke.
     const newBlock: Block = { pos, type: canonical };
     const r = doAdd(curBlocks, spatialIndex, curHidden, key, newBlock);
     curBlocks = r.blocks;
@@ -514,8 +664,16 @@ function mergeBlocksWithDelta(
   incoming: Map<string, Block>,
   delta: Position3D,
 ): Partial<BlockStore> | null {
+  // Two-phase paste (per Codex eng-review #4):
+  // Phase 1 — translate every incoming entry, drop invalid positions and
+  //           collisions; record surviving placements paired with their
+  //           original `sourceGroupId`.
+  // Phase 2 — for each source group with ≥2 surviving placements, mint a
+  //           fresh nanoid and stamp it as `groupId` on those blocks.
+  //           Source groups with fewer than 2 survivors leave their
+  //           remaining placement ungrouped (matches the dissolve-<2 rule).
   const mergedBlocks = new Map(state.blocks);
-  const entries: Array<{ key: string; block: Block }> = [];
+  const placed: Array<{ key: string; pos: Position3D; type: BlockType; sourceGroupId: string | undefined }> = [];
   for (const b of incoming.values()) {
     const newPos: Position3D = {
       x: b.pos.x + delta.x,
@@ -525,9 +683,32 @@ function mergeBlocksWithDelta(
     if (!isValidPos(newPos, b.type)) continue;
     const newKey = posKey(newPos);
     if (mergedBlocks.has(newKey)) continue;
-    const newBlock: Block = { pos: newPos, type: b.type };
-    mergedBlocks.set(newKey, newBlock);
-    entries.push({ key: newKey, block: newBlock });
+    placed.push({ key: newKey, pos: newPos, type: b.type, sourceGroupId: b.groupId });
+    // Reserve the slot so subsequent incoming entries can't collide on the same key.
+    mergedBlocks.set(newKey, { pos: newPos, type: b.type });
+  }
+  if (placed.length === 0) return null;
+
+  // Tally survivors per source group; allocate one fresh nanoid per group
+  // that has ≥2 survivors.
+  const groupSurvivorCount = new Map<string, number>();
+  for (const p of placed) {
+    if (!p.sourceGroupId) continue;
+    groupSurvivorCount.set(p.sourceGroupId, (groupSurvivorCount.get(p.sourceGroupId) ?? 0) + 1);
+  }
+  const sourceGroupToNew = new Map<string, string>();
+  for (const [src, count] of groupSurvivorCount) {
+    if (count >= 2) sourceGroupToNew.set(src, genNewGroupId());
+  }
+
+  const entries: Array<{ key: string; block: Block }> = [];
+  for (const p of placed) {
+    const remappedGid = p.sourceGroupId ? sourceGroupToNew.get(p.sourceGroupId) : undefined;
+    const newBlock: Block = remappedGid
+      ? { pos: p.pos, type: p.type, groupId: remappedGid }
+      : { pos: p.pos, type: p.type };
+    mergedBlocks.set(p.key, newBlock);
+    entries.push({ key: p.key, block: newBlock });
   }
   if (entries.length === 0) return null;
 
@@ -606,11 +787,16 @@ function computeDerivedFromBlocks(blocks: Map<string, Block>): {
 
 function readShowYDefects(): boolean {
   if (typeof localStorage === "undefined") return false;
+  let stored: string | null = null;
+  let failed = false;
   try {
-    return localStorage.getItem("piperDraw.showYDefects") === "1";
-  } catch {
-    return false;
+    stored = localStorage.getItem("piperDraw.showYDefects");
+  } catch (err) {
+    console.debug("piperDraw.showYDefects read failed (private mode?)", err);
+    failed = true;
   }
+  if (failed) return false;
+  return stored === "1";
 }
 
 export const useBlockStore = create<BlockStore>((set, get) => ({
@@ -816,26 +1002,30 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const currentVariant = PIPE_TYPE_TO_VARIANT[oldType];
 
           const validVariants: PipeVariant[] = [];
-          for (const v of PIPE_VARIANTS) {
-            const candidate = VARIANT_AXIS_MAP[v][openAxis];
-            const tmp = new Map(s.blocks);
-            tmp.set(pipeKey, { pos: pipeBlock.pos, type: candidate });
-            let ok = true;
-            for (const offset of [-1, 2]) {
-              const nc: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
-              nc[openAxis] += offset;
-              const nKey = posKey({ x: nc[0], y: nc[1], z: nc[2] });
-              const neighbor = tmp.get(nKey);
-              if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
-              const opts = determineCubeOptions(neighbor.pos, tmp);
-              const currentType = neighbor.type as CubeType;
-              if (opts.determined) {
-                if (opts.type !== currentType) { ok = false; break; }
-              } else if (!opts.options.includes(currentType)) {
-                ok = false; break;
+          if (s.freeBuild) {
+            for (const v of PIPE_VARIANTS) validVariants.push(v);
+          } else {
+            for (const v of PIPE_VARIANTS) {
+              const candidate = VARIANT_AXIS_MAP[v][openAxis];
+              const tmp = new Map(s.blocks);
+              tmp.set(pipeKey, { pos: pipeBlock.pos, type: candidate });
+              let ok = true;
+              for (const offset of [-1, 2]) {
+                const nc: [number, number, number] = [pipeCoords[0], pipeCoords[1], pipeCoords[2]];
+                nc[openAxis] += offset;
+                const nKey = posKey({ x: nc[0], y: nc[1], z: nc[2] });
+                const neighbor = tmp.get(nKey);
+                if (!neighbor || isPipeType(neighbor.type) || neighbor.type === "Y") continue;
+                const opts = determineCubeOptions(neighbor.pos, tmp);
+                const currentType = neighbor.type as CubeType;
+                if (opts.determined) {
+                  if (opts.type !== currentType) { ok = false; break; }
+                } else if (!opts.options.includes(currentType)) {
+                  ok = false; break;
+                }
               }
+              if (ok) validVariants.push(v);
             }
-            if (ok) validVariants.push(v);
           }
 
           const cycle: PipeVariant[] = [];
@@ -859,7 +1049,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const newType = VARIANT_AXIS_MAP[nextVariant][openAxis];
           let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, pipeKey, pipeBlock));
-          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, pipeKey, { pos: pipeBlock.pos, type: newType }));
+          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, pipeKey, { ...pipeBlock, type: newType }));
 
           const cmd: UndoCommand = { kind: "pipe-cycle", pipeKey, oldType, newType };
           return {
@@ -918,11 +1108,17 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           }
         }
       }
-      const result = determineCubeOptions(pos, s.blocks);
-      const cubeOpts = new Set<CubeType | "Y">(result.determined ? [result.type] : result.options);
-      // Y is a leaf: only valid with at most one attached (Z-open) pipe.
-      if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", pos, s.blocks)) cubeOpts.add("Y");
-      const portAllowed = pipeCount < 2;
+      let cubeOpts: Set<CubeType | "Y">;
+      let portAllowed: boolean;
+      if (s.freeBuild) {
+        cubeOpts = new Set<CubeType | "Y">([...CUBE_TYPES, "Y"]);
+        portAllowed = true;
+      } else {
+        cubeOpts = new Set<CubeType | "Y">(determineCubeOptionsWithPipeRetype(pos, s.blocks));
+        // Y is a leaf: only valid with at most one attached (Z-open) pipe.
+        if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", pos, s.blocks)) cubeOpts.add("Y");
+        portAllowed = pipeCount < 2;
+      }
 
       type Opt = { kind: "port" } | { kind: "cube"; type: CubeType | "Y" };
       const cycle: Opt[] = [];
@@ -970,11 +1166,80 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (existingBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, key, existingBlock));
         }
-        newBlock = { pos, type: nextOpt.type };
+        // Preserve `groupId` (and any future Block metadata) when cycling type.
+        newBlock = existingBlock
+          ? { ...existingBlock, type: nextOpt.type }
+          : { pos, type: nextOpt.type };
         ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, key, newBlock));
         // Placing a cube clears any explicit port marker at this position
         // (mirrors addBlock's behaviour when a cube lands on a user-placed port).
         newPortMarker = false;
+      }
+
+      // Retype adjacent pipes when target is a real cube (not Y / port) and not freeBuild.
+      // The wider gate already vetted feasibility; computePipeRetypes returns the actual
+      // updates (preserving Hadamard) or null on far-end conflict.
+      const pipeUpdates: Array<{ key: string; oldType: PipeType; newType: PipeType }> = [];
+      if (newBlock && nextOpt.kind === "cube" && nextOpt.type !== "Y" && !s.freeBuild) {
+        const retypes = computePipeRetypes(blocks, pos, nextOpt.type as CubeType);
+        if (retypes === null) {
+          // Defense-in-depth: revert spatial-index mutations from the just-applied
+          // cube placement and bail. (Shouldn't fire — wider gate vetted feasibility.)
+          doRemove(blocks, s.spatialIndex, hiddenFaces, key, newBlock);
+          if (existingBlock) {
+            doAdd(blocks, s.spatialIndex, hiddenFaces, key, existingBlock);
+          }
+          return s;
+        }
+        for (const pu of retypes) {
+          const pipeBlock = blocks.get(pu.key)!;
+          ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, pu.key, pipeBlock));
+          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, pu.key, { pos: pipeBlock.pos, type: pu.newType }));
+          pipeUpdates.push(pu);
+        }
+      }
+
+      // Refresh undeterminedCubes for far-end neighbours of retyped pipes (mirrors
+      // the pipe-cycle pattern at line ~1519 and the cube-cycle path in cycleBlock).
+      const newUndetermined = new Map(s.undeterminedCubes);
+      const undeterminedNeighbors: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> = [];
+      const seenNeighbors = new Set<string>();
+      for (const pu of pipeUpdates) {
+        const pipe = blocks.get(pu.key);
+        if (!pipe || !isPipeType(pipe.type)) continue;
+        const base = pipe.type.replace("H", "");
+        const openAxis = base.indexOf("O");
+        const pc: [number, number, number] = [pipe.pos.x, pipe.pos.y, pipe.pos.z];
+        for (const endOffset of [-1, 2]) {
+          const nc: [number, number, number] = [pc[0], pc[1], pc[2]];
+          nc[openAxis] += endOffset;
+          const nKey = posKey({ x: nc[0], y: nc[1], z: nc[2] });
+          if (nKey === key) continue;
+          if (seenNeighbors.has(nKey)) continue;
+          seenNeighbors.add(nKey);
+          const neighborBlock = blocks.get(nKey);
+          if (!neighborBlock || isPipeType(neighborBlock.type) || neighborBlock.type === "Y") continue;
+          const oldInfo = s.undeterminedCubes.get(nKey);
+          const opts = determineCubeOptions(neighborBlock.pos, blocks);
+          let newInfo: UndeterminedCubeInfo | undefined;
+          if (opts.determined) {
+            newInfo = undefined;
+          } else if (opts.options.length > 0) {
+            const idx = Math.max(0, opts.options.indexOf(neighborBlock.type as CubeType));
+            newInfo = { options: [...opts.options], currentIndex: idx };
+          } else {
+            newInfo = oldInfo;
+          }
+          const sameInfo =
+            (!oldInfo && !newInfo) ||
+            (!!oldInfo && !!newInfo &&
+              oldInfo.options.join(",") === newInfo.options.join(",") &&
+              oldInfo.currentIndex === newInfo.currentIndex);
+          if (sameInfo) continue;
+          undeterminedNeighbors.push({ key: nKey, oldInfo, newInfo });
+          if (newInfo) newUndetermined.set(nKey, newInfo);
+          else newUndetermined.delete(nKey);
+        }
       }
 
       const newPorts = new Set(s.portPositions);
@@ -994,6 +1259,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         kind: "edit-type-cycle", key, pos,
         oldBlock: existingBlock, newBlock,
         oldPortMarker, newPortMarker,
+        oldPipes: pipeUpdates.length > 0 ? pipeUpdates : undefined,
+        prevSelectedKeys: [...s.selectedKeys],
+        nextSelectedKeys: [...newSelectedKeys],
+        prevSelectedPortPositions: [...s.selectedPortPositions],
+        nextSelectedPortPositions: [...newSelectedPorts],
+        undeterminedNeighbors: undeterminedNeighbors.length > 0 ? undeterminedNeighbors : undefined,
       };
       return {
         blocks,
@@ -1001,6 +1272,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         portPositions: newPorts,
         selectedKeys: newSelectedKeys,
         selectedPortPositions: newSelectedPorts,
+        undeterminedCubes: newUndetermined,
         history: [...s.history, cmd].slice(-MAX_HISTORY),
         future: [],
       };
@@ -1131,7 +1403,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (hasYCubePipeAxisConflict(blockType, pos, state.blocks)) return state;
       }
 
-      const block: Block = { pos, type: blockType };
+      // For replacement (existing block at this pos), spread `existing` so
+      // optional metadata (e.g. groupId) rides through the type swap. For
+      // fresh placement, start with no metadata.
+      const block: Block = existing
+        ? { ...existing, pos, type: blockType }
+        : { pos, type: blockType };
 
       if (existing) {
         // Skip if same type — nothing to replace
@@ -1224,10 +1501,20 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const orphanedPortKeys = removedPipes.length > 0
           ? orphanedPortKeysFromRemovedPipes(removedPipes, blocks, state.portPositions)
           : [];
+        // Auto-dissolve: single-block delete must also restore the ≥2-member
+        // group invariant for any group the deleted block belonged to.
+        const dissolved = applyAutoDissolve(blocks, [{ key, block }]);
+        const finalBlocks = dissolved.blocks;
+        dissolveToast(dissolved.autoDissolvedFor);
         if (orphanedPortKeys.length === 0) {
-          const cmd: UndoCommand = { kind: "remove", key, block };
+          const cmd: UndoCommand = {
+            kind: "remove",
+            key,
+            block,
+            ...(dissolved.autoDissolvedFor.length > 0 ? { autoDissolvedFor: dissolved.autoDissolvedFor } : {}),
+          };
           return {
-            blocks,
+            blocks: finalBlocks,
             hiddenFaces,
             history: [...state.history, cmd].slice(-MAX_HISTORY),
             future: [],
@@ -1241,9 +1528,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           kind: "bulk-remove",
           entries: [{ key, block }],
           portKeys: orphanedPortKeys,
+          ...(dissolved.autoDissolvedFor.length > 0 ? { autoDissolvedFor: dissolved.autoDissolvedFor } : {}),
         };
         return {
-          blocks,
+          blocks: finalBlocks,
           hiddenFaces,
           portPositions,
           history: [...state.history, cmd].slice(-MAX_HISTORY),
@@ -1276,10 +1564,15 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         portPositions = new Set(state.portPositions);
         for (const k of orphanedPortKeys) portPositions.delete(k);
       }
+      // Auto-dissolve: junction-cube cascade can also drop a group below 2.
+      const dissolved = applyAutoDissolve(blocks, entries);
+      blocks = dissolved.blocks;
+      dissolveToast(dissolved.autoDissolvedFor);
       const cmd: UndoCommand = {
         kind: "bulk-remove",
         entries,
         ...(orphanedPortKeys.length > 0 ? { portKeys: orphanedPortKeys } : {}),
+        ...(dissolved.autoDissolvedFor.length > 0 ? { autoDissolvedFor: dissolved.autoDissolvedFor } : {}),
       };
       return {
         blocks,
@@ -1310,7 +1603,19 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
 
       if (cmd.kind === "remove") {
-        const { blocks, hiddenFaces } = doAdd(state.blocks, state.spatialIndex, state.hiddenFaces, cmd.key, cmd.block);
+        const added = doAdd(state.blocks, state.spatialIndex, state.hiddenFaces, cmd.key, cmd.block);
+        let blocks = added.blocks;
+        const hiddenFaces = added.hiddenFaces;
+        // Restore any survivor groupId that this remove auto-dissolved.
+        if (cmd.autoDissolvedFor && cmd.autoDissolvedFor.length > 0) {
+          const newBlocks = new Map(blocks);
+          for (const a of cmd.autoDissolvedFor) {
+            const b = newBlocks.get(a.survivorKey);
+            if (!b) continue;
+            newBlocks.set(a.survivorKey, { ...b, groupId: a.priorGroupId });
+          }
+          blocks = newBlocks;
+        }
         return {
           blocks,
           hiddenFaces,
@@ -1324,6 +1629,17 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
         for (const entry of cmd.entries) {
           ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, entry.key, entry.block));
+        }
+        // Restore any group-membership that was auto-cleared on the survivor
+        // when the original delete dropped the group below 2 members.
+        if (cmd.autoDissolvedFor && cmd.autoDissolvedFor.length > 0) {
+          const newBlocks = new Map(blocks);
+          for (const a of cmd.autoDissolvedFor) {
+            const b = newBlocks.get(a.survivorKey);
+            if (!b) continue;
+            newBlocks.set(a.survivorKey, { ...b, groupId: a.priorGroupId });
+          }
+          blocks = newBlocks;
         }
         let portPositions = state.portPositions;
         if (cmd.portKeys && cmd.portKeys.length > 0) {
@@ -1432,7 +1748,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const curDest = blocks.get(dtc.key);
           if (curDest) {
             ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, dtc.key, curDest));
-            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, dtc.key, { pos: curDest.pos, type: dtc.prevType }));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, dtc.key, { ...curDest, type: dtc.prevType }));
           }
         }
         // Restore dest undetermined state
@@ -1492,14 +1808,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const pipeBlock = blocks.get(cmd.pipeKey);
         if (pipeBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cmd.pipeKey, pipeBlock));
-          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.pipeKey, { pos: pipeBlock.pos, type: cmd.oldType }));
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.pipeKey, { ...pipeBlock, type: cmd.oldType }));
         }
         if (cmd.retyped) {
           for (const rd of cmd.retyped) {
             const cubeBlock = blocks.get(rd.cubeKey);
             if (cubeBlock) {
               ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, rd.cubeKey, cubeBlock));
-              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, rd.cubeKey, { pos: cubeBlock.pos, type: rd.oldType }));
+              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, rd.cubeKey, { ...cubeBlock, type: rd.oldType }));
             }
             if (rd.oldUndetermined) newUndetermined.set(rd.cubeKey, rd.oldUndetermined);
             else newUndetermined.delete(rd.cubeKey);
@@ -1540,9 +1856,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (cubeBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, cubeBlock));
         }
-        // Re-add old cube
+        // Re-add old cube — preserve `groupId` from the (now-removed) current cube.
         if (cmd.oldPlacedType) {
-          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, { pos: cmd.cubePos, type: cmd.oldPlacedType }));
+          const restored: Block = cubeBlock
+            ? { ...cubeBlock, type: cmd.oldPlacedType }
+            : { pos: cmd.cubePos, type: cmd.oldPlacedType };
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, restored));
         }
         // Revert pipe updates
         if (cmd.oldPipes) {
@@ -1550,13 +1869,20 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
             const pb = blocks.get(pu.key);
             if (pb) {
               ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, pu.key, pb));
-              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, pu.key, { pos: pb.pos, type: pu.oldType }));
+              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, pu.key, { ...pb, type: pu.oldType }));
             }
           }
         }
         // Restore undetermined state
         if (cmd.oldUndetermined) newUndetermined.set(cmd.cubeKey, cmd.oldUndetermined);
         else newUndetermined.delete(cmd.cubeKey);
+        // Restore neighbour undetermined entries that were refreshed by the cycle
+        if (cmd.undeterminedNeighbors) {
+          for (const u of cmd.undeterminedNeighbors) {
+            if (u.oldInfo) newUndetermined.set(u.key, { ...u.oldInfo, options: [...u.oldInfo.options] });
+            else newUndetermined.delete(u.key);
+          }
+        }
         return { blocks, hiddenFaces, history: newHistory, future: [cmd, ...state.future].slice(0, MAX_HISTORY), undeterminedCubes: newUndetermined, hoveredGridPos: null };
       }
 
@@ -1580,12 +1906,33 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (cmd.oldBlock) {
           ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.key, cmd.oldBlock));
         }
+        // Revert pipe retypes
+        if (cmd.oldPipes) {
+          for (const pu of cmd.oldPipes) {
+            const pb = blocks.get(pu.key);
+            if (pb) {
+              ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, pu.key, pb));
+              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, pu.key, { ...pb, type: pu.oldType }));
+            }
+          }
+        }
         const newPorts = new Set(state.portPositions);
         if (cmd.oldPortMarker) newPorts.add(cmd.key); else newPorts.delete(cmd.key);
+        // Restore neighbour undetermined entries
+        const newUndetermined = new Map(state.undeterminedCubes);
+        if (cmd.undeterminedNeighbors) {
+          for (const u of cmd.undeterminedNeighbors) {
+            if (u.oldInfo) newUndetermined.set(u.key, { ...u.oldInfo, options: [...u.oldInfo.options] });
+            else newUndetermined.delete(u.key);
+          }
+        }
         return {
           blocks,
           hiddenFaces,
           portPositions: newPorts,
+          selectedKeys: new Set(cmd.prevSelectedKeys),
+          selectedPortPositions: new Set(cmd.prevSelectedPortPositions),
+          undeterminedCubes: newUndetermined,
           history: newHistory,
           future: [cmd, ...state.future].slice(0, MAX_HISTORY),
           hoveredGridPos: null,
@@ -1655,6 +2002,40 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         };
       }
 
+      if (cmd.kind === "group-create") {
+        // Undo: restore each block's prior groupId (typically undefined).
+        const newBlocks = new Map(state.blocks);
+        for (const e of cmd.entries) {
+          const b = newBlocks.get(e.key);
+          if (!b) continue;
+          if (e.prevGroupId === undefined) {
+            newBlocks.set(e.key, withoutGroupId(b));
+          } else {
+            newBlocks.set(e.key, { ...b, groupId: e.prevGroupId });
+          }
+        }
+        return {
+          blocks: newBlocks,
+          history: newHistory,
+          future: [cmd, ...state.future].slice(0, MAX_HISTORY),
+        };
+      }
+
+      if (cmd.kind === "ungroup") {
+        // Undo: restore each block's prior groupId.
+        const newBlocks = new Map(state.blocks);
+        for (const e of cmd.entries) {
+          const b = newBlocks.get(e.key);
+          if (!b) continue;
+          newBlocks.set(e.key, { ...b, groupId: e.groupId });
+        }
+        return {
+          blocks: newBlocks,
+          history: newHistory,
+          future: [cmd, ...state.future].slice(0, MAX_HISTORY),
+        };
+      }
+
       // cmd.kind === "clear" — restore saved state, rebuild spatial index
       const newIndex = buildSpatialIndex(cmd.savedBlocks);
       return {
@@ -1686,7 +2067,19 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
 
       if (cmd.kind === "remove") {
-        const { blocks, hiddenFaces } = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, cmd.key, cmd.block);
+        const removed = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, cmd.key, cmd.block);
+        let blocks = removed.blocks;
+        const hiddenFaces = removed.hiddenFaces;
+        // Re-clear any survivor groupId that the original remove auto-dissolved.
+        if (cmd.autoDissolvedFor && cmd.autoDissolvedFor.length > 0) {
+          const newBlocks = new Map(blocks);
+          for (const a of cmd.autoDissolvedFor) {
+            const b = newBlocks.get(a.survivorKey);
+            if (!b) continue;
+            newBlocks.set(a.survivorKey, withoutGroupId(b));
+          }
+          blocks = newBlocks;
+        }
         return {
           blocks,
           hiddenFaces,
@@ -1700,6 +2093,16 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
         for (const entry of cmd.entries) {
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, entry.key, entry.block));
+        }
+        // Re-clear any survivor groupId that the original delete auto-dissolved.
+        if (cmd.autoDissolvedFor && cmd.autoDissolvedFor.length > 0) {
+          const newBlocks = new Map(blocks);
+          for (const a of cmd.autoDissolvedFor) {
+            const b = newBlocks.get(a.survivorKey);
+            if (!b) continue;
+            newBlocks.set(a.survivorKey, withoutGroupId(b));
+          }
+          blocks = newBlocks;
         }
         let portPositions = state.portPositions;
         if (cmd.portKeys && cmd.portKeys.length > 0) {
@@ -1817,7 +2220,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const curDest = blocks.get(dtc.key);
           if (curDest) {
             ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, dtc.key, curDest));
-            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, dtc.key, { pos: curDest.pos, type: dtc.newType }));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, dtc.key, { ...curDest, type: dtc.newType }));
           }
         }
         // Re-apply dest determination (existing dest became determined)
@@ -1866,14 +2269,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const pipeBlock = blocks.get(cmd.pipeKey);
         if (pipeBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cmd.pipeKey, pipeBlock));
-          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.pipeKey, { pos: pipeBlock.pos, type: cmd.newType }));
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.pipeKey, { ...pipeBlock, type: cmd.newType }));
         }
         if (cmd.retyped) {
           for (const rd of cmd.retyped) {
             const cubeBlock = blocks.get(rd.cubeKey);
             if (cubeBlock) {
               ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, rd.cubeKey, cubeBlock));
-              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, rd.cubeKey, { pos: cubeBlock.pos, type: rd.newType }));
+              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, rd.cubeKey, { ...cubeBlock, type: rd.newType }));
             }
             if (rd.newUndetermined) newUndetermined.set(rd.cubeKey, rd.newUndetermined);
             else newUndetermined.delete(rd.cubeKey);
@@ -1891,22 +2294,32 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (cubeBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, cubeBlock));
         }
-        // Re-add new cube (unless cycling ended at the port slot)
+        // Re-add new cube (unless cycling ended at the port slot) — preserve `groupId`.
         if (cmd.newPlacedType) {
-          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, { pos: cmd.cubePos, type: cmd.newPlacedType }));
+          const restored: Block = cubeBlock
+            ? { ...cubeBlock, type: cmd.newPlacedType }
+            : { pos: cmd.cubePos, type: cmd.newPlacedType };
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, restored));
         }
         if (cmd.oldPipes) {
           for (const pu of cmd.oldPipes) {
             const pb = blocks.get(pu.key);
             if (pb) {
               ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, pu.key, pb));
-              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, pu.key, { pos: pb.pos, type: pu.newType }));
+              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, pu.key, { ...pb, type: pu.newType }));
             }
           }
         }
         // Restore undetermined state
         if (cmd.newUndetermined) newUndetermined.set(cmd.cubeKey, cmd.newUndetermined);
         else newUndetermined.delete(cmd.cubeKey);
+        // Re-apply neighbour undetermined refresh from the original cycle
+        if (cmd.undeterminedNeighbors) {
+          for (const u of cmd.undeterminedNeighbors) {
+            if (u.newInfo) newUndetermined.set(u.key, { ...u.newInfo, options: [...u.newInfo.options] });
+            else newUndetermined.delete(u.key);
+          }
+        }
         return { blocks, hiddenFaces, history: [...state.history, cmd], future: newFuture, undeterminedCubes: newUndetermined, hoveredGridPos: null };
       }
 
@@ -1930,12 +2343,33 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (cmd.newBlock) {
           ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cmd.key, cmd.newBlock));
         }
+        // Re-apply pipe retypes
+        if (cmd.oldPipes) {
+          for (const pu of cmd.oldPipes) {
+            const pb = blocks.get(pu.key);
+            if (pb) {
+              ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, pu.key, pb));
+              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, pu.key, { ...pb, type: pu.newType }));
+            }
+          }
+        }
         const newPorts = new Set(state.portPositions);
         if (cmd.newPortMarker) newPorts.add(cmd.key); else newPorts.delete(cmd.key);
+        // Re-apply neighbour undetermined refresh
+        const newUndetermined = new Map(state.undeterminedCubes);
+        if (cmd.undeterminedNeighbors) {
+          for (const u of cmd.undeterminedNeighbors) {
+            if (u.newInfo) newUndetermined.set(u.key, { ...u.newInfo, options: [...u.newInfo.options] });
+            else newUndetermined.delete(u.key);
+          }
+        }
         return {
           blocks,
           hiddenFaces,
           portPositions: newPorts,
+          selectedKeys: new Set(cmd.nextSelectedKeys),
+          selectedPortPositions: new Set(cmd.nextSelectedPortPositions),
+          undeterminedCubes: newUndetermined,
           history: [...state.history, cmd],
           future: newFuture,
           hoveredGridPos: null,
@@ -2002,6 +2436,36 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           hoveredGridPos: null,
           selectedKeys: new Set(cmd.nextSelectedKeys),
           selectionPivot: null,
+        };
+      }
+
+      if (cmd.kind === "group-create") {
+        // Redo: re-stamp newGroupId onto each entry's block.
+        const newBlocks = new Map(state.blocks);
+        for (const e of cmd.entries) {
+          const b = newBlocks.get(e.key);
+          if (!b) continue;
+          newBlocks.set(e.key, { ...b, groupId: cmd.newGroupId });
+        }
+        return {
+          blocks: newBlocks,
+          history: [...state.history, cmd],
+          future: newFuture,
+        };
+      }
+
+      if (cmd.kind === "ungroup") {
+        // Redo: clear groupId on each entry's block.
+        const newBlocks = new Map(state.blocks);
+        for (const e of cmd.entries) {
+          const b = newBlocks.get(e.key);
+          if (!b) continue;
+          newBlocks.set(e.key, withoutGroupId(b));
+        }
+        return {
+          blocks: newBlocks,
+          history: [...state.history, cmd],
+          future: newFuture,
         };
       }
 
@@ -2104,7 +2568,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const b = state.blocks.get(key);
         if (!b) continue;
         const pos: Position3D = { x: b.pos.x - minX, y: b.pos.y - minY, z: b.pos.z - minZ };
-        clipboard.set(posKey(pos), { pos, type: b.type });
+        // Preserve `groupId` so paste can re-stamp a fresh nanoid per source
+        // group (see commitPasteReducer's two-phase paste). Spreading `b` also
+        // carries any future Block metadata fields automatically.
+        clipboard.set(posKey(pos), { ...b, pos });
       }
       if (clipboard.size === 0) return state;
       return { clipboard };
@@ -2233,6 +2700,83 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       return { selectedPortPositions: new Set<string>() };
     }),
 
+  // -------------------------------------------------------------------------
+  // Group actions — `groupId?: string` rides on each Block as metadata, so
+  // existing block mutators (rotate, flip, bulk-move, etc.) preserve group
+  // membership via spread `{ ...block, type: X }`. Group create/dissolve has
+  // its own UndoCommand kinds.
+  // -------------------------------------------------------------------------
+
+  groupSelected: (memberKeys) =>
+    set((state) => {
+      if (memberKeys.size < 2) return state;
+      const newGroupId = genNewGroupId();
+      const entries: Array<{ key: string; prevGroupId: string | undefined }> = [];
+      const newBlocks = new Map(state.blocks);
+      for (const key of memberKeys) {
+        const block = newBlocks.get(key);
+        if (!block) continue;
+        entries.push({ key, prevGroupId: block.groupId });
+        newBlocks.set(key, { ...block, groupId: newGroupId });
+      }
+      if (entries.length === 0) return state;
+      const cmd: UndoCommand = { kind: "group-create", entries, newGroupId };
+      return {
+        blocks: newBlocks,
+        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+      };
+    }),
+
+  ungroupSelected: (groupId) =>
+    set((state) => {
+      const memberKeys = listGroupMembers(state.blocks, groupId);
+      if (memberKeys.length === 0) return state;
+      const entries: Array<{ key: string; groupId: string }> = [];
+      const newBlocks = new Map(state.blocks);
+      for (const key of memberKeys) {
+        const block = newBlocks.get(key);
+        if (!block) continue;
+        entries.push({ key, groupId });
+        newBlocks.set(key, withoutGroupId(block));
+      }
+      if (entries.length === 0) return state;
+      const cmd: UndoCommand = { kind: "ungroup", entries };
+      return {
+        blocks: newBlocks,
+        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        future: [],
+      };
+    }),
+
+  groupToggle: () => {
+    const state = get();
+    const cls = selectionGroupClassification(state.blocks, state.selectedKeys);
+    switch (cls.kind) {
+      case "empty":
+      case "single-ungrouped":
+        reportGroupToast("Select 2+ blocks to group");
+        return;
+      case "single-grouped":
+      case "all-same-group":
+        get().ungroupSelected(cls.groupId);
+        return;
+      case "all-ungrouped":
+        get().groupSelected(state.selectedKeys);
+        return;
+      case "mixed-grouped-ungrouped":
+        reportGroupToast(
+          "Selection mixes grouped and ungrouped blocks. Ungroup first or select only ungrouped.",
+        );
+        return;
+      case "multi-group":
+        reportGroupToast(
+          "Selection spans multiple groups. Ungroup first.",
+        );
+        return;
+    }
+  },
+
   deleteSelected: () =>
     set((state) => {
       if (state.selectedKeys.size === 0 && state.selectedPortPositions.size === 0) return state;
@@ -2284,11 +2828,22 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         }
       }
       if (entries.length === 0 && portKeys.length === 0) return state;
-      const cmd: UndoCommand = { kind: "bulk-remove", entries, ...(portKeys.length > 0 ? { portKeys } : {}) };
+
+      const dissolved = applyAutoDissolve(blocks, entries);
+      const blocksAfterDissolve = dissolved.blocks;
+      const autoDissolvedFor = dissolved.autoDissolvedFor;
+      dissolveToast(autoDissolvedFor);
+
+      const cmd: UndoCommand = {
+        kind: "bulk-remove",
+        entries,
+        ...(portKeys.length > 0 ? { portKeys } : {}),
+        ...(autoDissolvedFor.length > 0 ? { autoDissolvedFor } : {}),
+      };
       const newUndetermined = new Map(state.undeterminedCubes);
       for (const { key } of entries) newUndetermined.delete(key);
       return {
-        blocks,
+        blocks: blocksAfterDissolve,
         hiddenFaces,
         portPositions,
         history: [...state.history, cmd].slice(-MAX_HISTORY),
@@ -2311,7 +2866,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (!block) continue;
         const newType = flipBlockType(block.type);
         if (newType === block.type) continue;
-        entries.push({ key, oldBlock: block, newBlock: { pos: block.pos, type: newType } });
+        entries.push({ key, oldBlock: block, newBlock: { ...block, type: newType } });
       }
       if (entries.length === 0) return state;
 
@@ -2367,27 +2922,27 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       };
     }),
 
-  rotateSelected: (direction, pivotOverride) => {
+  rotateSelected: (axis, operation, pivotOverride) => {
     const state = get();
     if (state.selectedKeys.size === 0) return { ok: true };
 
     // Determine pivot. Priority:
-    //   1. Explicit override (user hovered a selected block while pressing R).
-    //   2. Cached selectionPivot from a prior rotation of the same selection —
-    //      this is what makes 4×CCW return to identity even when the selection
-    //      bbox isn't cube-grid-aligned (bbox swaps X/Y spans on rotation, so
-    //      recomputing each time would drift).
-    //   3. Single-block selection: that block's position.
-    //   4. Multi-block selection: bbox XY center, snapped to the cube grid.
+    //   1. Explicit override (user hovered a selected block while pressing the rotate key).
+    //   2. Cached selectionPivot from a prior rotation of the same selection AND
+    //      same axis. Reusing across axes would inherit a z-coord that wasn't
+    //      meaningful for Z-only rotation (and still isn't for X/Y) — recompute
+    //      when axis changes.
+    //   3. Single-block selection: that block's position, snapped to cube grid.
+    //   4. Multi-block selection: bbox center on all 3 axes, snapped to cube grid.
     let pivot: Position3D;
     if (pivotOverride) {
       pivot = {
         x: Math.round(pivotOverride.x / 3) * 3,
         y: Math.round(pivotOverride.y / 3) * 3,
-        z: pivotOverride.z,
+        z: Math.round(pivotOverride.z / 3) * 3,
       };
-    } else if (state.selectionPivot) {
-      pivot = state.selectionPivot;
+    } else if (state.selectionPivot && state.selectionPivot.axis === axis) {
+      pivot = state.selectionPivot.pos;
     } else if (state.selectedKeys.size === 1) {
       const onlyKey = state.selectedKeys.values().next().value as string;
       const onlyBlock = state.blocks.get(onlyKey);
@@ -2395,24 +2950,25 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       pivot = {
         x: Math.round(onlyBlock.pos.x / 3) * 3,
         y: Math.round(onlyBlock.pos.y / 3) * 3,
-        z: onlyBlock.pos.z,
+        z: Math.round(onlyBlock.pos.z / 3) * 3,
       };
     } else {
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      let zSample = 0;
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
       for (const key of state.selectedKeys) {
         const block = state.blocks.get(key);
         if (!block) continue;
         if (block.pos.x < minX) minX = block.pos.x;
         if (block.pos.y < minY) minY = block.pos.y;
+        if (block.pos.z < minZ) minZ = block.pos.z;
         if (block.pos.x > maxX) maxX = block.pos.x;
         if (block.pos.y > maxY) maxY = block.pos.y;
-        zSample = block.pos.z;
+        if (block.pos.z > maxZ) maxZ = block.pos.z;
       }
       pivot = {
         x: Math.round(((minX + maxX) / 2) / 3) * 3,
         y: Math.round(((minY + maxY) / 2) / 3) * 3,
-        z: zSample,
+        z: Math.round(((minZ + maxZ) / 2) / 3) * 3,
       };
     }
 
@@ -2423,49 +2979,50 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       for (const oldKey of state.selectedKeys) {
         const oldBlock = state.blocks.get(oldKey);
         if (!oldBlock) continue;
-        const newBlock = rotateBlockAroundZ(oldBlock, pivot, direction);
+        const newBlock = rotateBlockAroundAxis(oldBlock, pivot, axis, operation);
         if (!isValidPos(newBlock.pos, newBlock.type)) {
-          return { ok: false, reason: "Rotation produced an invalid grid position" };
+          return { ok: false, reason: "Result has an invalid grid position" };
         }
         const newKey = posKey(newBlock.pos);
         if (newKeys.has(newKey)) {
-          return { ok: false, reason: "Rotation produced overlapping positions" };
+          return { ok: false, reason: "Result has overlapping positions" };
         }
         newKeys.add(newKey);
         entries.push({ oldKey, oldBlock, newKey, newBlock });
       }
     } catch (e) {
-      return { ok: false, reason: e instanceof Error ? e.message : "Rotation failed" };
+      return { ok: false, reason: e instanceof Error ? e.message : "Operation failed" };
     }
 
     // Collision: any new key not in the old selection that already has a block
     for (const newKey of newKeys) {
       if (state.selectedKeys.has(newKey)) continue;
       if (state.blocks.has(newKey)) {
-        return { ok: false, reason: "Rotation would overlap an existing block" };
+        return { ok: false, reason: "Result would overlap an existing block" };
       }
     }
 
-    // TQEC validity: cube types must remain compatible with adjacent pipes.
-    // Skipped under "Ignore color rules" (freeBuild), matching moveSelection
-    // and placement paths (GridPlane, BlockInstances, OpenPipeGhosts).
-    if (!state.freeBuild) {
-      const tentative = new Map(state.blocks);
-      for (const entry of entries) tentative.delete(entry.oldKey);
-      for (const entry of entries) tentative.set(entry.newKey, entry.newBlock);
+    // Build the post-operation tentative map once for adjacency validation.
+    const tentative = new Map(state.blocks);
+    for (const entry of entries) tentative.delete(entry.oldKey);
+    for (const entry of entries) tentative.set(entry.newKey, entry.newBlock);
 
-      // Cubes to re-validate: every rotated cube, plus any cube adjacent to a
-      // rotated pipe's new position (catches the mirror case where a pipe lands
-      // next to an unselected cube and breaks its constraints).
+    // TQEC validity: cube types must remain compatible with adjacent pipes,
+    // and Y blocks must only neighbor Z-open pipes. Skipped under
+    // "Ignore color rules" (freeBuild), matching moveSelection and placement
+    // paths (GridPlane, BlockInstances, OpenPipeGhosts).
+    if (!state.freeBuild) {
+      // Cubes to re-validate for color rules: every rotated cube, plus any
+      // cube adjacent to a rotated pipe's new position.
       const toCheck = new Map<string, Block>();
       for (const entry of entries) {
         const b = entry.newBlock;
         if (isPipeType(b.type)) {
           const base = b.type.replace("H", "");
-          const axis = base.indexOf("O") as 0 | 1 | 2;
+          const pipeOpenAxis = base.indexOf("O") as 0 | 1 | 2;
           const nc: [number, number, number] = [b.pos.x, b.pos.y, b.pos.z];
           for (const pipeToCubeOffset of [-1, 2]) {
-            nc[axis] = [b.pos.x, b.pos.y, b.pos.z][axis] + pipeToCubeOffset;
+            nc[pipeOpenAxis] = [b.pos.x, b.pos.y, b.pos.z][pipeOpenAxis] + pipeToCubeOffset;
             const key = posKey({ x: nc[0], y: nc[1], z: nc[2] });
             const neighbor = tentative.get(key);
             if (neighbor && !isPipeType(neighbor.type) && neighbor.type !== "Y") {
@@ -2482,7 +3039,17 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const type = cube.type as CubeType;
         const ok = opts.determined ? opts.type === type : opts.options.includes(type);
         if (!ok) {
-          return { ok: false, reason: "Rotation would break color rules between adjacent blocks" };
+          return { ok: false, reason: "Color rules between adjacent blocks would break" };
+        }
+      }
+
+      // Y-block adjacency check: a Y block must only sit next to Z-open pipes.
+      // hasYCubePipeAxisConflict is symmetric — passing a Y block checks its
+      // pipe neighbors; passing a pipe checks for Y blocks at its endpoints.
+      // Iterating over rotated entries catches both directions.
+      for (const entry of entries) {
+        if (hasYCubePipeAxisConflict(entry.newBlock.type, entry.newBlock.pos, tentative)) {
+          return { ok: false, reason: "Y block can only attach to Z-open pipes (top/bottom)" };
         }
       }
     }
@@ -2505,6 +3072,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       const prevSelectedKeys = Array.from(s.selectedKeys);
       const nextSelectedKeys = entries.map((e) => e.newKey);
+      // The "rotate-selection" UndoCommand kind covers any axis and 180° flips —
+      // entries[] fully encodes the transformation.
       const cmd: UndoCommand = {
         kind: "rotate-selection",
         entries,
@@ -2517,7 +3086,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         history: [...s.history, cmd].slice(-MAX_HISTORY),
         future: [],
         selectedKeys: new Set(nextSelectedKeys),
-        selectionPivot: pivot,
+        selectionPivot: { pos: pivot, axis },
         hoveredGridPos: null,
         undeterminedCubes: newUndetermined,
       };
@@ -2570,7 +3139,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (!old) continue;
         const newPos: Position3D = { x: old.pos.x + delta.x, y: old.pos.y + delta.y, z: old.pos.z + delta.z };
         if (!isValidPos(newPos, old.type)) return state;
-        entries.push({ oldKey, oldBlock: old, newKey: posKey(newPos), newBlock: { pos: newPos, type: old.type } });
+        entries.push({ oldKey, oldBlock: old, newKey: posKey(newPos), newBlock: { ...old, pos: newPos } });
       }
       if (entries.length === 0) return state;
 
@@ -2629,6 +3198,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         history: [...state.history, cmd].slice(-MAX_HISTORY),
         future: [],
         selectedKeys: newSelected,
+        selectionPivot: null,
         hoveredGridPos: null,
         undeterminedCubes: newUndetermined,
       };
@@ -3020,7 +3590,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const curDest = blocks.get(dtc.key);
         if (curDest) {
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, dtc.key, curDest));
-          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, dtc.key, { pos: curDest.pos, type: dtc.prevType }));
+          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, dtc.key, { ...curDest, type: dtc.prevType }));
         }
       }
 
@@ -3151,10 +3721,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       } else {
         cubeOptions = pipeCount === 0
           ? [...CUBE_TYPES]
-          : (() => {
-              const result = determineCubeOptions(cursor, state.blocks);
-              return result.determined ? [result.type] : result.options;
-            })();
+          : determineCubeOptionsWithPipeRetype(cursor, state.blocks);
         // Y is a leaf: only valid with at most one attached (Z-open) pipe.
         if (pipeCount <= 1 && !hasYCubePipeAxisConflict("Y", cursor, state.blocks)) cubeOptions.push("Y");
       }
@@ -3197,7 +3764,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       // If cycling to the port slot, there's no new cube to place — the open
       // pipe endpoint (or portPositions marker) will render the port ghost.
-      const newBlock: Block | null = placeType !== null ? { pos: cursor, type: placeType } : null;
+      // Spread `existingBlock` when present so groupId rides through the
+      // cycle, mirroring edit-mode cycleSelectedType.
+      const newBlock: Block | null =
+        placeType !== null
+          ? (existingBlock
+              ? { ...existingBlock, pos: cursor, type: placeType }
+              : { pos: cursor, type: placeType })
+          : null;
       if (newBlock) {
         ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock));
       }
@@ -3205,49 +3779,21 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       // Update adjacent pipes to match new cube type (skip for Y or port — neither changes pipes)
       // In free build mode, skip pipe retyping entirely — just change the cube
       if (newBlock && placeType !== "Y" && !state.freeBuild) {
-        const revert = () => {
-          ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock));
+        const retypes = computePipeRetypes(blocks, cursor, placeType as CubeType);
+        if (retypes === null) {
+          // Defense-in-depth: cubeOptions came from determineCubeOptionsWithPipeRetype,
+          // so this branch shouldn't fire. Revert spatial-index mutations and bail.
+          doRemove(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock);
           if (existingBlock) {
-            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, existingBlock));
+            doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, existingBlock);
           }
-        };
-        for (let axis = 0; axis < 3; axis++) {
-          for (const pipeOffset of [1, -2]) {
-            const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
-            nCoords[axis] += pipeOffset;
-            const nKey = posKey({ x: nCoords[0], y: nCoords[1], z: nCoords[2] });
-            const neighbor = blocks.get(nKey);
-            if (!neighbor || !isPipeType(neighbor.type)) continue;
-
-            const base = neighbor.type.replace("H", "");
-            const hadamard = neighbor.type.length > 3;
-            const openAxis = base.indexOf("O");
-            if (openAxis !== axis) continue;
-
-            const newPipe = inferPipeType(placeType as CubeType, axis as 0 | 1 | 2);
-            if (!newPipe) {
-              revert();
-              return state;
-            }
-            const newPipeType = hadamard ? (newPipe + "H") as PipeType : newPipe;
-            if (newPipeType === neighbor.type) continue;
-
-            // Validate against far-end cube
-            const tmpBlocks = new Map(blocks);
-            tmpBlocks.set(nKey, { pos: neighbor.pos, type: newPipeType });
-            if (hasPipeColorConflict(newPipeType, neighbor.pos, tmpBlocks)) {
-              revert();
-              return state;
-            }
-            pipeUpdates.push({ key: nKey, oldType: neighbor.type as PipeType, newType: newPipeType });
-          }
+          return state;
         }
-
-        // Apply pipe mutations
-        for (const pu of pipeUpdates) {
+        for (const pu of retypes) {
           const pipeBlock = blocks.get(pu.key)!;
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, pu.key, pipeBlock));
-          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, pu.key, { pos: pipeBlock.pos, type: pu.newType }));
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, pu.key, { ...pipeBlock, type: pu.newType }));
+          pipeUpdates.push(pu);
         }
       }
 
@@ -3255,11 +3801,55 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       const newUndetermined = new Map(state.undeterminedCubes);
       newUndetermined.delete(cursorKey);
 
+      // Refresh undeterminedCubes for far-end neighbours of retyped pipes
+      // (their option set may have narrowed/widened). Mirror the pipe-cycle
+      // pattern at line ~1519.
+      const undeterminedNeighbors: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> = [];
+      const seenNeighbors = new Set<string>();
+      for (const pu of pipeUpdates) {
+        const pipe = blocks.get(pu.key);
+        if (!pipe || !isPipeType(pipe.type)) continue;
+        const base = pipe.type.replace("H", "");
+        const openAxis = base.indexOf("O");
+        const pc: [number, number, number] = [pipe.pos.x, pipe.pos.y, pipe.pos.z];
+        for (const endOffset of [-1, 2]) {
+          const nc: [number, number, number] = [pc[0], pc[1], pc[2]];
+          nc[openAxis] += endOffset;
+          const nKey = posKey({ x: nc[0], y: nc[1], z: nc[2] });
+          if (nKey === cursorKey) continue;
+          if (seenNeighbors.has(nKey)) continue;
+          seenNeighbors.add(nKey);
+          const neighborBlock = blocks.get(nKey);
+          if (!neighborBlock || isPipeType(neighborBlock.type) || neighborBlock.type === "Y") continue;
+          const oldInfo = state.undeterminedCubes.get(nKey);
+          const opts = determineCubeOptions(neighborBlock.pos, blocks);
+          let newInfo: UndeterminedCubeInfo | undefined;
+          if (opts.determined) {
+            newInfo = undefined;
+          } else if (opts.options.length > 0) {
+            const idx = Math.max(0, opts.options.indexOf(neighborBlock.type as CubeType));
+            newInfo = { options: [...opts.options], currentIndex: idx };
+          } else {
+            newInfo = oldInfo;
+          }
+          const sameInfo =
+            (!oldInfo && !newInfo) ||
+            (!!oldInfo && !!newInfo &&
+              oldInfo.options.join(",") === newInfo.options.join(",") &&
+              oldInfo.currentIndex === newInfo.currentIndex);
+          if (sameInfo) continue;
+          undeterminedNeighbors.push({ key: nKey, oldInfo, newInfo });
+          if (newInfo) newUndetermined.set(nKey, newInfo);
+          else newUndetermined.delete(nKey);
+        }
+      }
+
       const cmd: UndoCommand = {
         kind: "cube-cycle", cubeKey: cursorKey, cubePos: cursor,
         oldPlacedType: existingType, newPlacedType: placeType,
         oldPipes: pipeUpdates.length > 0 ? pipeUpdates : undefined,
         oldUndetermined, newUndetermined: undefined,
+        undeterminedNeighbors: undeterminedNeighbors.length > 0 ? undeterminedNeighbors : undefined,
       };
       return {
         blocks,
@@ -3401,7 +3991,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       // Toggle pipe
       ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, pipeKey, pipeBlock));
-      const newPipeBlock: Block = { pos: pipeBlock.pos, type: newPipeType };
+      // Preserve `groupId` (and any other Block metadata) when toggling pipe type.
+      const newPipeBlock: Block = { ...pipeBlock, type: newPipeType };
       ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, pipeKey, newPipeBlock));
 
       // Refresh undetermined info for the two neighbour cubes (their option set

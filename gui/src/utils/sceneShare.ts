@@ -56,6 +56,8 @@ async function decompressWithCap(
   const reader = transform.readable.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
+  let oversized = false;
+  let failed = false;
   try {
     while (true) {
       const { value, done } = await reader.read();
@@ -63,14 +65,17 @@ async function decompressWithCap(
       if (!value) continue;
       total += value.byteLength;
       if (total > maxBytes) {
+        oversized = true;
         await reader.cancel().catch(() => {});
-        return null;
+        break;
       }
       chunks.push(value);
     }
-  } catch {
-    return null;
+  } catch (err) {
+    console.debug("scene-share decompression failed", err);
+    failed = true;
   }
+  if (oversized || failed) return null;
 
   const out = new Uint8Array(total);
   let offset = 0;

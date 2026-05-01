@@ -1,0 +1,88 @@
+name: Weekly file-size metrics
+
+on:
+  schedule:
+    # Every Monday at 09:00 UTC.
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Measure LOC of the 6 hot files
+        id: measure
+        run: |
+          set -euo pipefail
+          FILES=(
+            gui/src/stores/blockStore.ts
+            gui/src/types/index.ts
+            gui/src/components/Toolbar.tsx
+            gui/src/App.tsx
+            gui/src/components/ZXPanel.tsx
+            gui/src/components/FlowsPanel.tsx
+          )
+          TARGETS=(
+            "blockStore.ts:2000"
+            "types/index.ts:500"
+            "Toolbar.tsx:600"
+            "App.tsx:600"
+            "ZXPanel.tsx:600"
+            "FlowsPanel.tsx:600"
+          )
+          {
+            echo "## Hot-file LOC report — $(date -u +%Y-%m-%d)"
+            echo ""
+            echo "Commit: \`${GITHUB_SHA::8}\`"
+            echo ""
+            echo "| File | LOC | Target | Status |"
+            echo "|------|----:|-------:|:------:|"
+            i=0
+            for f in "${FILES[@]}"; do
+              loc=$(wc -l < "$f" 2>/dev/null || echo 0)
+              target_line=${TARGETS[$i]}
+              target=${target_line##*:}
+              if [ "$loc" -le "$target" ]; then
+                status="✅"
+              elif [ "$loc" -le "$((target * 110 / 100))" ]; then
+                status="🟡"
+              else
+                status="❌"
+              fi
+              echo "| \`$f\` | $loc | $target | $status |"
+              i=$((i + 1))
+            done
+            echo ""
+          } > metrics-body.md
+          {
+            echo ""
+            echo "Targets follow the CEO tech-debt plan (\`2026-04-30-tech-debt-context-reduction.md\`)."
+            echo "✅ at or under target · 🟡 within 10% over · ❌ more than 10% over."
+          } >> metrics-body.md
+          cat metrics-body.md
+
+      - name: Post or update tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TITLE="Weekly hot-file LOC tracker"
+          # Find an open issue with the exact title; fall back to most-recent closed one.
+          ISSUE_NUM=$(gh issue list --repo "$REPO" --state open --search "\"$TITLE\" in:title" --json number,title --jq ".[] | select(.title == \"$TITLE\") | .number" | head -n1)
+          if [ -z "$ISSUE_NUM" ]; then
+            ISSUE_NUM=$(gh issue create --repo "$REPO" --title "$TITLE" --body "Weekly automated LOC report for the six hot files. Each Monday a comment is appended with current sizes against the targets from the CEO tech-debt plan." --label "tech-debt" 2>/dev/null | grep -oE '[0-9]+$' || true)
+          fi
+          if [ -z "$ISSUE_NUM" ]; then
+            # Label may not exist; retry without it.
+            ISSUE_NUM=$(gh issue create --repo "$REPO" --title "$TITLE" --body "Weekly automated LOC report for the six hot files." | grep -oE '[0-9]+$')
+          fi
+          gh issue comment "$ISSUE_NUM" --repo "$REPO" --body-file metrics-body.md
+          echo "Posted to issue #$ISSUE_NUM"
