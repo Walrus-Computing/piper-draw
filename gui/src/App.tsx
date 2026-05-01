@@ -120,7 +120,7 @@ function readPreShareSnapshot(): SceneSnapshotV1 | null {
     }
     return parsed;
   } catch {
-    try { localStorage.removeItem(PRE_SHARE_SNAPSHOT_KEY); } catch { /* ignore */ }
+    try { localStorage.removeItem(PRE_SHARE_SNAPSHOT_KEY); } catch (err) { void err; }
     return null;
   }
 }
@@ -128,13 +128,14 @@ function readPreShareSnapshot(): SceneSnapshotV1 | null {
 function writePreShareSnapshot(snapshot: SceneSnapshotV1): void {
   try {
     localStorage.setItem(PRE_SHARE_SNAPSHOT_KEY, JSON.stringify(snapshot));
-  } catch {
+  } catch (err) {
     // Quota / private mode — banner falls back to React-only state.
+    void err;
   }
 }
 
 function clearPreShareSnapshot(): void {
-  try { localStorage.removeItem(PRE_SHARE_SNAPSHOT_KEY); } catch { /* ignore */ }
+  try { localStorage.removeItem(PRE_SHARE_SNAPSHOT_KEY); } catch (err) { void err; }
 }
 
 /**
@@ -929,9 +930,10 @@ export default function App() {
               );
               localStorage.setItem(GROUP_KEYMAP_MIGRATION_KEY, "1");
             }
-          } catch {
+          } catch (err) {
             // localStorage unavailable (private mode etc.) — silently skip the
             // migration toast; the action itself still runs.
+            void err;
           }
           store.groupToggle();
           return;
@@ -1124,8 +1126,9 @@ export default function App() {
     const flush = (blocks: Map<string, Block>) => {
       try {
         localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(Array.from(blocks.entries())));
-      } catch {
+      } catch (err) {
         // Quota exceeded or storage unavailable — ignore.
+        void err;
       }
     };
     const flushMeta = () => {
@@ -1138,8 +1141,9 @@ export default function App() {
             portPositions: Array.from(s.portPositions),
           }),
         );
-      } catch {
-        // ignore
+      } catch (err) {
+        // private mode / unavailable — ignore
+        void err;
       }
     };
     const unsub = useBlockStore.subscribe((state, prev) => {
@@ -1171,8 +1175,9 @@ export default function App() {
       if (state.showYDefects === prev.showYDefects) return;
       try {
         localStorage.setItem("piperDraw.showYDefects", state.showYDefects ? "1" : "0");
-      } catch {
+      } catch (err) {
         // private mode / unavailable — ignore
+        void err;
       }
     });
   }, []);
@@ -1251,8 +1256,9 @@ export default function App() {
             setHelpOpen(false);
             try {
               localStorage.setItem('piperDraw.seenIntro', '1');
-            } catch {
+            } catch (err) {
               // ignore (e.g. private mode)
+              void err;
             }
           }}
         />

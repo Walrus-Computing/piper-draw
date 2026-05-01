@@ -133,8 +133,9 @@ export function SelectModePointer({
     if (!state) return;
     try {
       state.target.releasePointerCapture(state.pointerId);
-    } catch {
+    } catch (err) {
       // capture may have been released already
+      void err;
     }
     if (state.kind === "selection") {
       useBlockStore.getState().setDragState({ isDragging: false, delta: null, valid: true });
@@ -253,8 +254,9 @@ export function SelectModePointer({
       }
       try {
         target.setPointerCapture(e.pointerId);
-      } catch {
+      } catch (err) {
         // Some browsers reject capture during certain input phases
+        void err;
       }
     },
     [isSelectActive, threeStateRef, controlsRef],
@@ -356,8 +358,9 @@ export function SelectModePointer({
 
       try {
         state.target.releasePointerCapture(state.pointerId);
-      } catch {
+      } catch (err) {
         // already released
+        void err;
       }
       if (controlsRef.current) {
         controlsRef.current.enableRotate = restoreRotate();

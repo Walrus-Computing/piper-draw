@@ -787,11 +787,16 @@ function computeDerivedFromBlocks(blocks: Map<string, Block>): {
 
 function readShowYDefects(): boolean {
   if (typeof localStorage === "undefined") return false;
+  let stored: string | null = null;
+  let failed = false;
   try {
-    return localStorage.getItem("piperDraw.showYDefects") === "1";
-  } catch {
-    return false;
+    stored = localStorage.getItem("piperDraw.showYDefects");
+  } catch (err) {
+    console.debug("piperDraw.showYDefects read failed (private mode?)", err);
+    failed = true;
   }
+  if (failed) return false;
+  return stored === "1";
 }
 
 export const useBlockStore = create<BlockStore>((set, get) => ({
