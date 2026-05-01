@@ -6,6 +6,21 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.1.3.0] - 2026-05-01
+
+### Changed
+- Group-toggle hint toasts ("Select 2+ blocks", "mixes grouped and ungrouped",
+  "spans multiple groups"), the auto-dissolve toast, and the one-time
+  G-keymap migration notice now route through a non-destructive info channel.
+  Previously these reused the verify-error channel and silently wiped any
+  red invalid-block highlights from an in-progress verify (R7). Info toasts
+  appear top-right; the verify-error toast continues to occupy the top
+  centre.
+- Internal: ephemeral toasts are now dispatched through a shared event bus
+  (`gui/src/utils/toastBus.ts`) with `error` and `info` channels. Replaces
+  the dynamic-import workaround in `blockStore.ts` that fired toasts a
+  microtask later.
+
 ## [0.1.2.1] - 2026-05-01
 
 ### Added
