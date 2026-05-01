@@ -153,6 +153,7 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Files</h4>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
           <li><b>Import</b>/<b>Export</b> round-trip through Collada (.dae) files.</li>
+          <li><b>Share link</b> copies a URL with the scene packed into the hash; opening it restores the diagram. Capped at 6 KB — use Export for larger scenes.</li>
         </ul>
 
         <p style={{ margin: "14px 0 0", fontSize: 12, color: "#666" }}>

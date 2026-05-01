@@ -58,6 +58,7 @@ Select two or more blocks and press `G` to bundle them into a group. Grouped blo
 
 ### Files
 - **Import** / **Export** round-trip through Collada (`.dae`) files.
+- **Share link** — copy a self-contained URL with the scene compressed into the hash fragment; opening the link restores the exact diagram. Capped at 6 KB; for larger scenes, use Export instead.
 - **Templates** — load a bundled example diagram (CNOT, CZ, move + rotation, three CNOTs, Steane encoding) as a starting point, or insert one into the current scene.
 
 ### Bundled templates

@@ -6,6 +6,9 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+### Added
+- Document the **Share link** feature (File ▾ menu) in the README and in-app help.
+
 ## [0.1.0.0] - 2026-04-30
 
 ### Added
