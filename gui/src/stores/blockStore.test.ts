@@ -2535,4 +2535,60 @@ describe("blockStore", () => {
       expect(entry.corrSurfaceMarks).toEqual({ "0": "X" });
     });
   });
+
+  describe("paint H→Y conversion drops orphaned :band corr-marks", () => {
+    it("paintFace that converts OZXH → OZXY strips axis :band corr-surface marks", () => {
+      const pipe: Block = {
+        pos: { x: 1, y: 0, z: 0 },
+        type: "OZXH",
+        corrSurfaceMarks: { "1:band": "X", "1:below": "Z" },
+      };
+      const blocks = new Map<string, Block>([["1,0,0", pipe]]);
+      useBlockStore.setState({
+        blocks,
+        spatialIndex: buildSpatialIndex(blocks),
+        hiddenFaces: new Map(),
+      });
+      useBlockStore.getState().paintFace({ x: 1, y: 0, z: 0 }, "2:band", "#ff00ff");
+      const after = useBlockStore.getState().blocks.get("1,0,0")!;
+      expect(after.type).toBe("OZXY");
+      expect(after.corrSurfaceMarks).toEqual({ "1:below": "Z" });
+    });
+
+    it("drops corrSurfaceMarks entirely if all entries were :band", () => {
+      const pipe: Block = {
+        pos: { x: 1, y: 0, z: 0 },
+        type: "OZXH",
+        corrSurfaceMarks: { "1:band": "X", "2:band": "Z" },
+      };
+      const blocks = new Map<string, Block>([["1,0,0", pipe]]);
+      useBlockStore.setState({
+        blocks,
+        spatialIndex: buildSpatialIndex(blocks),
+        hiddenFaces: new Map(),
+      });
+      useBlockStore.getState().paintFace({ x: 1, y: 0, z: 0 }, "2:band", "#ff00ff");
+      const after = useBlockStore.getState().blocks.get("1,0,0")!;
+      expect(after.type).toBe("OZXY");
+      expect(after.corrSurfaceMarks).toBeUndefined();
+    });
+
+    it("non-band paint does not touch corr-marks", () => {
+      const pipe: Block = {
+        pos: { x: 1, y: 0, z: 0 },
+        type: "OZXH",
+        corrSurfaceMarks: { "1:band": "X", "1:below": "Z" },
+      };
+      const blocks = new Map<string, Block>([["1,0,0", pipe]]);
+      useBlockStore.setState({
+        blocks,
+        spatialIndex: buildSpatialIndex(blocks),
+        hiddenFaces: new Map(),
+      });
+      useBlockStore.getState().paintFace({ x: 1, y: 0, z: 0 }, "2:above", "#abcdef");
+      const after = useBlockStore.getState().blocks.get("1,0,0")!;
+      expect(after.type).toBe("OZXH");
+      expect(after.corrSurfaceMarks).toEqual({ "1:band": "X", "1:below": "Z" });
+    });
+  });
 });

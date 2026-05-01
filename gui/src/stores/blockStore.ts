@@ -1097,6 +1097,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       && oldBlock.type.endsWith("H")
       && faceKey.endsWith(":band")
       && color.toLowerCase() !== H_HEX.toLowerCase();
+    let nextCorrMarks: Record<string, "X" | "Z"> | undefined = oldBlock.corrSurfaceMarks;
     if (isHadBand) {
       newType = (oldBlock.type.slice(0, -1) + "Y") as BlockType;
       const stripped: Record<string, string> = {};
@@ -1104,9 +1105,24 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (!k.endsWith(":band")) stripped[k] = v;
       }
       nextOverrides = stripped;
+      // Y-twist has no band strip; any axis-keyed corr-surface mark with a
+      // ":band" suffix on this block is now semantically invalid (it described
+      // a slice through the Hadamard band that no longer exists). Drop them.
+      if (nextCorrMarks) {
+        const cleanedMarks: Record<string, "X" | "Z"> = {};
+        for (const [k, v] of Object.entries(nextCorrMarks)) {
+          if (!k.endsWith(":band")) cleanedMarks[k] = v;
+        }
+        nextCorrMarks = Object.keys(cleanedMarks).length > 0 ? cleanedMarks : undefined;
+      }
     }
 
     const newBlock: Block = { ...oldBlock, type: newType, faceColors: nextOverrides };
+    if (nextCorrMarks === undefined) {
+      delete newBlock.corrSurfaceMarks;
+    } else {
+      newBlock.corrSurfaceMarks = nextCorrMarks;
+    }
     const removed = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, key, oldBlock);
     const { blocks, hiddenFaces } = doAdd(removed.blocks, state.spatialIndex, removed.hiddenFaces, key, newBlock);
     const cmd: UndoCommand = { kind: "replace", key, oldBlock, newBlock };

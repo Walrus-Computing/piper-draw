@@ -471,6 +471,7 @@ export function BlockInstances() {
   const hiddenFaces = useBlockStore((s) => s.hiddenFaces);
   const viewMode = useBlockStore((s) => s.viewMode);
   const flowVizMode = useBlockStore((s) => s.flowVizMode);
+  const corrSurfaceVizMode = useBlockStore((s) => s.corrSurfaceVizMode);
 
   const grouped = useMemo(() => {
     type Group = {
@@ -483,8 +484,12 @@ export function BlockInstances() {
     const map = new Map<string, Group>();
     for (const block of blocks.values()) {
       const hf = hiddenFaces.get(posKey(block.pos)) ?? 0;
+      // Dim block walls when either flow surfaces or manual correlation
+      // surface marks are being shown — both render *inside* the blocks, and
+      // would be invisible behind opaque walls otherwise.
       const dimmed =
         flowVizMode ||
+        corrSurfaceVizMode ||
         (viewMode.kind === "iso" && !posInActiveSlice(viewMode, block.pos));
       const fcKey = faceColorsKey(block.faceColors);
       const key = `${block.type}:${hf}:${dimmed ? 1 : 0}:${fcKey}`;
@@ -502,7 +507,7 @@ export function BlockInstances() {
       }
     }
     return map;
-  }, [blocks, hiddenFaces, viewMode, flowVizMode]);
+  }, [blocks, hiddenFaces, viewMode, flowVizMode, corrSurfaceVizMode]);
 
   return (
     <>
