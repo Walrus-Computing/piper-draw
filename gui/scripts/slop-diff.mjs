@@ -76,8 +76,9 @@ if (mergeBase) {
     if (fs.existsSync(configFile)) {
       try {
         fs.copyFileSync(configFile, path.join(tmpWorktree, configFile));
-      } catch {
+      } catch (err) {
         // best-effort
+        void err;
       }
     }
 
@@ -102,8 +103,9 @@ if (mergeBase) {
             baseCounts.set(key, (baseCounts.get(key) || 0) + 1);
           }
         }
-      } catch {
+      } catch (err) {
         // ignore — base scan unavailable just means we treat all findings as new
+        void err;
       }
     }
 
