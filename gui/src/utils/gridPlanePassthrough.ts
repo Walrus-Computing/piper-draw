@@ -1,20 +1,17 @@
 import type { Intersection, Object3D } from "three";
 
 /**
- * In select mode, GridPlane should bow out of clicks/hovers when the ray also
- * hits another interactive mesh further along (a block or port ghost). Without
- * this, the invisible plane at Three.js y=0 swallows clicks meant for blocks
- * placed at TQEC z<0 (below the plane) when the camera looks down from above.
+ * GridPlane should bow out of clicks/hovers when the ray also hits another
+ * interactive mesh further along (a block or port ghost). The invisible plane
+ * at Three.js y=0 sits between the camera and other geometry in two scenarios:
  *
- * Click chain (perspective, camera tilted down):
- *
- *   camera                  After fix:
- *     │                       plane sees a non-plane hit in e.intersections
- *     ▼                       → returns without stopProp/clearSelection
- *   [GridPlane y=0]           → BlockInstances.handleClick runs
- *     │                       → sub-ground block gets selected
- *     ▼
- *   [Block | Port]
+ *   1. Camera tilted down + sub-ground block (TQEC z<0): plane is at y=0,
+ *      block lives at y<0, plane raycast wins. Pass-through lets the buried
+ *      block be selected/operated on from above.
+ *   2. Camera below the floor + above-floor block: plane's back face raycasts
+ *      closer than the model. Pass-through lets edit-mode placement do
+ *      face-adjacent placement on the model and Build-mode click move the
+ *      cursor to the clicked cube.
  *
  * Returns true if any intersection's object is not the plane itself, meaning
  * the next handler in the chain should own the event.

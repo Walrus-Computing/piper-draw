@@ -5,6 +5,8 @@ import { useBlockStore } from "../stores/blockStore";
 const X_COLOR = new THREE.Color("#ff7f7f");
 const Z_COLOR = new THREE.Color("#7396ff");
 
+const noRaycast = () => {};
+
 /**
  * Renders the selected correlation surface's pieces as colored quads in 3D.
  * Surface vertices arrive from the backend already in Three.js world coords
@@ -64,12 +66,12 @@ export function FlowSurfaceOverlay() {
   return (
     <>
       {geometries.X && (
-        <mesh geometry={geometries.X}>
+        <mesh geometry={geometries.X} raycast={noRaycast}>
           <meshBasicMaterial color={X_COLOR} side={THREE.DoubleSide} />
         </mesh>
       )}
       {geometries.Z && (
-        <mesh geometry={geometries.Z}>
+        <mesh geometry={geometries.Z} raycast={noRaycast}>
           <meshBasicMaterial color={Z_COLOR} side={THREE.DoubleSide} />
         </mesh>
       )}
