@@ -316,6 +316,7 @@ function ViewportCamera({ controlsRef }: { controlsRef: React.RefObject<any> }) 
           ref={controlsRef}
           makeDefault
           enableRotate
+          dampingFactor={0.2}
           zoomToCursor
           maxDistance={50000}
           screenSpacePanning={false}
@@ -384,6 +385,7 @@ function IsoViewport({
         ref={controlsRef}
         makeDefault
         enableRotate={false}
+        dampingFactor={0.2}
         zoomToCursor
         maxZoom={500}
         minZoom={2}

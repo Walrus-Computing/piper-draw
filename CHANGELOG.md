@@ -6,6 +6,26 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.1.3.5] - 2026-05-04
+
+### Fixed
+- Toolbar height no longer flickers when the mouse moves toward it in a
+  narrow window. Sub-pixel oscillation in the toolbar's natural width — from
+  the live FPS counter and hover-driven Position display — was retriggering
+  a `transform: scale(...)` recompute every frame. The viewport-fit hook now
+  ignores scale changes below a 0.5% threshold, which still reacts to real
+  fit changes (mode switches, selection inspector appearing) but absorbs
+  the text-width noise.
+  Closes #280.
+
+## [0.1.3.3] - 2026-05-04
+
+### Changed
+- Reduced camera momentum in both perspective and iso viewports. Orbit / pan /
+  zoom now settle in ~250ms after mouse release instead of ~700ms (drei
+  `dampingFactor` 0.05 → 0.2). Adjust-then-click workflows feel responsive
+  without losing the smoothing.
+
 ## [0.1.3.2] - 2026-05-04
 
 ### Fixed
