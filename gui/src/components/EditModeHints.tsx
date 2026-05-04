@@ -81,7 +81,7 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
     );
   } else if (armedTool === "corr-surface") {
     hints.push(
-      ["Click face", "Mark/unmark correlation surface"],
+      ["Click pipe face", "Mark/unmark correlation surface"],
       [`Hold ${bindingToLabel(b.holdToDelete)}`, "Click-to-delete"],
     );
   } else {

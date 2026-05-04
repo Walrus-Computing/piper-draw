@@ -408,6 +408,11 @@ function TypedInstances({
       if (armed === "corr-surface") {
         if (!e.face) return;
         const block = b[e.instanceId];
+        // v1: corr-surface authoring is restricted to pipes — that's where
+        // TQEC has the most interesting H/Y behavior to study and where the
+        // FB-only types (Y-twist) need empirical rule discovery. Cubes / slabs
+        // / Y blocks are excluded for now (clicks no-op).
+        if (!isPipeType(block.type)) return;
         const axisKey = deriveSliceKey(block, e.face.normal, e.point);
         if (axisKey === null) return;
         // Click semantics: same basis on a marked slice → unmark; other
