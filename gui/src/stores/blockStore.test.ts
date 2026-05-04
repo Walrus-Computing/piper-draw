@@ -2370,4 +2370,31 @@ describe("blockStore", () => {
       expect(useBlockStore.getState().blocks.get("6,0,0")?.groupId).toBe(gB);
     });
   });
+
+  describe("paintFace — repaint", () => {
+    it("overwrites an existing cell color when paintFace is called twice on the same key", () => {
+      // Place a slab. Slabs need free-build mode and a 2x2 inner gap pos.
+      useBlockStore.setState({ freeBuild: true, armedTool: "slab", cubeType: "slab" });
+      const pos = { x: 1, y: 1, z: 0 };
+      const slab: Block = { pos, type: "slab" };
+      const blocks = new Map<string, Block>();
+      blocks.set("1,1,0", slab);
+      useBlockStore.setState({ blocks, spatialIndex: buildSpatialIndex(blocks) });
+
+      // First paint: cell q=4 (center top) → red.
+      useBlockStore.getState().paintFace(pos, "2:4", "#ff0000");
+      expect(useBlockStore.getState().blocks.get("1,1,0")?.faceColors).toEqual({ "2:4": "#ff0000" });
+
+      // Repaint same cell with a different color → blue must overwrite red.
+      useBlockStore.getState().paintFace(pos, "2:4", "#0000ff");
+      expect(useBlockStore.getState().blocks.get("1,1,0")?.faceColors).toEqual({ "2:4": "#0000ff" });
+
+      // Paint a second cell q=0 → both keys should coexist with their own colors.
+      useBlockStore.getState().paintFace(pos, "2:0", "#00ff00");
+      expect(useBlockStore.getState().blocks.get("1,1,0")?.faceColors).toEqual({
+        "2:4": "#0000ff",
+        "2:0": "#00ff00",
+      });
+    });
+  });
 });

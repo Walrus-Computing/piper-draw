@@ -1007,9 +1007,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     nextOverrides[faceKey] = color;
 
     // Auto-promote: a Hadamard pipe whose yellow band is painted away from H_HEX
-    // no longer mediates the X↔Z basis switch on its walls — the geometric
-    // equivalent is a Y-twist (magenta seam, no band strip). Convert the type
-    // and drop the now-orphaned ":band" overrides since Y-twist has no band.
+    // no longer reads as the canonical yellow-band Hadamard — the geometric
+    // equivalent is a Y-twist (magenta seam at the open-axis midline). Convert
+    // the type but keep the painted band override, since Y-twist faces also
+    // expose a paintable band strip.
     let newType: BlockType = oldBlock.type;
     const isHadBand = isPipeType(oldBlock.type)
       && oldBlock.type.endsWith("H")
@@ -1017,11 +1018,6 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       && color.toLowerCase() !== H_HEX.toLowerCase();
     if (isHadBand) {
       newType = (oldBlock.type.slice(0, -1) + "Y") as BlockType;
-      const stripped: Record<string, string> = {};
-      for (const [k, v] of Object.entries(nextOverrides)) {
-        if (!k.endsWith(":band")) stripped[k] = v;
-      }
-      nextOverrides = stripped;
     }
 
     const newBlock: Block = { ...oldBlock, type: newType, faceColors: nextOverrides };

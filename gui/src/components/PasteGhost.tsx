@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { useBlockStore } from "../stores/blockStore";
 import { tqecToThree, yBlockZOffset, isValidPos } from "../types";
 import type { Block, Position3D } from "../types";
-import { getCachedGeometry, getCachedEdges } from "./BlockInstances";
+import { getCachedGeometry, getCachedEdges } from "./blockInstancesShared";
 import { GroundShadowAbsolute } from "./GroundShadowAbsolute";
 
 const MAX_PASTE_SHADOWS = 200;
