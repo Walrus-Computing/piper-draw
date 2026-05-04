@@ -6,6 +6,13 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.1.3.3] - 2026-05-04
+
+### Changed
+- Reduced camera momentum in perspective mode. Orbit / pan / zoom now settle in
+  ~250ms after mouse release instead of ~700ms (drei `dampingFactor` 0.05 → 0.2).
+  Adjust-then-click workflows feel responsive without losing the smoothing.
+
 ## [0.1.3.2] - 2026-05-04
 
 ### Fixed
