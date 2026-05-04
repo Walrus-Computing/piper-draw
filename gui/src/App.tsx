@@ -385,6 +385,7 @@ function IsoViewport({
         ref={controlsRef}
         makeDefault
         enableRotate={false}
+        dampingFactor={0.2}
         zoomToCursor
         maxZoom={500}
         minZoom={2}
