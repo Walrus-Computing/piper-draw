@@ -122,7 +122,15 @@ function dissolveToast(autoDissolvedFor: ReadonlyArray<{ priorGroupId: string }>
 }
 
 export type Mode = "edit" | "build";
-export type ArmedTool = "pointer" | "cube" | "pipe" | "port" | "paste" | "slab" | "paint";
+export type ArmedTool =
+  | "pointer"
+  | "cube"
+  | "pipe"
+  | "port"
+  | "paste"
+  | "slab"
+  | "paint"
+  | "corr-surface";
 
 const MAX_HISTORY = 100;
 
@@ -358,6 +366,29 @@ interface BlockStore {
    * Pushes a `replace` undo command so undo/redo round-trips through Block.
    */
   paintFace: (pos: Position3D, faceKey: string, color: string) => void;
+  /**
+   * Currently armed correlation-surface basis. Mirrors `paintColor`'s role:
+   * sub-state for the `armedTool === "corr-surface"` tool. Persists across
+   * tool switches so re-arming the tool re-uses the last basis.
+   */
+  corrBasis: "X" | "Z";
+  /**
+   * Arm the corr-surface tool with a specific basis. Sets `armedTool` to
+   * `"corr-surface"`, `corrBasis` to `basis`, and auto-enables
+   * `corrSurfaceVizMode` so the user sees what they're about to paint.
+   */
+  setArmedCorrSurface: (basis: "X" | "Z") => void;
+  /** Whether the manual correlation-surface overlay is rendered in 3D. */
+  corrSurfaceVizMode: boolean;
+  setCorrSurfaceVizMode: (on: boolean) => void;
+  /**
+   * Set or unset a manual correlation-surface mark on a single slice axis.
+   * `axisKey` is `"0"|"1"|"2"` (slice axis index) or `"<axis>:band|below|above"`
+   * for Hadamard / Y-twist pipes (strip clip along the open axis). Pass
+   * `null` for `basis` to remove the mark. If the block ends up with no
+   * marks, the field is dropped entirely. Pushes a `replace` undo command.
+   */
+  markCorrSurface: (pos: Position3D, axisKey: string, basis: "X" | "Z" | null) => void;
   /** Cycle the armed placeable by ±1 within PLACEABLE_ORDER (Drag / Drop mode only). */
   cycleArmedType: (dir: -1 | 1) => void;
   /**
@@ -870,6 +901,57 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   paintColor: "#ff7f7f",
   setPaintColor: (hex) => set({ paintColor: hex }),
 
+  corrBasis: "X",
+  corrSurfaceVizMode: false,
+  setCorrSurfaceVizMode: (on) => set({ corrSurfaceVizMode: on }),
+  setArmedCorrSurface: (basis) =>
+    set({
+      armedTool: "corr-surface" as ArmedTool,
+      corrBasis: basis,
+      corrSurfaceVizMode: true,
+      pipeVariant: null,
+      portWarning: null,
+      hoveredGridPos: null,
+      hoveredBlockType: null,
+      hoveredInvalid: false,
+      hoveredInvalidReason: null,
+      hoveredReplace: false,
+      selectedKeys: new Set<string>(),
+      selectedPortPositions: new Set<string>(),
+      selectionPivot: null,
+    }),
+  markCorrSurface: (pos, axisKey, basis) => set((state) => {
+    const key = posKey(pos);
+    const oldBlock = state.blocks.get(key);
+    if (!oldBlock) return state;
+    const cur = oldBlock.corrSurfaceMarks ?? {};
+    // No-op: setting the same basis the slice already has, or unmarking an unmarked slice.
+    if (basis === null ? !(axisKey in cur) : cur[axisKey] === basis) return state;
+    const nextMarks: Record<string, "X" | "Z"> = { ...cur };
+    if (basis === null) {
+      delete nextMarks[axisKey];
+    } else {
+      nextMarks[axisKey] = basis;
+    }
+    // Drop the field entirely when no marks remain so equality / serialization
+    // stays consistent with blocks that never had a mark.
+    const newBlock: Block = { ...oldBlock };
+    if (Object.keys(nextMarks).length === 0) {
+      delete newBlock.corrSurfaceMarks;
+    } else {
+      newBlock.corrSurfaceMarks = nextMarks;
+    }
+    const removed = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, key, oldBlock);
+    const { blocks, hiddenFaces } = doAdd(removed.blocks, state.spatialIndex, removed.hiddenFaces, key, newBlock);
+    const cmd: UndoCommand = { kind: "replace", key, oldBlock, newBlock };
+    return {
+      blocks,
+      hiddenFaces,
+      history: [...state.history, cmd].slice(-MAX_HISTORY),
+      future: [],
+    };
+  }),
+
   showGrid: true,
   showHints: true,
   toggleShowGrid: () => set((s) => ({ showGrid: !s.showGrid })),
@@ -1003,7 +1085,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     const key = posKey(pos);
     const oldBlock = state.blocks.get(key);
     if (!oldBlock) return state;
-    let nextOverrides: Record<string, string> = { ...(oldBlock.faceColors ?? {}) };
+    const nextOverrides: Record<string, string> = { ...(oldBlock.faceColors ?? {}) };
     nextOverrides[faceKey] = color;
 
     // Auto-promote: a Hadamard pipe whose yellow band is painted away from H_HEX
@@ -1016,11 +1098,17 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       && oldBlock.type.endsWith("H")
       && faceKey.endsWith(":band")
       && color.toLowerCase() !== H_HEX.toLowerCase();
+    const nextCorrMarks: Record<string, "X" | "Z"> | undefined = oldBlock.corrSurfaceMarks;
     if (isHadBand) {
       newType = (oldBlock.type.slice(0, -1) + "Y") as BlockType;
     }
 
     const newBlock: Block = { ...oldBlock, type: newType, faceColors: nextOverrides };
+    if (nextCorrMarks === undefined) {
+      delete newBlock.corrSurfaceMarks;
+    } else {
+      newBlock.corrSurfaceMarks = nextCorrMarks;
+    }
     const removed = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, key, oldBlock);
     const { blocks, hiddenFaces } = doAdd(removed.blocks, state.spatialIndex, removed.hiddenFaces, key, newBlock);
     const cmd: UndoCommand = { kind: "replace", key, oldBlock, newBlock };
@@ -1859,7 +1947,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const sd = step.sourceDetermination;
           const curSrc = blocks.get(sd.key);
           if (curSrc) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, sd.key, curSrc));
-          const reverted: Block = { pos: step.prevCursorPos, type: sd.prevType };
+          const reverted: Block = curSrc
+            ? { ...curSrc, type: sd.prevType }
+            : { pos: step.prevCursorPos, type: sd.prevType };
           ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, sd.key, reverted));
           newUndetermined.set(sd.key, { ...sd.prevUndeterminedInfo, options: [...sd.prevUndeterminedInfo.options] });
         }
@@ -1868,7 +1958,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           const sr = step.sourceRetype;
           const curSrc = blocks.get(sr.key);
           if (curSrc) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, sr.key, curSrc));
-          const reverted: Block = { pos: step.prevCursorPos, type: sr.prevType };
+          const reverted: Block = curSrc
+            ? { ...curSrc, type: sr.prevType }
+            : { pos: step.prevCursorPos, type: sr.prevType };
           ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, sr.key, reverted));
         }
         // Remove origin cube
@@ -1948,7 +2040,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (cubeBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, cubeBlock));
         }
-        // Re-add old cube — preserve `groupId` from the (now-removed) current cube.
+        // Re-add old cube — spread the just-removed cubeBlock so face
+        // annotations (faceColors, corrSurfaceMarks) and group membership
+        // (groupId) survive the type change.
         if (cmd.oldPlacedType) {
           const restored: Block = cubeBlock
             ? { ...cubeBlock, type: cmd.oldPlacedType }
@@ -2286,7 +2380,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           if (curSrc) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, sd.key, curSrc));
           const newSrcOptions = determineCubeOptions(step.prevCursorPos, blocks);
           const srcType = newSrcOptions.determined ? newSrcOptions.type : (newSrcOptions.options[0] ?? sd.prevType);
-          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, sd.key, { pos: step.prevCursorPos, type: srcType }));
+          const reSrc: Block = curSrc
+            ? { ...curSrc, type: srcType }
+            : { pos: step.prevCursorPos, type: srcType };
+          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, sd.key, reSrc));
           newUndetermined.delete(sd.key);
         }
         // Re-retype source
@@ -2299,7 +2396,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
             const candidates = newSrcOptions.determined ? [newSrcOptions.type] : newSrcOptions.options;
             const validForPipe = candidates.filter(ct => step.pipe && inferPipeType(ct, step.pipe.block.type.replace("H", "").indexOf("O") as 0 | 1 | 2) !== null);
             const srcType = validForPipe.length > 0 ? validForPipe[0] : sr.prevType;
-            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, sr.key, { pos: step.prevCursorPos, type: srcType }));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, sr.key, { ...curSrc, type: srcType }));
           }
         }
         // Re-place pipe
@@ -2386,7 +2483,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (cubeBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cmd.cubeKey, cubeBlock));
         }
-        // Re-add new cube (unless cycling ended at the port slot) — preserve `groupId`.
+        // Re-add new cube — spread cubeBlock so face annotations and groupId
+        // survive the type change.
         if (cmd.newPlacedType) {
           const restored: Block = cubeBlock
             ? { ...cubeBlock, type: cmd.newPlacedType }
@@ -2660,9 +2758,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const b = state.blocks.get(key);
         if (!b) continue;
         const pos: Position3D = { x: b.pos.x - minX, y: b.pos.y - minY, z: b.pos.z - minZ };
-        // Preserve `groupId` so paste can re-stamp a fresh nanoid per source
-        // group (see commitPasteReducer's two-phase paste). Spreading `b` also
-        // carries any future Block metadata fields automatically.
+        // Spread b so face annotations (faceColors, corrSurfaceMarks) and
+        // `groupId` ride along into the clipboard; pos is overridden to the
+        // normalized selection-relative position. groupId is later re-stamped
+        // with fresh nanoids per source group in commitPasteReducer.
         clipboard.set(posKey(pos), { ...b, pos });
       }
       if (clipboard.size === 0) return state;
@@ -3554,7 +3653,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (sourceDetermination) {
           const oldSrc = blocks.get(srcKey)!;
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, srcKey, oldSrc));
-          const newSrc: Block = { pos: cursor, type: srcType };
+          // Spread oldSrc to preserve face annotations (faceColors, corrSurfaceMarks)
+          // through the type change.
+          const newSrc: Block = { ...oldSrc, type: srcType };
           ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, srcKey, newSrc));
           newUndetermined.delete(srcKey);
         }
@@ -3563,7 +3664,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (sourceRetype) {
           const oldSrc = blocks.get(srcKey)!;
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, srcKey, oldSrc));
-          const newSrc: Block = { pos: cursor, type: srcType };
+          const newSrc: Block = { ...oldSrc, type: srcType };
           ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, srcKey, newSrc));
         }
       }
@@ -3576,7 +3677,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       if (destTypeChange) {
         const oldDest = blocks.get(destTypeChange.key)!;
         ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, destTypeChange.key, oldDest));
-        const newDest: Block = { pos: oldDest.pos, type: destTypeChange.newType };
+        const newDest: Block = { ...oldDest, type: destTypeChange.newType };
         ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, destTypeChange.key, newDest));
       }
 
@@ -3708,7 +3809,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (curSrc) {
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, sd.key, curSrc));
         }
-        const reverted: Block = { pos: step.prevCursorPos, type: sd.prevType };
+        const reverted: Block = curSrc
+          ? { ...curSrc, type: sd.prevType }
+          : { pos: step.prevCursorPos, type: sd.prevType };
         ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, sd.key, reverted));
         newUndetermined.set(sd.key, { ...sd.prevUndeterminedInfo, options: [...sd.prevUndeterminedInfo.options] });
       }
@@ -3719,7 +3822,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         const curSrc = blocks.get(sr.key);
         if (curSrc) {
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, sr.key, curSrc));
-          const reverted: Block = { pos: step.prevCursorPos, type: sr.prevType };
+          const reverted: Block = { ...curSrc, type: sr.prevType };
           ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, sr.key, reverted));
         }
         // Check if reverted source should now be undetermined (fewer pipe constraints)
@@ -3883,6 +3986,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           }
           return state;
         }
+        // Apply pipe mutations — spread pipeBlock so face annotations
+        // (faceColors, corrSurfaceMarks) survive the type change.
         for (const pu of retypes) {
           const pipeBlock = blocks.get(pu.key)!;
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, pu.key, pipeBlock));

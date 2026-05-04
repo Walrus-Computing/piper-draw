@@ -1,6 +1,18 @@
 import type { Block, BlockType, PortMeta } from "../types";
 import { CUBE_TYPES, PIPE_TYPES } from "../types";
 import { useBlockStore } from "../stores/blockStore";
+import { migrateFaceKeysToAxisKeys } from "./corrSurfaceGeom";
+
+/**
+ * Block fields the sanitizer cares about beyond the canonical `Block` shape:
+ * the legacy `faceCorrSurface` field (per-face-keyed) which we accept on
+ * load and translate into `corrSurfaceMarks` (per-axis-keyed). New scenes
+ * never write `faceCorrSurface`; this exists solely for backward compat
+ * with localStorage / URL-share payloads from the prior schema.
+ */
+type BlockWithLegacyFields = Block & {
+  faceCorrSurface?: Record<string, "X" | "Z">;
+};
 
 export const SCENE_SCHEMA_VERSION = 1;
 
@@ -108,9 +120,98 @@ export function isSceneSnapshotV1(value: unknown): value is SceneSnapshotV1 {
 
 export type ApplyMode = "load" | "hydrate";
 
+/**
+ * Sanitize a block's optional annotations on snapshot load.
+ *
+ * Two responsibilities:
+ *   1. **Validation:** drop malformed payloads (non-object, wrong value types,
+ *      malformed entries) silently rather than throwing — older or tampered
+ *      snapshots should still load with the geometry intact.
+ *   2. **Legacy migration:** translate any `faceCorrSurface` field (the
+ *      per-face-keyed schema from before the per-axis migration) into the
+ *      current `corrSurfaceMarks` field. The translator dedupes by axis
+ *      (face 2 + face 3 → axis 1, last-write-wins) and preserves H/Y strip
+ *      suffixes. After this runs, `faceCorrSurface` is always absent.
+ */
+function sanitizeBlock(block: Block): Block {
+  // Treat legacy fields as a wider Block shape for the duration of this fn.
+  const input = block as BlockWithLegacyFields;
+  let out: BlockWithLegacyFields = input;
+
+  // --- faceColors ---
+  if (input.faceColors !== undefined) {
+    if (typeof input.faceColors !== "object" || input.faceColors === null || Array.isArray(input.faceColors)) {
+      out = { ...out };
+      delete out.faceColors;
+    } else {
+      const cleaned: Record<string, string> = {};
+      for (const [k, v] of Object.entries(input.faceColors)) {
+        if (typeof v === "string") cleaned[k] = v;
+      }
+      if (Object.keys(cleaned).length === 0) {
+        out = { ...out };
+        delete out.faceColors;
+      } else if (cleaned !== input.faceColors) {
+        out = { ...out, faceColors: cleaned };
+      }
+    }
+  }
+
+  // --- legacy faceCorrSurface → corrSurfaceMarks (translator) ---
+  if (input.faceCorrSurface !== undefined) {
+    if (typeof input.faceCorrSurface === "object" && input.faceCorrSurface !== null && !Array.isArray(input.faceCorrSurface)) {
+      // Filter to just the X/Z values, then translate face-keys → axis-keys.
+      const cleaned: Record<string, "X" | "Z"> = {};
+      for (const [k, v] of Object.entries(input.faceCorrSurface)) {
+        if (v === "X" || v === "Z") cleaned[k] = v;
+      }
+      const migrated = migrateFaceKeysToAxisKeys(cleaned);
+      if (migrated) {
+        // Merge: legacy migrated marks + any existing axis-keyed marks.
+        // Legacy wins on conflict (it's the data the user authored before
+        // migration; existing axis-keyed entries during a partial reload
+        // are unexpected but we preserve them defensively).
+        out = { ...out, corrSurfaceMarks: { ...(out.corrSurfaceMarks ?? {}), ...migrated } };
+      }
+    }
+    // Always strip the legacy field — it's never valid in current schema.
+    out = { ...out };
+    delete out.faceCorrSurface;
+  }
+
+  // --- corrSurfaceMarks (canonical) ---
+  if (out.corrSurfaceMarks !== undefined) {
+    if (typeof out.corrSurfaceMarks !== "object" || out.corrSurfaceMarks === null || Array.isArray(out.corrSurfaceMarks)) {
+      out = { ...out };
+      delete out.corrSurfaceMarks;
+    } else {
+      // Strict: drop entries with non-X/Z values. Key shape is validated by
+      // parseSliceKey at render time, but we drop obviously malformed values
+      // here so the store never holds garbage.
+      const cleaned: Record<string, "X" | "Z"> = {};
+      for (const [k, v] of Object.entries(out.corrSurfaceMarks)) {
+        if (v === "X" || v === "Z") cleaned[k] = v;
+      }
+      if (Object.keys(cleaned).length === 0) {
+        out = { ...out };
+        delete out.corrSurfaceMarks;
+      } else if (cleaned !== out.corrSurfaceMarks) {
+        out = { ...out, corrSurfaceMarks: cleaned };
+      }
+    }
+  }
+
+  return out as Block;
+}
+
 export function applySnapshot(snapshot: SceneSnapshotV1, mode: ApplyMode = "hydrate"): void {
   const store = useBlockStore.getState();
-  const blocks = new Map<string, Block>(snapshot.blocks);
+  // Sanitize each block (drops malformed faceColors/faceCorrSurface payloads,
+  // translates legacy schemas if needed) before installing.
+  const blocks = new Map<string, Block>();
+  for (const [key, block] of snapshot.blocks) {
+    blocks.set(key, sanitizeBlock(block));
+  }
   const portMeta = new Map(snapshot.portMeta);
   const portPositions = new Set(snapshot.portPositions);
   if (mode === "load") {

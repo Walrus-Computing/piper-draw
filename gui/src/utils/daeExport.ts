@@ -73,15 +73,25 @@ export function exportBlocksToDae(blocks: Map<string, Block>): string {
   // .dae round-trip in v1 — drop them on export and log once so the user knows.
   let droppedSlabs = 0;
   let droppedYTwist = 0;
+  let droppedFaceColors = 0;
+  let droppedCorrMarks = 0;
   for (const block of blocks.values()) {
     if (isSlabType(block.type)) droppedSlabs++;
     else if (isYTwistPipe(block.type)) droppedYTwist++;
+    if (block.faceColors && Object.keys(block.faceColors).length > 0) droppedFaceColors++;
+    if (block.corrSurfaceMarks && Object.keys(block.corrSurfaceMarks).length > 0) droppedCorrMarks++;
   }
   if (droppedSlabs > 0) {
     console.info(`[daeExport] dropped ${droppedSlabs} slab(s) — slabs are not represented in .dae`);
   }
   if (droppedYTwist > 0) {
     console.warn(`[daeExport] dropped ${droppedYTwist} Y-twist pipe(s) — Y-twist pipes have no TQEC semantics in v1`);
+  }
+  if (droppedFaceColors > 0) {
+    console.info(`[daeExport] dropped face-paint overrides on ${droppedFaceColors} block(s) — paint is a free-build authoring artifact`);
+  }
+  if (droppedCorrMarks > 0) {
+    console.info(`[daeExport] dropped manual correlation-surface marks on ${droppedCorrMarks} block(s) — marks are a free-build authoring artifact`);
   }
 
   // Collect unique block kinds (excluding slabs and Y-twist pipes)

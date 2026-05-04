@@ -20,7 +20,7 @@ import {
 } from "../types";
 import type { CubeType, Position3D, ViewMode } from "../types";
 import { cameraGroundPoint } from "../utils/groundPlane";
-import { shouldPassThroughGridPlane } from "../utils/gridPlanePassthrough";
+import { isFaceTargetingTool, shouldPassThroughGridPlane } from "../utils/gridPlanePassthrough";
 import { snapIsoPos, isoGridMeshTransform } from "../utils/isoView";
 
 const PLANE_SIZE = 1000;
@@ -108,8 +108,10 @@ export function GridPlane() {
       }
       return;
     }
-    // Paint tool: targets faces of existing blocks, never the empty plane.
-    if (store.armedTool === "paint") {
+    // Face-targeting tools (paint, corr-surface) never preview on the empty
+    // plane — without this guard the handler falls through to cube/pipe
+    // placement preview below.
+    if (isFaceTargetingTool(store.armedTool)) {
       setHoveredGridPos(null);
       return;
     }
@@ -207,6 +209,8 @@ export function GridPlane() {
       addBlock(pos);
       return;
     }
+    // Face-targeting tools never place on ground-plane click.
+    if (isFaceTargetingTool(store.armedTool)) return;
     const forPipe = store.pipeVariant !== null;
     const pos = snapForViewMode(viewMode, e.point, forPipe);
     addBlock(pos);

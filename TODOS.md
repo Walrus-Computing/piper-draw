@@ -1,4 +1,46 @@
-# TODOs
+# TODOS
+
+Items deferred from CEO plan reviews. Each entry: what / why / effort / priority / depends-on / context.
+
+## P2 — corr-surface tool follow-ups
+
+### 1. Per-unit-cell slab granularity for corr-surface marks
+
+**What:** Extend `Block.faceCorrSurface` keying for slabs so the 2x2 top and bottom faces can be marked per unit cell (4 cells each), not just per whole face. Likely a sub-key like `"<faceIdx>:cell-<row><col>"` for slab faces 4 (top) and 5 (bottom).
+
+**Why:** Slabs fill 2x2 inner gaps where surface boundaries naturally land mid-slab; per-face granularity loses that detail.
+
+**Effort:** S (human ~1 day / CC ~30 min).
+**Priority:** P2 — only matters once a few authored scenes have shown that mid-slab boundaries actually appear.
+**Depends on:** v1 corr-surface tool shipped.
+
+**Context:** D7 in CEO review for branch `peter-janderks/manual-corr-surfaces`. v1 ships per-face marks on slabs (free, since slabs share the cube face-index scheme).
+
+### 2. JSON export of corr-surface marks
+
+**What:** Add a "Download manual surfaces JSON" toolbar action that emits `{sceneSignature, blocks: [{pos, type, marks: Record<faceKey, "X"|"Z">}]}`.
+
+**Why:** Approach A captures marks in localStorage / URL share but has no clean export. Studying patterns across many authored scenes requires export. This is the contract that feeds the future rule-derivation work.
+
+**Effort:** S (human ~1-2 hr / CC ~15 min).
+**Priority:** P2 — needed before rule-derivation work begins, not before.
+**Depends on:** v1 corr-surface tool shipped.
+
+**Context:** D13 in CEO review. Schema not finalized in advance — choose after authoring a few scenes so the shape matches what rule code actually wants to consume.
+
+### 3. Pauli I/O context attached to corr-surface marks
+
+**What:** Add UI that lets the user record port-pair Pauli context (input/output operators on labeled ports) for the current set of marks, and serialize that context alongside the marks (probably in JSON export).
+
+**Why:** A correlation surface is a *labeled* object: "X on port A → Z on port B." Approach A captures shape only. Without the Pauli labels, a marks dataset can't be turned into rules — you don't know *why* a given face is X vs Z.
+
+**Effort:** M (human ~3-5 days / CC ~1-2 hr).
+**Priority:** P2 — only matters once approach-A authoring shows whether context affects basis assignments in non-obvious ways.
+**Depends on:** v1 corr-surface tool shipped; ideally TODO #2 (so labels ride along in export).
+
+**Context:** D14 in CEO review. This is what approach B/C in the original review would have built up-front; the user chose approach A explicitly to defer this.
+
+---
 
 ## Deferred from CEO plan: Group Elements (2026-04-29)
 

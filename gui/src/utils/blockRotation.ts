@@ -274,19 +274,27 @@ export function rotateBlockAroundAxis(
 
   const newPos = rotatePositionAroundAxis(block.pos, pivot, axis, operation, needsCoordCanon);
 
-  // Face-paint colors only rotate under a Z 90° (CCW/CW). Other axes/180°
-  // are not supported by the paint UI today, so face colors pass through
-  // unchanged in those cases. Spread `block` first so optional metadata
-  // (e.g. `groupId`) rides through; without it group membership would
-  // silently disappear on every rotate.
+  // Face-paint colors and corr-surface marks only rotate under a Z 90°
+  // (CCW/CW). Other axes/180° are not supported by the paint or corr-surface
+  // UI today, so face annotations pass through unchanged in those cases.
+  // Spread `block` first so optional metadata (e.g. `groupId`) rides through;
+  // without it group membership would silently disappear on every rotate.
   const result: Block = { ...block, pos: newPos, type: newType as Block["type"] };
-  if (block.faceColors) {
-    if (axis === "z" && operation !== "flip") {
+  if (axis === "z" && operation !== "flip") {
+    if (block.faceColors) {
       const rotated = rotateFaceColorsAroundZ(block.faceColors, block.type, operation);
       if (rotated) {
         result.faceColors = rotated;
       } else {
         delete result.faceColors;
+      }
+    }
+    if (block.corrSurfaceMarks) {
+      const rotated = rotateAxisKeyedRecordAroundZ(block.corrSurfaceMarks, block.type, operation);
+      if (rotated) {
+        result.corrSurfaceMarks = rotated;
+      } else {
+        delete result.corrSurfaceMarks;
       }
     }
   }
@@ -348,11 +356,16 @@ function flipHStrip(strip: string, threeOpenAxis: 0 | 1 | 2, direction: Rotation
   return strip === "below" ? "above" : strip === "above" ? "below" : strip;
 }
 
-function rotateFaceColorsAroundZ(
-  faceColors: Record<string, string>,
+/**
+ * Generic Z-rotation for any face-keyed annotation `Record<string, T>`.
+ * Permutes face indices, flips H/Y-twist below↔above strips per axis, and
+ * passes values through unchanged. Used by `rotateFaceColorsAroundZ` (paint).
+ */
+export function rotateFaceKeyedRecordAroundZ<T>(
+  record: Record<string, T>,
   blockType: Block["type"],
   direction: RotationDirection,
-): Record<string, string> | undefined {
+): Record<string, T> | undefined {
   const perm = direction === "ccw" ? FACE_PERM_CCW : FACE_PERM_CW;
   let threeOpenAxis: 0 | 1 | 2 | null = null;
   // Hadamard ("H") and Y-twist ("Y") pipes have per-strip face keys whose
@@ -364,15 +377,15 @@ function rotateFaceColorsAroundZ(
     const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
     threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpen] as 0 | 1 | 2;
   }
-  const out: Record<string, string> = {};
-  for (const [key, hex] of Object.entries(faceColors)) {
+  const out: Record<string, T> = {};
+  for (const [key, value] of Object.entries(record)) {
     const colon = key.indexOf(":");
     if (colon === -1) {
       const idx = Number(key);
       if (Number.isInteger(idx) && idx >= 0 && idx < 6) {
-        out[String(perm[idx])] = hex;
+        out[String(perm[idx])] = value;
       } else {
-        out[key] = hex;
+        out[key] = value;
       }
     } else {
       const idx = Number(key.slice(0, colon));
@@ -381,11 +394,69 @@ function rotateFaceColorsAroundZ(
         ? flipHStrip(strip, threeOpenAxis, direction)
         : strip;
       if (Number.isInteger(idx) && idx >= 0 && idx < 6) {
-        out[`${perm[idx]}:${newStrip}`] = hex;
+        out[`${perm[idx]}:${newStrip}`] = value;
       } else {
-        out[key] = hex;
+        out[key] = value;
       }
     }
   }
   return Object.keys(out).length ? out : undefined;
+}
+
+function rotateFaceColorsAroundZ(
+  faceColors: Record<string, string>,
+  blockType: Block["type"],
+  direction: RotationDirection,
+): Record<string, string> | undefined {
+  return rotateFaceKeyedRecordAroundZ(faceColors, blockType, direction);
+}
+
+/**
+ * Z-axis 90° rotation permutes Three.js axis indices: X (0) ↔ Z (2),
+ * Y (1) is invariant. Same permutation under both CCW and CW (rotation
+ * direction affects the position-vector signs, not the axis labels).
+ */
+const AXIS_PERM_Z_ROT = [2, 1, 0] as const;
+
+/**
+ * Generic Z-rotation for any axis-keyed annotation `Record<string, T>` —
+ * the per-axis schema for `corrSurfaceMarks`. Permutes the axis index
+ * (0 ↔ 2, Y invariant) and flips H/Y-twist `below ↔ above` strip suffixes
+ * the same way as the face-keyed helper. Bare strings that aren't valid
+ * axis-keys pass through unchanged (defensive — they shouldn't exist).
+ */
+export function rotateAxisKeyedRecordAroundZ<T>(
+  record: Record<string, T>,
+  blockType: Block["type"],
+  direction: RotationDirection,
+): Record<string, T> | undefined {
+  let threeOpenAxis: 0 | 1 | 2 | null = null;
+  const isHadamard = isPipeType(blockType) && blockType.endsWith("H");
+  const isYTwist = isPipeType(blockType) && blockType.endsWith("Y") && blockType.length === 4;
+  if (isHadamard || isYTwist) {
+    const base = blockType.length > 3 ? blockType.slice(0, 3) : blockType;
+    const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
+    threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpen] as 0 | 1 | 2;
+  }
+  const out: Record<string, T> = {};
+  for (const [key, value] of Object.entries(record)) {
+    const colon = key.indexOf(":");
+    const axisStr = colon === -1 ? key : key.slice(0, colon);
+    const axis = Number(axisStr);
+    if (!Number.isInteger(axis) || axis < 0 || axis > 2) {
+      out[key] = value;
+      continue;
+    }
+    const newAxis = AXIS_PERM_Z_ROT[axis];
+    if (colon === -1) {
+      out[String(newAxis)] = value;
+    } else {
+      const strip = key.slice(colon + 1);
+      const newStrip = threeOpenAxis !== null
+        ? flipHStrip(strip, threeOpenAxis, direction)
+        : strip;
+      out[`${newAxis}:${newStrip}`] = value;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }

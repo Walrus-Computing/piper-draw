@@ -108,6 +108,41 @@ skipIfNoCompression("encode/decode round-trip", () => {
   it("returns null when there is no scene param", async () => {
     expect(await decodeSnapshotFromHash("#nothing-here")).toBe(null);
   });
+
+  it("round-trips faceColors and corrSurfaceMarks annotations", async () => {
+    const blocks: Array<[string, Block]> = [
+      [
+        "0,0,0",
+        {
+          pos: { x: 0, y: 0, z: 0 },
+          type: "XZZ",
+          faceColors: { "0": "#abcdef", "5": "#123456" },
+          corrSurfaceMarks: { "0": "X", "2": "Z" },
+        },
+      ],
+    ];
+    const original = snapshot(blocks);
+    const encoded = await encodeSnapshotToHashParam(original);
+    const decoded = await decodeSnapshotFromHash(`#scene=${encoded}`);
+    expect(decoded).toEqual(original);
+  });
+
+  it("round-trips corrSurfaceMarks with sub-strip axis keys on Hadamard pipes", async () => {
+    const blocks: Array<[string, Block]> = [
+      [
+        "1,0,0",
+        {
+          pos: { x: 1, y: 0, z: 0 },
+          type: "OZXH",
+          corrSurfaceMarks: { "1:band": "X", "1:below": "Z", "1:above": "X" },
+        },
+      ],
+    ];
+    const original = snapshot(blocks);
+    const encoded = await encodeSnapshotToHashParam(original);
+    const decoded = await decodeSnapshotFromHash(`#scene=${encoded}`);
+    expect(decoded).toEqual(original);
+  });
 });
 
 skipIfNoCompression("decode-side hard caps", () => {

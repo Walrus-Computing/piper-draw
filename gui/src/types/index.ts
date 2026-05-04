@@ -109,11 +109,11 @@ export const PLACEABLE_ORDER: ReadonlyArray<Placeable> = [
  * pointer tool is armed (no placeable selected).
  */
 export function currentPlaceableIndex(
-  armedTool: "pointer" | "cube" | "pipe" | "port" | "paste" | "slab" | "paint",
+  armedTool: "pointer" | "cube" | "pipe" | "port" | "paste" | "slab" | "paint" | "corr-surface",
   cubeType: BlockType,
   pipeVariant: PipeVariant | null,
 ): number {
-  if (armedTool === "pointer" || armedTool === "paste" || armedTool === "paint") return -1;
+  if (armedTool === "pointer" || armedTool === "paste" || armedTool === "paint" || armedTool === "corr-surface") return -1;
   if (armedTool === "port") return 0;
   if (armedTool === "slab") return PLACEABLE_ORDER.findIndex((p) => p.kind === "slab");
   if (armedTool === "pipe") {
@@ -147,7 +147,27 @@ export interface Block {
    * Auto-promoted blocks intentionally start ungrouped (`undefined`).
    */
   groupId?: string;
+  /**
+   * Manual correlation-surface marks. **Axis-keyed**, not face-keyed:
+   *   - `"0" | "1" | "2"` — slice axis index (Three.js axis), for non-H/Y blocks
+   *   - `"<axis>:below|band|above"` — Hadamard / Y-twist pipes, where the strip
+   *     clip runs lengthwise along the open axis (different from slice axis)
+   *
+   * Each mark renders as a flat quad in the plane perpendicular to the slice
+   * axis, at the block's centerline along that axis. Matches what TQEC's
+   * `/api/flows` returns: an internal cross-section, NOT an outer face.
+   *
+   * +Y and -Y of the same pipe address the same slice (same axis); the
+   * click handler normalizes face index to axis index at write time. Per
+   * block: max 3 keys (cube/slab/Y) or up to 6 (H/Y pipe with strip clips).
+   *
+   * Dropped on `.dae` export. Legacy `faceCorrSurface` payloads are
+   * translated to this shape on snapshot load by `sanitizeBlock`.
+   */
+  corrSurfaceMarks?: Record<string, "X" | "Z">;
 }
+
+export type CorrBasis = "X" | "Z";
 
 export type PortIO = "in" | "out";
 
@@ -427,6 +447,68 @@ export function faceIndexFromNormal(n: THREE.Vector3): 0 | 1 | 2 | 3 | 4 | 5 {
   if (ax >= ay && ax >= az) return n.x > 0 ? 0 : 1;
   if (ay >= az) return n.y > 0 ? 2 : 3;
   return n.z > 0 ? 4 : 5;
+}
+
+/**
+ * For Hadamard / Y-twist pipes, determine which strip (`below`/`band`/`above`)
+ * a click landed in, based on the local hit position along the pipe's open
+ * axis. Returns `null` for non-pipe blocks and for non-colour-flip pipes
+ * (where there are no strips to disambiguate). Shared sub-helper of
+ * `deriveFaceKey` (paint, returns face-keys) and `deriveSliceKey`
+ * (corr-surface, returns axis-keys).
+ */
+export function derivePipeStrip(
+  block: Block,
+  hitPoint: THREE.Vector3,
+): "below" | "band" | "above" | null {
+  if (!isPipeType(block.type)) return null;
+  const isHad = block.type.endsWith("H");
+  const isYTwist = block.type.endsWith("Y") && block.type.length === 4;
+  if (!isHad && !isYTwist) return null;
+  const base = block.type.length > 3 ? block.type.slice(0, 3) : block.type;
+  const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
+  const threeOpen = TQEC_TO_THREE_AXIS[tqecOpen];
+  const [cx, cy, cz] = tqecToThree(block.pos, block.type);
+  const local: [number, number, number] = [
+    hitPoint.x - cx,
+    hitPoint.y - cy,
+    hitPoint.z - cz,
+  ];
+  const t = local[threeOpen];
+  return isHad
+    ? t < -H_BAND_HALF_HEIGHT ? "below" : t > H_BAND_HALF_HEIGHT ? "above" : "band"
+    : t < 0 ? "below" : "above";
+}
+
+/**
+ * Three.js axis (0/1/2) the pipe is open along, or `null` if `block` is not a
+ * pipe. Used by click handlers to skip clicks on open-axis end faces (no
+ * rendered geometry) and by the corr-surface `deriveSliceKey` to detect them.
+ */
+export function pipeOpenThreeAxis(block: Block): 0 | 1 | 2 | null {
+  if (!isPipeType(block.type)) return null;
+  const base = block.type.length > 3 ? block.type.slice(0, 3) : block.type;
+  const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
+  return TQEC_TO_THREE_AXIS[tqecOpen] as 0 | 1 | 2;
+}
+
+/**
+ * Derive a face key string for a click on `block` (paint tool). Returns:
+ *   - `"0".."5"` for cubes / Y / slabs / non-colour-flip pipes,
+ *   - `"<faceIdx>:band|below|above"` for Hadamard / Y-twist pipes,
+ *   - `null` if the click hit an open-axis end face (no rendered geometry).
+ */
+export function deriveFaceKey(
+  block: Block,
+  hitNormal: THREE.Vector3,
+  hitPoint: THREE.Vector3,
+): string | null {
+  const faceIdx = faceIndexFromNormal(hitNormal);
+  const open = pipeOpenThreeAxis(block);
+  // Open-axis end faces of pipes have no rendered geometry.
+  if (open !== null && (faceIdx >> 1) === open) return null;
+  const strip = derivePipeStrip(block, hitPoint);
+  return strip === null ? String(faceIdx) : `${faceIdx}:${strip}`;
 }
 
 /**

@@ -18,11 +18,9 @@ import {
   resolvePipeType,
   getAdjacentPos,
   posKey,
-  faceIndexFromNormal,
-  TQEC_TO_THREE_AXIS,
-  H_BAND_HALF_HEIGHT,
-  PIPE_PAINT_BAND_HALF,
+  deriveFaceKey,
 } from "../types";
+import { deriveSliceKey } from "../utils/corrSurfaceGeom";
 import type { BlockType, CubeType, Block, FaceMask } from "../types";
 import { posInActiveSlice } from "../utils/isoView";
 import {
@@ -215,9 +213,9 @@ function TypedInstances({
       // Slab tool: never face-adjacent — the placement target is the gap
       // between pipes on the ground plane, handled by GridPlane.
       store.setHoveredGridPos(null);
-    } else if (store.mode === "edit" && armed === "paint") {
-      // Paint tool: hover does nothing yet (face-level hover preview is
-      // out of scope for v1). Clicks paint the face under the cursor.
+    } else if (store.mode === "edit" && (armed === "paint" || armed === "corr-surface")) {
+      // Face-targeting tools: hover does nothing (no placement preview, no
+      // face-level hover preview yet). Clicks mark the face under the cursor.
       store.setHoveredGridPos(null);
     } else {
       // Place mode: check if we can replace the hovered block itself
@@ -346,40 +344,29 @@ function TypedInstances({
       if (armed === "paint") {
         if (!e.face) return;
         const block = b[e.instanceId];
-        const faceIdx = faceIndexFromNormal(e.face.normal);
-        let key = String(faceIdx);
-        if (isSlabType(block.type) && (faceIdx === 2 || faceIdx === 3)) {
-          const [cx, , cz] = tqecToThree(block.pos, block.type);
-          const localX = e.point.x - cx;
-          const localZ = e.point.z - cz;
-          const ix = localX < -1 / 3 ? 0 : localX > 1 / 3 ? 2 : 1;
-          const iz = localZ < -1 / 3 ? 0 : localZ > 1 / 3 ? 2 : 1;
-          const q = ix + iz * 3;
-          key = `${faceIdx}:${q}`;
-        } else if (isPipeType(block.type)) {
-          // Strip both possible band-style suffixes ("H" for Hadamard, "Y" for Y-twist)
-          // before reading the open-axis position.
-          const base = block.type.length > 3 ? block.type.slice(0, 3) : block.type;
-          const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
-          const threeOpen = TQEC_TO_THREE_AXIS[tqecOpen];
-          // Open-axis faces have no rendered geometry — ignore the click.
-          if ((faceIdx >> 1) === threeOpen) return;
-          // All pipes (plain, Hadamard, Y-twist) have three paintable strips
-          // per closed-axis face, split along the open axis. Hadamard's band
-          // matches its thin visual yellow stripe; plain and Y-twist split
-          // into equal thirds (geometry and hit-test stay aligned).
-          const [cx, cy, cz] = tqecToThree(block.pos, block.type);
-          const local: [number, number, number] = [
-            e.point.x - cx,
-            e.point.y - cy,
-            e.point.z - cz,
-          ];
-          const t = local[threeOpen];
-          const bh = block.type.endsWith("H") ? H_BAND_HALF_HEIGHT : PIPE_PAINT_BAND_HALF;
-          const strip = t < -bh ? "below" : t > bh ? "above" : "band";
-          key = `${faceIdx}:${strip}`;
-        }
+        const key = deriveFaceKey(block, e.face.normal, e.point);
+        if (key === null) return;
         store.paintFace(block.pos, key, store.paintColor);
+        return;
+      }
+      if (armed === "corr-surface") {
+        if (!e.face) return;
+        const block = b[e.instanceId];
+        // v1: corr-surface authoring is restricted to pipes — that's where
+        // TQEC has the most interesting H/Y behavior to study and where the
+        // FB-only types (Y-twist) need empirical rule discovery. Cubes / slabs
+        // / Y blocks are excluded for now (clicks no-op).
+        if (!isPipeType(block.type)) return;
+        const axisKey = deriveSliceKey(block, e.face.normal, e.point);
+        if (axisKey === null) return;
+        // Click semantics: same basis on a marked slice → unmark; other
+        // basis → switch; unmarked → mark with the armed basis. +Y and -Y
+        // of the same pipe both address the same axis-key, so clicks on
+        // either side dedupe by construction.
+        const cur = block.corrSurfaceMarks?.[axisKey];
+        const armedBasis = store.corrBasis;
+        const next = cur === armedBasis ? null : armedBasis;
+        store.markCorrSurface(block.pos, axisKey, next);
         return;
       }
       // Place mode: try replacing the clicked block if the selected type
@@ -433,6 +420,7 @@ export function BlockInstances() {
   const hiddenFaces = useBlockStore((s) => s.hiddenFaces);
   const viewMode = useBlockStore((s) => s.viewMode);
   const flowVizMode = useBlockStore((s) => s.flowVizMode);
+  const corrSurfaceVizMode = useBlockStore((s) => s.corrSurfaceVizMode);
 
   const grouped = useMemo(() => {
     type Group = {
@@ -445,8 +433,12 @@ export function BlockInstances() {
     const map = new Map<string, Group>();
     for (const block of blocks.values()) {
       const hf = hiddenFaces.get(posKey(block.pos)) ?? 0;
+      // Dim block walls when either flow surfaces or manual correlation
+      // surface marks are being shown — both render *inside* the blocks, and
+      // would be invisible behind opaque walls otherwise.
       const dimmed =
         flowVizMode ||
+        corrSurfaceVizMode ||
         (viewMode.kind === "iso" && !posInActiveSlice(viewMode, block.pos));
       const fcKey = faceColorsKey(block.faceColors);
       const key = `${block.type}:${hf}:${dimmed ? 1 : 0}:${fcKey}`;
@@ -464,7 +456,7 @@ export function BlockInstances() {
       }
     }
     return map;
-  }, [blocks, hiddenFaces, viewMode, flowVizMode]);
+  }, [blocks, hiddenFaces, viewMode, flowVizMode, corrSurfaceVizMode]);
 
   return (
     <>

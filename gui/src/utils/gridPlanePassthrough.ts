@@ -1,4 +1,17 @@
 import type { Intersection, Object3D } from "three";
+import type { ArmedTool } from "../stores/blockStore";
+
+/**
+ * Tools that target faces of existing blocks. The ground plane is not a
+ * legitimate target for these tools — ground-plane clicks must be no-ops, and
+ * pointermove must clear the hover preview rather than render a placement
+ * ghost. A bug regression sits on top of this: any new face-targeting tool
+ * must be added here, otherwise GridPlane will fall through to its
+ * cube/pipe/port placement path and place stray blocks on ground clicks.
+ */
+export function isFaceTargetingTool(armedTool: ArmedTool): boolean {
+  return armedTool === "paint" || armedTool === "corr-surface";
+}
 
 /**
  * In select mode, GridPlane should bow out of clicks/hovers when the ray also

@@ -35,6 +35,7 @@ import { ZXPanel } from "./components/ZXPanel";
 import { PortLabels3D } from "./components/PortLabels3D";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
 import { FlowSurfaceOverlay } from "./components/FlowSurfaceOverlay";
+import { CorrSurfaceOverlay } from "./components/CorrSurfaceOverlay";
 import { YDefectOverlay } from "./components/YDefectOverlay";
 import { BuildModeHints } from "./components/BuildModeHints";
 import { EditModeHints } from "./components/EditModeHints";
@@ -1284,6 +1285,7 @@ export default function App() {
         {!photoRequest && !flowVizMode && <OpenPipeGhosts />}
       {!photoRequest && (flowsPanelOpen || zxPanelOpen || flowVizMode) && <PortLabels3D />}
         {!photoRequest && <FlowSurfaceOverlay />}
+        {!photoRequest && <CorrSurfaceOverlay />}
         {!photoRequest && <YDefectOverlay />}
         <CameraBuildSnap controlsRef={controlsRef} />
         <GridPlane />
