@@ -169,10 +169,12 @@ export function GridPlane() {
     // X-held delete on empty grid is a no-op.
     if (store.xHeld) { e.stopPropagation(); return; }
 
-    if (store.armedTool === "pointer") {
+    if (store.armedTool === "pointer" || store.armedTool === "paint") {
       // Pass-through: when the click ray also hits a block or port ghost
       // further along, let that handler own the event so sub-ground blocks
-      // (TQEC z<0) can be selected from above.
+      // (TQEC z<0) can be selected from above, and so the bottom face of a
+      // slab (or any block) can be painted when the camera is below the
+      // plane (Three.js y=0).
       //
       // NOTE: this couples deselect-on-empty-click policy to GridPlane. Any
       // future clickable scene mesh must either opt out of raycast (the
@@ -181,7 +183,8 @@ export function GridPlane() {
       // silently stop working through that mesh.
       if (shouldPassThroughGridPlane(e.intersections, meshRef.current)) return;
       e.stopPropagation();
-      store.clearSelection();
+      // Empty-plane click clears the pointer selection; paint is a no-op.
+      if (store.armedTool === "pointer") store.clearSelection();
       return;
     }
     // Paste / port / placement: the plane is the intended target, so we

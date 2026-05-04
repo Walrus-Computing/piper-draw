@@ -2536,8 +2536,35 @@ describe("blockStore", () => {
     });
   });
 
-  describe("paint H→Y conversion drops orphaned :band corr-marks", () => {
-    it("paintFace that converts OZXH → OZXY strips axis :band corr-surface marks", () => {
+  describe("paintFace — repaint", () => {
+    it("overwrites an existing cell color when paintFace is called twice on the same key", () => {
+      // Place a slab. Slabs need free-build mode and a 2x2 inner gap pos.
+      useBlockStore.setState({ freeBuild: true, armedTool: "slab", cubeType: "slab" });
+      const pos = { x: 1, y: 1, z: 0 };
+      const slab: Block = { pos, type: "slab" };
+      const blocks = new Map<string, Block>();
+      blocks.set("1,1,0", slab);
+      useBlockStore.setState({ blocks, spatialIndex: buildSpatialIndex(blocks) });
+
+      // First paint: cell q=4 (center top) → red.
+      useBlockStore.getState().paintFace(pos, "2:4", "#ff0000");
+      expect(useBlockStore.getState().blocks.get("1,1,0")?.faceColors).toEqual({ "2:4": "#ff0000" });
+
+      // Repaint same cell with a different color → blue must overwrite red.
+      useBlockStore.getState().paintFace(pos, "2:4", "#0000ff");
+      expect(useBlockStore.getState().blocks.get("1,1,0")?.faceColors).toEqual({ "2:4": "#0000ff" });
+
+      // Paint a second cell q=0 → both keys should coexist with their own colors.
+      useBlockStore.getState().paintFace(pos, "2:0", "#00ff00");
+      expect(useBlockStore.getState().blocks.get("1,1,0")?.faceColors).toEqual({
+        "2:4": "#0000ff",
+        "2:0": "#00ff00",
+      });
+    });
+  });
+
+  describe("paint H→Y conversion preserves corr-marks", () => {
+    it("paintFace that converts OZXH → OZXY keeps :band corr-surface marks (Y-twist also has a band strip)", () => {
       const pipe: Block = {
         pos: { x: 1, y: 0, z: 0 },
         type: "OZXH",
@@ -2552,42 +2579,6 @@ describe("blockStore", () => {
       useBlockStore.getState().paintFace({ x: 1, y: 0, z: 0 }, "2:band", "#ff00ff");
       const after = useBlockStore.getState().blocks.get("1,0,0")!;
       expect(after.type).toBe("OZXY");
-      expect(after.corrSurfaceMarks).toEqual({ "1:below": "Z" });
-    });
-
-    it("drops corrSurfaceMarks entirely if all entries were :band", () => {
-      const pipe: Block = {
-        pos: { x: 1, y: 0, z: 0 },
-        type: "OZXH",
-        corrSurfaceMarks: { "1:band": "X", "2:band": "Z" },
-      };
-      const blocks = new Map<string, Block>([["1,0,0", pipe]]);
-      useBlockStore.setState({
-        blocks,
-        spatialIndex: buildSpatialIndex(blocks),
-        hiddenFaces: new Map(),
-      });
-      useBlockStore.getState().paintFace({ x: 1, y: 0, z: 0 }, "2:band", "#ff00ff");
-      const after = useBlockStore.getState().blocks.get("1,0,0")!;
-      expect(after.type).toBe("OZXY");
-      expect(after.corrSurfaceMarks).toBeUndefined();
-    });
-
-    it("non-band paint does not touch corr-marks", () => {
-      const pipe: Block = {
-        pos: { x: 1, y: 0, z: 0 },
-        type: "OZXH",
-        corrSurfaceMarks: { "1:band": "X", "1:below": "Z" },
-      };
-      const blocks = new Map<string, Block>([["1,0,0", pipe]]);
-      useBlockStore.setState({
-        blocks,
-        spatialIndex: buildSpatialIndex(blocks),
-        hiddenFaces: new Map(),
-      });
-      useBlockStore.getState().paintFace({ x: 1, y: 0, z: 0 }, "2:above", "#abcdef");
-      const after = useBlockStore.getState().blocks.get("1,0,0")!;
-      expect(after.type).toBe("OZXH");
       expect(after.corrSurfaceMarks).toEqual({ "1:band": "X", "1:below": "Z" });
     });
   });

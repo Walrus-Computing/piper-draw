@@ -1085,36 +1085,22 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     const key = posKey(pos);
     const oldBlock = state.blocks.get(key);
     if (!oldBlock) return state;
-    let nextOverrides: Record<string, string> = { ...(oldBlock.faceColors ?? {}) };
+    const nextOverrides: Record<string, string> = { ...(oldBlock.faceColors ?? {}) };
     nextOverrides[faceKey] = color;
 
     // Auto-promote: a Hadamard pipe whose yellow band is painted away from H_HEX
-    // no longer mediates the X↔Z basis switch on its walls — the geometric
-    // equivalent is a Y-twist (magenta seam, no band strip). Convert the type
-    // and drop the now-orphaned ":band" overrides since Y-twist has no band.
+    // no longer reads as the canonical yellow-band Hadamard — the geometric
+    // equivalent is a Y-twist (magenta seam at the open-axis midline). Convert
+    // the type but keep the painted band override, since Y-twist faces also
+    // expose a paintable band strip.
     let newType: BlockType = oldBlock.type;
     const isHadBand = isPipeType(oldBlock.type)
       && oldBlock.type.endsWith("H")
       && faceKey.endsWith(":band")
       && color.toLowerCase() !== H_HEX.toLowerCase();
-    let nextCorrMarks: Record<string, "X" | "Z"> | undefined = oldBlock.corrSurfaceMarks;
+    const nextCorrMarks: Record<string, "X" | "Z"> | undefined = oldBlock.corrSurfaceMarks;
     if (isHadBand) {
       newType = (oldBlock.type.slice(0, -1) + "Y") as BlockType;
-      const stripped: Record<string, string> = {};
-      for (const [k, v] of Object.entries(nextOverrides)) {
-        if (!k.endsWith(":band")) stripped[k] = v;
-      }
-      nextOverrides = stripped;
-      // Y-twist has no band strip; any axis-keyed corr-surface mark with a
-      // ":band" suffix on this block is now semantically invalid (it described
-      // a slice through the Hadamard band that no longer exists). Drop them.
-      if (nextCorrMarks) {
-        const cleanedMarks: Record<string, "X" | "Z"> = {};
-        for (const [k, v] of Object.entries(nextCorrMarks)) {
-          if (!k.endsWith(":band")) cleanedMarks[k] = v;
-        }
-        nextCorrMarks = Object.keys(cleanedMarks).length > 0 ? cleanedMarks : undefined;
-      }
     }
 
     const newBlock: Block = { ...oldBlock, type: newType, faceColors: nextOverrides };
