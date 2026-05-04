@@ -12,6 +12,8 @@ import type { BlockType, FaceMask } from "../types";
 
 const yDefectMaterial = new THREE.MeshLambertMaterial({ color: Y_DEFECT_HEX });
 
+const noRaycast = () => {};
+
 type CylinderInstance = {
   geometry: THREE.CylinderGeometry;
   position: THREE.Vector3;
@@ -74,6 +76,7 @@ export function YDefectOverlay() {
               material={yDefectMaterial}
               position={c.position}
               quaternion={c.quaternion}
+              raycast={noRaycast}
             />
           ))}
         </group>
