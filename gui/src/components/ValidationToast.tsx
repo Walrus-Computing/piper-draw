@@ -4,6 +4,7 @@ import { useValidationStore } from "../stores/validationStore";
 import type { ValidationError } from "../stores/validationStore";
 import { tqecToThree, posKey } from "../types";
 import { animateCamera } from "../utils/cameraAnim";
+import { toastBus } from "../utils/toastBus";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function navigateToError(error: ValidationError, controlsRef: React.RefObject<any>) {
@@ -37,6 +38,19 @@ const styleVariants: Record<string, React.CSSProperties> = {
   invalid: { background: "#f8d7da", color: "#721c24", border: "1px solid #f5c6cb" },
   error: { background: "#fff3cd", color: "#856404", border: "1px solid #ffeeba" },
   aborted: { background: "#f8d7da", color: "#721c24", border: "1px solid #f5c6cb" },
+};
+
+// Info-channel toast — stacked at top-right, deliberately offset from the
+// center-aligned validation toast so the two never collide. Click to dismiss.
+const infoToastStyle: React.CSSProperties = {
+  ...baseStyle,
+  left: "auto",
+  transform: "none",
+  right: 16,
+  background: "#e2e3e5",
+  color: "#383d41",
+  border: "1px solid #d6d8db",
+  cursor: "pointer",
 };
 
 const errorRowStyle: React.CSSProperties = {
@@ -90,13 +104,37 @@ export function ValidationToast({
   const selectError = useValidationStore((s) => s.selectError);
   const [topOffset, setTopOffset] = useState(0);
   const [expanded, setExpanded] = useState(false);
+  const [infoToast, setInfoToast] = useState<{ message: string; nonce: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (status === "idle" || !toolbarRef.current) return;
+    // Recompute when either kind of toast becomes visible — the info toast
+    // can be the only one on screen, in which case status stays idle.
+    if (status === "idle" && !infoToast) return;
+    if (!toolbarRef.current) return;
     const rect = toolbarRef.current.getBoundingClientRect();
     setTopOffset(rect.bottom + 8);
-  }, [status, toolbarRef]);
+  }, [status, toolbarRef, infoToast]);
+
+  // Subscribe to the info channel directly — bypasses validationStore so
+  // info toasts never trigger a re-render of components that select status /
+  // errors / invalidKeys (R7: dissolve toasts no longer wipe verify state).
+  useEffect(() => {
+    let nonce = 0;
+    const unsub = toastBus.info.subscribe((message) => {
+      nonce += 1;
+      setInfoToast({ message, nonce });
+    });
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    if (!infoToast) return;
+    const t = setTimeout(() => {
+      setInfoToast((cur) => (cur && cur.nonce === infoToast.nonce ? null : cur));
+    }, 3000);
+    return () => clearTimeout(t);
+  }, [infoToast]);
 
   useEffect(() => {
     if (status === "valid") {
@@ -109,7 +147,17 @@ export function ValidationToast({
     }
   }, [status, dismiss]);
 
-  if (status === "idle") return null;
+  const infoOverlay = infoToast ? (
+    <div
+      key={infoToast.nonce}
+      style={{ ...infoToastStyle, top: topOffset }}
+      onClick={() => setInfoToast(null)}
+    >
+      {infoToast.message}
+    </div>
+  ) : null;
+
+  if (status === "idle") return infoOverlay;
 
   const variantKey = status === "invalid" && errors.some((e) => e.message.includes("not available")) ? "error" : status;
   const style: React.CSSProperties = {
@@ -120,19 +168,32 @@ export function ValidationToast({
   };
 
   if (status === "loading") {
-    return <div style={style}>Verifying with tqec...</div>;
+    return (
+      <>
+        <div style={style}>Verifying with tqec...</div>
+        {infoOverlay}
+      </>
+    );
   }
 
   if (status === "valid") {
     return (
-      <div style={style} onClick={dismiss}>
-        Diagram is valid
-      </div>
+      <>
+        <div style={style} onClick={dismiss}>
+          Diagram is valid
+        </div>
+        {infoOverlay}
+      </>
     );
   }
 
   if (status === "aborted") {
-    return <div style={style}>{errors[0]?.message ?? ""}</div>;
+    return (
+      <>
+        <div style={style}>{errors[0]?.message ?? ""}</div>
+        {infoOverlay}
+      </>
+    );
   }
 
   // Invalid / error status
@@ -174,32 +235,35 @@ export function ValidationToast({
   };
 
   return (
-    <div style={style}>
-      {errors.length > 1 && (
-        <div style={{ marginBottom: "4px" }}>{errors.length} validation errors found</div>
-      )}
-      <div
-        ref={scrollRef}
-        style={{
-          fontSize: "12px",
-          ...(effectiveExpanded ? { maxHeight: "200px", overflowY: "auto" } : {}),
-        }}
-      >
-        {visibleErrors.map((e, i) => renderErrorRow(e, i))}
-      </div>
-      {hasOverflow && !effectiveExpanded && (
-        <button
-          style={{ ...dismissAllStyle, borderColor: "rgba(114, 28, 36, 0.2)" }}
-          onClick={() => setExpanded(true)}
+    <>
+      <div style={style}>
+        {errors.length > 1 && (
+          <div style={{ marginBottom: "4px" }}>{errors.length} validation errors found</div>
+        )}
+        <div
+          ref={scrollRef}
+          style={{
+            fontSize: "12px",
+            ...(effectiveExpanded ? { maxHeight: "200px", overflowY: "auto" } : {}),
+          }}
         >
-          Show all {errors.length} errors
-        </button>
-      )}
-      {errors.length > 1 && (
-        <button style={dismissAllStyle} onClick={dismiss}>
-          Dismiss all
-        </button>
-      )}
-    </div>
+          {visibleErrors.map((e, i) => renderErrorRow(e, i))}
+        </div>
+        {hasOverflow && !effectiveExpanded && (
+          <button
+            style={{ ...dismissAllStyle, borderColor: "rgba(114, 28, 36, 0.2)" }}
+            onClick={() => setExpanded(true)}
+          >
+            Show all {errors.length} errors
+          </button>
+        )}
+        {errors.length > 1 && (
+          <button style={dismissAllStyle} onClick={dismiss}>
+            Dismiss all
+          </button>
+        )}
+      </div>
+      {infoOverlay}
+    </>
   );
 }

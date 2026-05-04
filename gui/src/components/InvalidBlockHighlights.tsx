@@ -3,8 +3,11 @@ import * as THREE from "three";
 import { useValidationStore } from "../stores/validationStore";
 import { useBlockStore } from "../stores/blockStore";
 import { usePulseScale } from "../hooks/usePulseScale";
-import { tqecToThree, yBlockZOffset, blockThreeSize, posKey } from "../types";
+import { tqecToThree, yBlockZOffset, posKey } from "../types";
 import type { BlockType, Position3D } from "../types";
+import { getHighlightGeo } from "./highlightGeo";
+
+const HIGHLIGHT_SCALE = 1.05;
 
 const highlightMaterial = new THREE.MeshBasicMaterial({
   color: 0xff0000,
@@ -27,24 +30,6 @@ const pulsingMaterial = new THREE.MeshBasicMaterial({
   side: THREE.DoubleSide,
 });
 
-const boxCache = new Map<BlockType, THREE.BoxGeometry>();
-const edgesCache = new Map<BlockType, THREE.EdgesGeometry>();
-
-function getHighlightGeo(blockType: BlockType) {
-  let box = boxCache.get(blockType);
-  if (!box) {
-    const [sx, sy, sz] = blockThreeSize(blockType);
-    box = new THREE.BoxGeometry(sx * 1.05, sy * 1.05, sz * 1.05);
-    boxCache.set(blockType, box);
-  }
-  let edges = edgesCache.get(blockType);
-  if (!edges) {
-    edges = new THREE.EdgesGeometry(box);
-    edgesCache.set(blockType, edges);
-  }
-  return { box, edges };
-}
-
 const noRaycast = () => {};
 
 function parseKey(key: string): Position3D | null {
@@ -58,7 +43,7 @@ function parseKey(key: string): Position3D | null {
 /** Pulsing red ghost cube for the currently selected error */
 function PulsingErrorBlock({ position, blockType }: { position: [number, number, number]; blockType: BlockType }) {
   const groupRef = usePulseScale();
-  const { box } = getHighlightGeo(blockType);
+  const { box } = getHighlightGeo(blockType, HIGHLIGHT_SCALE);
 
   return (
     <group ref={groupRef} position={position}>
@@ -112,7 +97,7 @@ export function InvalidBlockHighlights() {
           );
         }
 
-        const { box, edges } = getHighlightGeo(blockType);
+        const { box, edges } = getHighlightGeo(blockType, HIGHLIGHT_SCALE);
         return (
           <group key={key} position={[tx, ty, tz]}>
             <mesh geometry={box} material={highlightMaterial} raycast={noRaycast} />
@@ -133,7 +118,7 @@ export function InvalidBlockHighlights() {
           );
         }
 
-        const { box, edges } = getHighlightGeo("XZZ");
+        const { box, edges } = getHighlightGeo("XZZ", HIGHLIGHT_SCALE);
         return (
           <group key={key} position={[tx, ty, tz]}>
             <mesh geometry={box} material={highlightMaterial} raycast={noRaycast} />

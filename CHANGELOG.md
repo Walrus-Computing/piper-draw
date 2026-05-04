@@ -6,13 +6,43 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
-## [0.1.2.2] - 2026-05-04
+## [0.1.3.2] - 2026-05-04
 
 ### Fixed
 - Y blocks now flip around X, Y, and Z axes (180°). Previously the X-flip and
   Y-flip hotkeys aborted any selection that included a Y cube with the error
   "Y blocks can only rotate around the Z axis." 90° X/Y rotations of Y blocks
   remain rejected because piper-draw does not encode a Y-direction.
+
+## [0.1.3.1] - 2026-05-01
+
+### Changed
+- Highlight geometry helper deduplicated. The cube/edge geometry cache used by
+  `InvalidBlockHighlights`, `LocatePulseHighlight`, and `SelectionHighlights`
+  now lives in `gui/src/components/highlightGeo.ts` and accepts a per-call scale
+  factor. Behaviour is identical; this removes ~60 lines of copy-paste.
+- ESLint now enforces `max-lines: 600` and `max-lines-per-function: 80`. The six
+  hot files (blockStore, types/index, Toolbar, App, ZXPanel, FlowsPanel) plus the
+  current per-function offenders are grandfathered until splits land — overrides
+  are removed in the same PR that takes a file under threshold.
+- CI runs `npm run slop:diff` against the PR base as a warn-only gate. Findings
+  surface in logs but do not block merge during the bake-in window (E3 from the
+  CEO tech-debt plan).
+
+## [0.1.3.0] - 2026-05-01
+
+### Changed
+- Group-toggle hint toasts ("Select 2+ blocks", "mixes grouped and ungrouped",
+  "spans multiple groups"), the auto-dissolve toast, and the one-time
+  G-keymap migration notice now route through a non-destructive info channel.
+  Previously these reused the verify-error channel and silently wiped any
+  red invalid-block highlights from an in-progress verify (R7). Info toasts
+  appear top-right; the verify-error toast continues to occupy the top
+  centre.
+- Internal: ephemeral toasts are now dispatched through a shared event bus
+  (`gui/src/utils/toastBus.ts`) with `error` and `info` channels. Replaces
+  the dynamic-import workaround in `blockStore.ts` that fired toasts a
+  microtask later.
 
 ## [0.1.2.1] - 2026-05-01
 

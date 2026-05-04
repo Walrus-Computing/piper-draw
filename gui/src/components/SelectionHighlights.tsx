@@ -2,8 +2,11 @@ import { useMemo } from "react";
 import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
 import { usePulseScale } from "../hooks/usePulseScale";
-import { tqecToThree, yBlockZOffset, blockThreeSize, posKey } from "../types";
-import type { Block, BlockType } from "../types";
+import { tqecToThree, yBlockZOffset, posKey } from "../types";
+import type { Block } from "../types";
+import { getHighlightGeo } from "./highlightGeo";
+
+const SELECTION_SCALE = 1.04;
 
 const highlightMaterial = new THREE.MeshBasicMaterial({
   color: 0x4a9eff,
@@ -18,24 +21,6 @@ const outlineMaterial = new THREE.LineBasicMaterial({
   linewidth: 2,
 });
 
-const boxCache = new Map<BlockType, THREE.BoxGeometry>();
-const edgesCache = new Map<BlockType, THREE.EdgesGeometry>();
-
-function getHighlightGeo(blockType: BlockType) {
-  let box = boxCache.get(blockType);
-  if (!box) {
-    const [sx, sy, sz] = blockThreeSize(blockType);
-    box = new THREE.BoxGeometry(sx * 1.04, sy * 1.04, sz * 1.04);
-    boxCache.set(blockType, box);
-  }
-  let edges = edgesCache.get(blockType);
-  if (!edges) {
-    edges = new THREE.EdgesGeometry(box);
-    edgesCache.set(blockType, edges);
-  }
-  return { box, edges };
-}
-
 const noRaycast = () => {};
 
 function PulsingHighlight({
@@ -47,7 +32,7 @@ function PulsingHighlight({
 }) {
   const groupRef = usePulseScale();
   const [tx, ty, tz] = tqecToThree(block.pos, block.type, zo);
-  const { box, edges } = getHighlightGeo(block.type);
+  const { box, edges } = getHighlightGeo(block.type, SELECTION_SCALE);
 
   return (
     <group ref={groupRef} position={[tx, ty, tz]}>
