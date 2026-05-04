@@ -1274,7 +1274,7 @@ export default function App() {
       )}
       <PlacementWarning toolbarRef={toolbarRef} />
       <Canvas
-        gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping, preserveDrawingBuffer: true }}
+        gl={{ toneMapping: THREE.ACESFilmicToneMapping, preserveDrawingBuffer: true }}
         onContextMenu={(e) => e.preventDefault()}
       >
         <color attach="background" args={["#CBDFC6"]} />

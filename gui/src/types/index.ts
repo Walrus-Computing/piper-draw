@@ -146,6 +146,8 @@ export const Y_DEFECT_HEX = "#ff39c2";
 const H_BAND_HALF_HEIGHT = 0.08;
 /** Inset so pipe walls are never coplanar with adjacent blocks/pipes. */
 const WALL_EPS = 0.001;
+/** Outward offset on edge wireframe so lines never sit coplanar with face polygons. */
+const EDGE_OFFSET = 0.0005;
 const FACE_MASK_EPS = 1e-9;
 
 // ---------------------------------------------------------------------------
@@ -576,9 +578,13 @@ export function createBlockEdges(blockType: BlockType, hiddenFaces: FaceMask = 0
   const [bx, by, bz] = blockThreeSize(blockType);
   const pipe = isPipeType(blockType);
   const e2 = pipe ? 2 * WALL_EPS : 0;
-  const hx = bx / 2 - e2 / 2;
-  const hy = by / 2 - e2 / 2;
-  const hz = bz / 2 - e2 / 2;
+  // Sub-pixel outward offset on edge corners: keeps line wireframe just
+  // outside the face surface so depth comparisons can't tie. Redundant with
+  // material polygonOffset, but survives renderer settings (e.g. log depth
+  // buffer) that silently disable polygonOffset.
+  const hx = bx / 2 - e2 / 2 + EDGE_OFFSET;
+  const hy = by / 2 - e2 / 2 + EDGE_OFFSET;
+  const hz = bz / 2 - e2 / 2 + EDGE_OFFSET;
   const corners: Array<[number, number, number]> = [
     [-hx, -hy, -hz],
     [-hx, -hy, hz],
