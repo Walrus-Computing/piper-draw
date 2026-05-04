@@ -6,6 +6,18 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.1.3.7] - 2026-05-04
+
+### Fixed
+- Cube edge lines no longer flicker between faces when the camera is still.
+  Three.js's `logarithmicDepthBuffer` was silently disabling the polygon
+  offset that keeps the black edge wireframe rendering in front of cube
+  faces, so depth comparisons landed at the precision boundary and flipped
+  frame-to-frame. Removed the log depth buffer (the scene's depth range
+  doesn't need it) and inflated edge corners by a sub-pixel offset as a
+  belt-and-braces guard against future renderer changes.
+  Closes #274.
+
 ## [0.1.3.6] - 2026-05-04
 
 ### Fixed
