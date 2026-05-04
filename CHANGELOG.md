@@ -6,6 +6,25 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.1.3.6] - 2026-05-04
+
+### Fixed
+- Clicking the model from a below-the-floor camera now works. With the camera
+  rotated underneath the XY plane (looking up at the model so you can build
+  downward), the invisible ground plane's back face raycasts closer than the
+  blocks and used to hijack every click — placement tools landed a new block
+  on the floor instead of running face-adjacent placement, and Keyboard Build
+  mode moved the cursor to the floor instead of to the clicked cube. Edit-mode
+  click + pointer-move and Build-mode click now pass through to the block
+  handler whenever the click ray also hits a block, regardless of the armed
+  tool.
+- No more dead zones in flow-viz and Y-defect modes. Hovering over a flow
+  surface or a Y-defect cylinder used to leave the placement / paste ghost
+  frozen at the previous cell because the overlay meshes lacked
+  `raycast={noRaycast}` and had no event handlers, so the widened plane
+  pass-through silently dropped pointer-move updates. Both overlays now opt
+  out of raycasting per the project's decorative-mesh convention.
+
 ## [0.1.3.5] - 2026-05-04
 
 ### Fixed
