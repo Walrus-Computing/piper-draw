@@ -16,6 +16,7 @@ import {
   getAllPortPositions,
 } from "../types";
 import { resolvePipeTypeFromFace } from "./blockInstancesShared";
+import { isFaceTargetingTool } from "../utils/gridPlanePassthrough";
 import type { Position3D, BlockType, CubeType } from "../types";
 
 // Sentinel cube type for sizing/face-normal calculations on a port (which has
@@ -78,8 +79,11 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
       return;
     }
 
-    // Paint tool: ports have no paintable geometry. No ghost preview, no fall-through to placement.
-    if (store.armedTool === "paint") {
+    // Face-targeting tools (paint, corr-surface): ports have no paintable
+    // geometry and no slice geometry. No ghost preview, no fall-through to
+    // placement. Mirrors GridPlane's isFaceTargetingTool guard so any future
+    // face-targeting tool is covered automatically.
+    if (isFaceTargetingTool(store.armedTool)) {
       store.setHoveredGridPos(null);
       return;
     }
@@ -141,8 +145,10 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
     }
     // Port tool: clicking a port is a no-op (it's already a port).
     if (store.armedTool === "port") return;
-    // Paint tool: clicking a port is a no-op (no paintable geometry).
-    if (store.armedTool === "paint") return;
+    // Face-targeting tools (paint, corr-surface): clicking a port is a no-op.
+    // Without this guard, the click falls through to store.addBlock(pos) and
+    // places a stray cube at the port slot.
+    if (isFaceTargetingTool(store.armedTool)) return;
     if (store.armedTool === "pipe" && store.pipeVariant) {
       if (!e.face) return;
       const resolved = resolvePipeTypeFromFace(pos, PORT_SENTINEL_TYPE, e.face.normal, store.pipeVariant);
