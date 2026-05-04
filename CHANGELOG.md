@@ -6,6 +6,14 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.1.3.2] - 2026-05-04
+
+### Fixed
+- Y blocks now flip around X, Y, and Z axes (180°). Previously the X-flip and
+  Y-flip hotkeys aborted any selection that included a Y cube with the error
+  "Y blocks can only rotate around the Z axis." 90° X/Y rotations of Y blocks
+  remain rejected because piper-draw does not encode a Y-direction.
+
 ## [0.1.3.1] - 2026-05-01
 
 ### Changed

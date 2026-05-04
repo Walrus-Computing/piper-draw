@@ -867,22 +867,72 @@ describe("blockStore", () => {
       expect(blocks.has("3,3,3")).toBe(true);
     });
 
-    it("rejects X rotation of a Y block with a clear error", () => {
+    it("rejects 90° X rotation of a Y block with a clear error", () => {
       useBlockStore.setState({ cubeType: "Y" });
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       useBlockStore.getState().selectAll();
       const result = useBlockStore.getState().rotateSelected("x", "ccw");
       expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.reason).toMatch(/can only rotate around the Z axis/);
+      if (!result.ok) expect(result.reason).toMatch(/cannot 90°-rotate around the X or Y axis/);
     });
 
-    it("allows Z flip of a Y block (Z direction preserved)", () => {
+    it("allows Y blocks to flip on any axis (type preserved)", () => {
       useBlockStore.setState({ cubeType: "Y" });
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       useBlockStore.getState().selectAll();
-      const result = useBlockStore.getState().rotateSelected("z", "flip");
+      for (const axis of ["x", "y", "z"] as const) {
+        const result = useBlockStore.getState().rotateSelected(axis, "flip");
+        expect(result).toEqual({ ok: true });
+        expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("Y");
+      }
+    });
+
+    it("flips a Y + Z-open pipe pair around X axis (adjacency holds)", () => {
+      // Y at (0,0,0), Z-axis pipe at (0,0,1) (resolves to "ZXO"). X-flip about
+      // the bbox pivot mirrors the pair vertically; the pipe stays Z-open
+      // (180° X-flip preserves "ZXO") so the Y-cube/Z-pipe adjacency holds.
+      useBlockStore.setState({ cubeType: "Y" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 1 });
+      useBlockStore.setState({ pipeVariant: null });
+      useBlockStore.getState().selectAll();
+      const result = useBlockStore.getState().rotateSelected("x", "flip");
       expect(result).toEqual({ ok: true });
-      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("Y");
+      const blocks = useBlockStore.getState().blocks;
+      const pipe = [...blocks.values()].find((b) => b.type === "ZXO");
+      expect(pipe).toBeDefined();
+      const y = [...blocks.values()].find((b) => b.type === "Y");
+      expect(y).toBeDefined();
+    });
+
+    it("free-build flip succeeds for Y+X-open pipe; strict mode rejects", () => {
+      // Regression test: rotateBlockKind used to throw on X-flip of a Y block,
+      // masking the freeBuild adjacency bypass. After the fix, freeBuild
+      // controls the outcome — strict mode rejects (Y next to X-open pipe),
+      // freeBuild allows.
+      const setup = (freeBuild: boolean) => {
+        reset();
+        useBlockStore.setState({ freeBuild: true, cubeType: "Y" });
+        useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+        // pipeVariant "ZX" at an X-axis pipe slot resolves to "OZX" (X-open).
+        useBlockStore.setState({ pipeVariant: "ZX", cubeType: "XZZ" });
+        useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+        useBlockStore.setState({ pipeVariant: null, freeBuild });
+        useBlockStore.getState().selectAll();
+      };
+
+      // freeBuild: flip succeeds — adjacency bypass lets the Y stay next to
+      // the X-open pipe in the mirrored layout.
+      setup(true);
+      const freeResult = useBlockStore.getState().rotateSelected("x", "flip");
+      expect(freeResult.ok).toBe(true);
+
+      // strict mode: same flip is rejected by the post-rotation Y-adjacency
+      // check (Y blocks may only neighbor Z-open pipes).
+      setup(false);
+      const strictResult = useBlockStore.getState().rotateSelected("x", "flip");
+      expect(strictResult.ok).toBe(false);
     });
 
     it("rejects rotating a Z-open pipe around X axis when adjacent to a Y block", () => {
