@@ -1556,10 +1556,10 @@ function AnalyzeMenu() {
 // FreeBuildToggle — top-level toolbar button for Free Build mode
 //
 // Free Build relaxes pipe/cube color-matching checks so users can edit through
-// "wrongspace" intermediate states. The same toggle also lives inside
-// SettingsMenu as "Ignore color rules" — surfacing it here makes the mode
-// discoverable before users hit a rejection toast (where a hint also points
-// at this button).
+// "wrongspace" intermediate states. Surfaced as a top-level button so the mode
+// is discoverable before users hit a rejection toast — and the rejection toast
+// itself points at this button via an inline "Turn on Free Build" hint when
+// the rejection is one Free Build would relieve.
 // ---------------------------------------------------------------------------
 
 function FreeBuildToggle({
