@@ -6,6 +6,18 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.2.0.1] - 2026-05-07
+
+### Fixed
+- Placing a pipe next to a cube no longer fails when the cube's current type
+  doesn't accept the pipe's basis but a different canonical type would. The
+  cube now retypes itself (and Hadamard-toggles any neighbour pipes the new
+  cube type forces) on click, then the pipe lands. The hover ghost previews
+  the success in green instead of red. Strict TQEC mode only — free-build
+  was already permissive. The cube retype + pipe add are recorded as two
+  separate undo entries so a second undo press restores the cube's original
+  type. Closes #292.
+
 ## [0.2.0.0] - 2026-05-07
 
 ### Added
