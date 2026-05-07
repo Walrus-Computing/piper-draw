@@ -261,13 +261,61 @@ function cloneDefaults(): BindingsByMode {
   };
 }
 
+// Exported for unit testing. The `persist` config below is the only runtime caller.
+//
+// v16 (2026-05-07): the camera default flipped from "pan" → "rotate". Zustand
+// persist had already written the old default into every prior user's
+// localStorage, so the new default would otherwise never reach them. On
+// migration we drop the persisted navStyle so `keybindMerge` falls back to
+// the current default; users who explicitly preferred pan can re-pick it.
+export function keybindMigrate(persisted: unknown, fromVersion: number): unknown {
+  const p = (persisted ?? {}) as Partial<KeybindState> & Record<string, unknown>;
+  // Treat NaN / non-numeric / undefined as "older than v16" — corrupted or
+  // hand-edited records get the same one-time reset as anyone on v15.
+  if (!Number.isFinite(fromVersion) || (fromVersion as number) < 16) {
+    delete p.navStyle;
+  }
+  return p;
+}
+
+// Exported for unit testing. When a persisted scalar field is missing or
+// invalid, the merge falls back to `current.<field>` — the *current* default.
+// Useful for new fields and intentional resets (e.g. v16's navStyle reset),
+// but it means a future default flip without a version bump would silently
+// affect any user whose persisted record is missing that field.
+export function keybindMerge(persisted: unknown, current: KeybindState): KeybindState {
+  const p = (persisted ?? {}) as Partial<KeybindState>;
+  const merged = cloneDefaults();
+  if (p.bindings) {
+    for (const mode of Object.keys(merged) as Mode[]) {
+      const stored = (p.bindings as Partial<BindingsByMode>)[mode] as Record<string, KeyBinding> | undefined;
+      if (!stored) continue;
+      const target = merged[mode] as Record<string, KeyBinding>;
+      for (const action of Object.keys(target)) {
+        const b = stored[action];
+        if (b && typeof b.key === "string") target[action] = b;
+      }
+    }
+  }
+  return {
+    ...current,
+    bindings: merged,
+    cameraFollowsBuild:
+      typeof p.cameraFollowsBuild === "boolean" ? p.cameraFollowsBuild : current.cameraFollowsBuild,
+    axisAbsoluteWasd:
+      typeof p.axisAbsoluteWasd === "boolean" ? p.axisAbsoluteWasd : current.axisAbsoluteWasd,
+    navStyle:
+      p.navStyle === "pan" || p.navStyle === "rotate" ? p.navStyle : current.navStyle,
+  };
+}
+
 export const useKeybindStore = create<KeybindState>()(
   persist(
     (set) => ({
       bindings: cloneDefaults(),
       cameraFollowsBuild: false,
       axisAbsoluteWasd: false,
-      navStyle: "pan",
+      navStyle: "rotate",
 
       setBinding: (mode, action, binding) =>
         set((state) => {
@@ -302,39 +350,9 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: "piper-draw-keybinds",
-      version: 15,
-      // Pass-through: schema is additive across versions (new EditActions only
-      // get appended). The `merge` step below starts from `cloneDefaults()` and
-      // walks the action list, picking up any persisted user bindings for
-      // existing actions while letting new actions fall back to defaults — no
-      // need to wipe state on migration.
-      migrate: (persisted) => persisted as KeybindState,
-      merge: (persisted, current) => {
-        const p = persisted as Partial<KeybindState>;
-        const cur = current as KeybindState;
-        const merged = cloneDefaults();
-        if (p.bindings) {
-          for (const mode of Object.keys(merged) as Mode[]) {
-            const stored = (p.bindings as Partial<BindingsByMode>)[mode] as Record<string, KeyBinding> | undefined;
-            if (!stored) continue;
-            const target = merged[mode] as Record<string, KeyBinding>;
-            for (const action of Object.keys(target)) {
-              const b = stored[action];
-              if (b && typeof b.key === "string") target[action] = b;
-            }
-          }
-        }
-        return {
-          ...cur,
-          bindings: merged,
-          cameraFollowsBuild:
-            typeof p.cameraFollowsBuild === "boolean" ? p.cameraFollowsBuild : cur.cameraFollowsBuild,
-          axisAbsoluteWasd:
-            typeof p.axisAbsoluteWasd === "boolean" ? p.axisAbsoluteWasd : cur.axisAbsoluteWasd,
-          navStyle:
-            p.navStyle === "pan" || p.navStyle === "rotate" ? p.navStyle : cur.navStyle,
-        };
-      },
+      version: 16,
+      migrate: (persisted, fromVersion) => keybindMigrate(persisted, fromVersion) as KeybindState,
+      merge: (persisted, current) => keybindMerge(persisted, current as KeybindState),
     },
   ),
 );

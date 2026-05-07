@@ -1657,6 +1657,9 @@ function SettingsMenu({
                 {NAV_STYLE_LABELS[v]}
               </label>
             ))}
+            <div style={{ fontSize: 10, color: "#888", marginTop: 4 }}>
+              Middle-click drag always orbits, regardless of this setting.
+            </div>
           </div>
 
           <div style={{ height: 1, background: "#eee" }} />
