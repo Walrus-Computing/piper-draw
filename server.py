@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,7 @@ import pyzx
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from tqec import gallery
 from tqec.computation.block_graph import BlockGraph
 from tqec.interop.collada._correlation import CorrelationSurfaceTransformationHelper
 from tqec.utils.exceptions import TQECError
@@ -18,7 +20,19 @@ from tqec.utils.exceptions import TQECError
 # that exposes correlation-surface geometry pieces (unit quads with transforms)
 # needed to render flow surfaces in 3D. Pinned via git dep in pyproject.toml.
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # The first call to `find_correlation_surfaces` on any graph pays a
+    # ~0.5–2s lazy-init tax (module-level work inside tqec / pyzx). With
+    # uvicorn --reload, every save resets that, making the first
+    # /api/flows click after each save feel like seconds of latency on
+    # what should be a ~1ms job. Pay the cost once at startup.
+    list(gallery.cnot().find_correlation_surfaces())
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 # Cap on the circuit size we'll run `pyzx.compare_tensors` against for the
 # extracted-circuit ≡ original-graph check. Tensor contraction is exponential
