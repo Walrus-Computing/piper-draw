@@ -1571,6 +1571,8 @@ function FreeBuildToggle({
 }) {
   return (
     <button
+      type="button"
+      aria-pressed={freeBuild}
       onClick={toggleFreeBuild}
       title={
         freeBuild

@@ -540,6 +540,13 @@ function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivE
   }, [portWarning, clearPortWarning]);
 
   if (!message) return null;
+  // Clearing the rejection alongside the toggle removes the now-stale red
+  // warning — without this the toast persists with an irrelevant message
+  // until the next hover/build event.
+  const enableFreeBuildAndDismiss = () => {
+    toggleFreeBuild();
+    useBlockStore.setState({ hoveredInvalidReason: null });
+  };
   return (
     <div
       style={{
@@ -555,9 +562,10 @@ function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivE
         borderRadius: "6px",
         fontFamily: "sans-serif",
         fontSize: "13px",
-        // pointerEvents needs to be auto when the hint is interactive,
-        // but stay none in the toast-only case so it doesn't intercept hover.
-        pointerEvents: showFreeBuildHint ? "auto" : "none",
+        // The container stays click-through so it never shadows canvas
+        // hover/build interactions in the strip below the toolbar; only the
+        // inline Free Build button opts back into pointer events.
+        pointerEvents: "none",
         boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
         maxWidth: "500px",
         textAlign: "center" as const,
@@ -569,7 +577,7 @@ function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivE
           Turn on{" "}
           <button
             type="button"
-            onClick={toggleFreeBuild}
+            onClick={enableFreeBuildAndDismiss}
             style={{
               background: "transparent",
               border: "none",
@@ -580,6 +588,7 @@ function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivE
               fontSize: "inherit",
               textDecoration: "underline",
               cursor: "pointer",
+              pointerEvents: "auto",
             }}
           >
             Free Build

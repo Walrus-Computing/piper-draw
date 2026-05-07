@@ -1374,6 +1374,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       state.hoveredBlockType === bt &&
       state.hoveredInvalid === inv &&
       state.hoveredInvalidReason?.text === rsn?.text &&
+      state.hoveredInvalidReason?.kind === rsn?.kind &&
       state.hoveredReplace === rep
     ) return state;
     return { hoveredGridPos: pos, hoveredBlockType: bt, hoveredInvalid: inv, hoveredInvalidReason: rsn, hoveredReplace: rep };

@@ -1969,7 +1969,7 @@ describe("blockStore", () => {
         kind: "color",
       });
       // And clearing (no reason) returns null, not a tagged object.
-      useBlockStore.getState().setHoveredGridPos(null, null, false, undefined, false);
+      useBlockStore.getState().setHoveredGridPos(null, undefined, false, undefined, false);
       expect(useBlockStore.getState().hoveredInvalidReason).toBeNull();
     });
   });
