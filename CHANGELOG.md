@@ -6,6 +6,15 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.1.4.0] - 2026-05-07
+
+### Fixed
+- Opening the Flows or ZX panel for the first time after a page load no
+  longer blanks the entire 3D scene (background, blocks, lights) for a
+  few frames. The port-label text used to load its font lazily on first
+  mount, which briefly hid every sibling in the canvas with it.
+  Closes #278.
+
 ## [0.1.3.7] - 2026-05-04
 
 ### Fixed
