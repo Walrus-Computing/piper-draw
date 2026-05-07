@@ -89,9 +89,12 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
         <ul style={{ margin: 0, paddingLeft: 18 }}>
           <li>Use <b>Undo</b>/<b>Redo</b> or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z.</li>
           <li>
-            <b>Camera</b> — scroll to zoom, <kbd>Shift</kbd>/<kbd>Alt</kbd>+drag
-            to rotate, drag to pan. Use the <b>Iso ▾</b> menu in the toolbar
-            to snap to an axis-locked orthographic view.
+            <b>Camera</b> — drag (or middle-drag) to orbit, scroll to zoom,
+            <kbd>Shift</kbd>+drag to pan. Switch to “Drag to pan” in
+            Settings if you prefer pan as the primary gesture (then{" "}
+            <kbd>Shift</kbd>/<kbd>Alt</kbd>+drag rotates, and middle-drag
+            still orbits). Use the <b>Iso ▾</b> menu in the toolbar to snap
+            to an axis-locked orthographic view.
           </li>
           <li>
             <b>Shortcuts</b> — every key binding is listed and rebindable in

@@ -320,7 +320,7 @@ function ViewportCamera({ controlsRef }: { controlsRef: React.RefObject<any> }) 
           zoomToCursor
           maxDistance={50000}
           screenSpacePanning={false}
-          mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: -1 as THREE.MOUSE }}
+          mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: -1 as THREE.MOUSE }}
         />
       </>
     );

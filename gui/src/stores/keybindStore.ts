@@ -267,7 +267,7 @@ export const useKeybindStore = create<KeybindState>()(
       bindings: cloneDefaults(),
       cameraFollowsBuild: false,
       axisAbsoluteWasd: false,
-      navStyle: "pan",
+      navStyle: "rotate",
 
       setBinding: (mode, action, binding) =>
         set((state) => {
