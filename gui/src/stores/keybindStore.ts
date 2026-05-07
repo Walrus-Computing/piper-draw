@@ -302,13 +302,25 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: "piper-draw-keybinds",
-      version: 15,
-      // Pass-through: schema is additive across versions (new EditActions only
+      version: 16,
+      // Schema is additive across versions for bindings (new EditActions only
       // get appended). The `merge` step below starts from `cloneDefaults()` and
       // walks the action list, picking up any persisted user bindings for
-      // existing actions while letting new actions fall back to defaults — no
-      // need to wipe state on migration.
-      migrate: (persisted) => persisted as KeybindState,
+      // existing actions while letting new actions fall back to defaults.
+      //
+      // v16 (2026-05-07): the camera default flipped from "pan" → "rotate".
+      // Zustand persist had already written the old default into every prior
+      // user's localStorage, so the new default would otherwise never reach
+      // them. On migration we drop the persisted navStyle so `merge` falls
+      // back to the current default; users who explicitly preferred pan can
+      // re-pick it in Settings.
+      migrate: (persisted, fromVersion) => {
+        const p = persisted as Partial<KeybindState> & Record<string, unknown>;
+        if (fromVersion < 16) {
+          delete p.navStyle;
+        }
+        return p as KeybindState;
+      },
       merge: (persisted, current) => {
         const p = persisted as Partial<KeybindState>;
         const cur = current as KeybindState;

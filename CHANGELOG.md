@@ -10,10 +10,13 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ### Changed
 - Default camera navigation is now "Drag to rotate" (orbit) instead of "Drag
-  to pan". Existing users keep their stored preference; only fresh sessions
-  see the new default. Middle-click drag now always orbits the model in
-  perspective view, regardless of the Navigation style setting. Mouse-wheel
-  zoom and the Settings → Navigation style toggle are unchanged.
+  to pan". Returning users get a one-time reset to the new default (Zustand
+  persist had stored the old default in every prior user's localStorage, so
+  a plain default flip would never have reached them); users who actively
+  preferred pan can re-pick it in Settings → Navigation style. Middle-click
+  drag now always orbits the model in perspective view, regardless of the
+  Navigation style setting. Mouse-wheel zoom and the Settings → Navigation
+  style toggle are unchanged.
 
 ## [0.1.5.0] - 2026-05-07
 
