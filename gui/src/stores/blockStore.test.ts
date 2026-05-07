@@ -1889,6 +1889,91 @@ describe("blockStore", () => {
     });
   });
 
+  // The Free Build discoverability hint relies on the discriminated `kind` tag
+  // on hoveredInvalidReason. Color-class rejections (kind: "color") show a
+  // "Turn on Free Build" hint in the toast; structural rejections (kind:
+  // "other") do not, because Free Build does not bypass overlap / invalid-pos
+  // checks. These tests pin the tagging at the three points it's set:
+  // setHoveredGridPos (hover-driven), buildMove's reject() helper for the
+  // color path, and reject() for the overlap/invalid-pos path.
+  describe("hoveredInvalidReason kind tagging (Free Build hint discriminator)", () => {
+    it("buildMove tags color-class rejections with kind: 'color'", () => {
+      // Two pipes constrain (0,0,0) to ZZX, which can't pipe along +Z
+      // (would need 'ZZO' which has duplicate closed-axis chars). Empty
+      // origin path then runs out of valid origin candidates and rejects
+      // with "Cannot build in this direction from here" — kind: "color".
+      const blocks = new Map<string, Block>([
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ["0,1,0", { pos: { x: 0, y: 1, z: 0 }, type: "ZOX" }],
+      ]);
+      useBlockStore.setState({
+        blocks,
+        spatialIndex: buildSpatialIndex(blocks),
+        hiddenFaces: new Map(),
+        history: [],
+        future: [],
+        mode: "build",
+        freeBuild: false,
+        buildCursor: { x: 0, y: 0, z: 0 },
+        buildHistory: [],
+        undeterminedCubes: new Map(),
+        hoveredInvalidReason: null,
+      });
+      const ok = useBlockStore.getState().buildMove({ tqecAxis: 2, sign: 1 });
+      expect(ok).toBe(false);
+      const r = useBlockStore.getState().hoveredInvalidReason;
+      expect(r?.kind).toBe("color");
+      expect(r?.text).toMatch(/Cannot build in this direction/);
+    });
+
+    it("buildMove tags structural rejections with kind: 'other'", () => {
+      // Cursor sitting at a non-cube slot makes computePipePos produce an
+      // invalid pipe coordinate (1+1 = 2; 2 mod 3 = 2 → not a pipe slot).
+      // The reject path at line ~3380 fires "Invalid pipe position" with
+      // kind: "other" — Free Build doesn't relax position validity, so the
+      // hint must NOT be offered for this rejection.
+      useBlockStore.setState({
+        blocks: new Map(),
+        spatialIndex: new Map(),
+        hiddenFaces: new Map(),
+        history: [],
+        future: [],
+        mode: "build",
+        freeBuild: false,
+        buildCursor: { x: 1, y: 0, z: 0 },
+        buildHistory: [],
+        undeterminedCubes: new Map(),
+        hoveredInvalidReason: null,
+      });
+      const ok = useBlockStore.getState().buildMove({ tqecAxis: 0, sign: 1 });
+      expect(ok).toBe(false);
+      const r = useBlockStore.getState().hoveredInvalidReason;
+      expect(r?.kind).toBe("other");
+      expect(r?.text).toMatch(/Invalid pipe position/);
+    });
+
+    it("setHoveredGridPos tags hover-driven reasons with kind: 'color'", () => {
+      // Hover-driven rejections (from GridPlane / OpenPipeGhosts color-rule
+      // checks) are all relievable by Free Build — setHoveredGridPos pins
+      // them as kind: "color" so the toast surfaces the Free Build hint.
+      useBlockStore.setState({ hoveredInvalidReason: null });
+      useBlockStore.getState().setHoveredGridPos(
+        { x: 0, y: 0, z: 0 },
+        "XZZ",
+        true,
+        "Adjacent pipe color mismatch",
+        false,
+      );
+      expect(useBlockStore.getState().hoveredInvalidReason).toEqual({
+        text: "Adjacent pipe color mismatch",
+        kind: "color",
+      });
+      // And clearing (no reason) returns null, not a tagged object.
+      useBlockStore.getState().setHoveredGridPos(null, null, false, undefined, false);
+      expect(useBlockStore.getState().hoveredInvalidReason).toBeNull();
+    });
+  });
+
   describe("ensurePortLabels — default io from pipe geometry", () => {
     function seed(blocks: Array<{ x: number; y: number; z: number; type: Block["type"] }>) {
       const map = new Map<string, Block>();
