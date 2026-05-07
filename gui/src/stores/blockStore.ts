@@ -14,6 +14,7 @@ import {
   hasCubeColorConflict,
   hasPipeColorConflict,
   hasYCubePipeAxisConflict,
+  validatePipePlacement,
   isPipeType,
   isValidBlockPos,
   isValidPos,
@@ -1394,8 +1395,42 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         return state;
       }
       if (hasBlockOverlap(pos, blockType, state.blocks, state.spatialIndex, existing ? key : undefined)) return state;
+
+      // Working state. If validatePipePlacement decides retypes are required
+      // (issue #292: cubes adjacent to a new pipe should adapt their type
+      // rather than block placement), apply them BEFORE the normal add path.
+      // The retype + add are recorded as TWO separate undo entries (D1).
+      let preBlocks = state.blocks;
+      let preHiddenFaces = state.hiddenFaces;
+      let preUndetermined = state.undeterminedCubes;
+      let pretypeCmd: UndoCommand | null = null;
+
       if (!store.freeBuild) {
-        if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, state.blocks)) return state;
+        if (isPipeType(blockType)) {
+          const result = validatePipePlacement(blockType, pos, state.blocks);
+          if (!result.ok) return state;
+          if (result.replaces.length > 0) {
+            let curBlocks = preBlocks;
+            let curHiddenFaces = preHiddenFaces;
+            for (const e of result.replaces) {
+              ({ blocks: curBlocks, hiddenFaces: curHiddenFaces } = doRemove(curBlocks, state.spatialIndex, curHiddenFaces, e.key, e.oldBlock));
+              ({ blocks: curBlocks, hiddenFaces: curHiddenFaces } = doAdd(curBlocks, state.spatialIndex, curHiddenFaces, e.key, e.newBlock));
+            }
+            const newUndetermined = new Map(state.undeterminedCubes);
+            const undeterminedChanges: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> = [];
+            for (const e of result.replaces) {
+              const oldInfo = state.undeterminedCubes.get(e.key);
+              if (oldInfo) {
+                newUndetermined.delete(e.key);
+                undeterminedChanges.push({ key: e.key, oldInfo, newInfo: undefined });
+              }
+            }
+            preBlocks = curBlocks;
+            preHiddenFaces = curHiddenFaces;
+            preUndetermined = newUndetermined;
+            pretypeCmd = { kind: "bulk-replace", entries: result.replaces, undeterminedChanges };
+          }
+        }
         if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
         if (hasYCubePipeAxisConflict(blockType, pos, state.blocks)) return state;
       }
@@ -1407,24 +1442,27 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         ? { ...existing, pos, type: blockType }
         : { pos, type: blockType };
 
+      const prependHistory = (cmds: UndoCommand[]): UndoCommand[] =>
+        pretypeCmd ? [...state.history, pretypeCmd, ...cmds].slice(-MAX_HISTORY) : [...state.history, ...cmds].slice(-MAX_HISTORY);
+
       if (existing) {
         // Skip if same type — nothing to replace
         if (existing.type === blockType) return state;
-        const removed = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, key, existing);
+        const removed = doRemove(preBlocks, state.spatialIndex, preHiddenFaces, key, existing);
         const { blocks, hiddenFaces } = doAdd(removed.blocks, state.spatialIndex, removed.hiddenFaces, key, block);
         const cmd: UndoCommand = { kind: "replace", key, oldBlock: existing, newBlock: block };
-        const newUndetermined = new Map(state.undeterminedCubes);
+        const newUndetermined = new Map(preUndetermined);
         newUndetermined.delete(key);
         return {
           blocks,
           hiddenFaces,
-          history: [...state.history, cmd].slice(-MAX_HISTORY),
+          history: prependHistory([cmd]),
           future: [],
           undeterminedCubes: newUndetermined,
         };
       }
 
-      const addResult = doAdd(state.blocks, state.spatialIndex, state.hiddenFaces, key, block);
+      const addResult = doAdd(preBlocks, state.spatialIndex, preHiddenFaces, key, block);
       let blocks = addResult.blocks;
       let hiddenFaces = addResult.hiddenFaces;
       let cmd: UndoCommand = { kind: "add", key, block };
@@ -1446,9 +1484,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           return {
             blocks,
             hiddenFaces,
-            history: [...state.history, cmd].slice(-MAX_HISTORY),
+            history: prependHistory([cmd]),
             future: [],
             portPositions: newPorts,
+            undeterminedCubes: preUndetermined,
           };
         }
       }
@@ -1460,17 +1499,19 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         return {
           blocks,
           hiddenFaces,
-          history: [...state.history, cmd].slice(-MAX_HISTORY),
+          history: prependHistory([cmd]),
           future: [],
           portPositions: newPorts,
+          undeterminedCubes: preUndetermined,
         };
       }
 
       return {
         blocks,
         hiddenFaces,
-        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        history: prependHistory([cmd]),
         future: [],
+        undeterminedCubes: preUndetermined,
       };
     }),
 

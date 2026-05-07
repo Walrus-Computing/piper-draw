@@ -113,6 +113,115 @@ describe("blockStore", () => {
     });
   });
 
+  describe("addBlock — pipe placement retypes adjacent cube (issue #292)", () => {
+    function seed(blocks: Array<{ x: number; y: number; z: number; type: Block["type"] }>) {
+      const map = new Map<string, Block>();
+      for (const b of blocks) {
+        map.set(`${b.x},${b.y},${b.z}`, { pos: { x: b.x, y: b.y, z: b.z }, type: b.type });
+      }
+      const spatialIndex = buildSpatialIndex(map);
+      useBlockStore.setState({ blocks: map, spatialIndex, hiddenFaces: new Map() });
+    }
+
+    it("retypes a cube to canonical type when adding a pipe whose basis only fits another cube type", () => {
+      // Cube ZXZ + existing OXZ pipe (which matches ZXZ on closed axes).
+      // User now wants a perpendicular Y-open pipe XOZ; current cube blocks it.
+      // Fix: cube retypes from ZXZ → XXZ (canonical match) and the pipe lands.
+      seed([
+        { x: 0, y: 0, z: 0, type: "ZXZ" },
+        { x: 1, y: 0, z: 0, type: "OXZ" },
+      ]);
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 1, z: 0 });
+      const state = useBlockStore.getState();
+      expect(state.blocks.get("0,0,0")?.type).toBe("XXZ");
+      expect(state.blocks.get("0,1,0")?.type).toBe("XOZ");
+    });
+
+    it("pushes two history entries: bulk-replace for the retype, then add for the pipe (D1)", () => {
+      seed([
+        { x: 0, y: 0, z: 0, type: "ZXZ" },
+        { x: 1, y: 0, z: 0, type: "OXZ" },
+      ]);
+      const histBefore = useBlockStore.getState().history.length;
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 1, z: 0 });
+      const history = useBlockStore.getState().history;
+      expect(history.length).toBe(histBefore + 2);
+      expect(history[history.length - 2].kind).toBe("bulk-replace");
+      expect(history[history.length - 1].kind).toBe("add");
+    });
+
+    it("undo round-trip: first undo removes the pipe, second undo restores the cube's original type", () => {
+      seed([
+        { x: 0, y: 0, z: 0, type: "ZXZ" },
+        { x: 1, y: 0, z: 0, type: "OXZ" },
+      ]);
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 1, z: 0 });
+      // First undo: pipe gone, cube still XXZ (retype not undone yet).
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.has("0,1,0")).toBe(false);
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XXZ");
+      // Second undo: cube reverts to ZXZ.
+      useBlockStore.getState().undo();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXZ");
+    });
+
+    it("redo restores both the cube retype and the pipe", () => {
+      seed([
+        { x: 0, y: 0, z: 0, type: "ZXZ" },
+        { x: 1, y: 0, z: 0, type: "OXZ" },
+      ]);
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 0, y: 1, z: 0 });
+      useBlockStore.getState().undo();
+      useBlockStore.getState().undo();
+      useBlockStore.getState().redo();
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("XXZ");
+      useBlockStore.getState().redo();
+      expect(useBlockStore.getState().blocks.get("0,1,0")?.type).toBe("XOZ");
+    });
+
+    it("rejects pipe placement when no cube retype combination satisfies all attached pipes", () => {
+      // Cube XXZ + OXZ + XOZ pin its type. Adding a Z-open pipe whose head
+      // needs T[0]='Z' creates an unsatisfiable joint constraint. Reject silently.
+      seed([
+        { x: 0, y: 0, z: 0, type: "XXZ" },
+        { x: 1, y: 0, z: 0, type: "OXZ" },
+        { x: 0, y: 1, z: 0, type: "XOZ" },
+      ]);
+      const histBefore = useBlockStore.getState().history.length;
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 1 });
+      // Block count unchanged (the new pipe was rejected) and history unchanged.
+      expect(useBlockStore.getState().blocks.size).toBe(3);
+      expect(useBlockStore.getState().history.length).toBe(histBefore);
+    });
+
+    it("does not retype when the existing cube already accepts the new pipe (fast path)", () => {
+      seed([{ x: 0, y: 0, z: 0, type: "ZXZ" }]);
+      const histBefore = useBlockStore.getState().history.length;
+      useBlockStore.setState({ pipeVariant: "XZ" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.get("1,0,0")?.type).toBe("OXZ");
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXZ");
+      // Single history entry: just the pipe add. No bulk-replace.
+      expect(useBlockStore.getState().history.length).toBe(histBefore + 1);
+      const last = useBlockStore.getState().history[useBlockStore.getState().history.length - 1];
+      expect(last.kind).toBe("add");
+    });
+
+    it("free-build skips the retype entirely (placement is permissive)", () => {
+      seed([{ x: 0, y: 0, z: 0, type: "ZXZ" }]);
+      useBlockStore.setState({ freeBuild: true, pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      // Pipe lands without any cube retype (free-build accepts anything).
+      expect(useBlockStore.getState().blocks.get("0,0,0")?.type).toBe("ZXZ");
+      expect(useBlockStore.getState().blocks.get("1,0,0")?.type).toBe("OZX");
+    });
+  });
+
   describe("removeBlock", () => {
     it("removes an existing block", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
