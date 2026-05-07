@@ -6,6 +6,18 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.2.1.2] - 2026-05-07
+
+### Fixed
+- Placing a pipe on the bottom face of a cube from a below-the-floor camera
+  no longer drops a misleading ghost (or click) at z=0. With the camera
+  rotated under the XY plane, the invisible floor was silently consuming
+  pointer-moves and clicks that targeted blocks above, dropping the hover
+  preview onto z=0 even though the cursor was clearly on a cube. The grid
+  plane now bows out of placement-tool hovers and clicks when the camera
+  is below it; pointer/paste tools are unaffected so deselect-on-empty-
+  click and clipboard commits still respond from any angle.
+
 ## [0.2.1.1] - 2026-05-07
 
 ### Fixed

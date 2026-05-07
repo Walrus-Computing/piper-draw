@@ -29,6 +29,21 @@ function snapForViewMode(viewMode: ViewMode, point: THREE.Vector3, forPipe: bool
   return snapGroundPos(point.x, -point.z, forPipe);
 }
 
+/**
+ * Camera-below-floor guard: when the user looks UP at the floor from below
+ * (Three.js Y < 0, persp mode only), the grid plane is invisible from this
+ * side, so a click or hover that lands on it is the user clicking *through*
+ * an invisible floor — not at it. The cube/port pass-through above handles
+ * intentional clicks on blocks; this guard catches edge cases where the
+ * cube is missing from e.intersections and we'd otherwise drop a placement
+ * (or render a misleading ghost) at z=0 from a camera angle where the
+ * floor isn't visible at all. Pointer/paste tools are unaffected:
+ * deselect-on-empty-click and clipboard commits still respond.
+ */
+function isPlacementTool(armed: string): boolean {
+  return armed === "cube" || armed === "pipe" || armed === "port";
+}
+
 export function GridPlane() {
   const addBlock = useBlockStore((s) => s.addBlock);
   const mode = useBlockStore((s) => s.mode);
@@ -36,8 +51,12 @@ export function GridPlane() {
   const setHoveredGridPos = useBlockStore((s) => s.setHoveredGridPos);
   const meshRef = useRef<THREE.Mesh>(null!);
   const target = useRef(new THREE.Vector3());
+  const camera = useThree((s) => s.camera);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controls = useThree((s) => s.controls) as any;
+
+  const cameraIsBelowFloor = (): boolean =>
+    viewMode.kind === "persp" && camera.position.y < 0;
 
   // Keep the invisible raycast plane centered: under the camera in persp mode,
   // following the orbit target along the in-plane axes in iso mode.
@@ -72,6 +91,17 @@ export function GridPlane() {
     if (mode === "edit") {
       const s = useBlockStore.getState();
       if (!s.xHeld && shouldPassThroughGridPlane(e.intersections, meshRef.current)) {
+        return;
+      }
+      // From below the floor with a placement tool armed, never write the
+      // floor cell into hoveredGridPos. The plane is invisible from below,
+      // so the ghost would render at z=0 the user can't see while their
+      // cursor is over a cube above. The cube's own pointer-move (via
+      // pass-through above) handles the intentional case; this guard
+      // catches the edge cases where pass-through doesn't fire.
+      if (!s.xHeld && isPlacementTool(s.armedTool) && cameraIsBelowFloor()) {
+        e.stopPropagation();
+        setHoveredGridPos(null);
         return;
       }
     }
@@ -155,6 +185,17 @@ export function GridPlane() {
     // e.stopPropagation() in its own onClick. Otherwise deselection would
     // silently stop working through that mesh.
     if (shouldPassThroughGridPlane(e.intersections, meshRef.current)) return;
+
+    // From below the floor with a placement tool armed, drop the click
+    // silently rather than consuming it for a z=0 placement the user can't
+    // see. The cube's own onClick (via pass-through above) handles
+    // intentional clicks; this guard catches edge cases where the cube
+    // isn't in e.intersections and we'd otherwise drop a block onto the
+    // invisible floor.
+    if (isPlacementTool(store.armedTool) && cameraIsBelowFloor()) {
+      e.stopPropagation();
+      return;
+    }
 
     if (store.armedTool === "pointer") {
       e.stopPropagation();
