@@ -3148,8 +3148,15 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
   selectAll: () =>
     set((state) => {
-      if (state.blocks.size === 0) return state;
-      return { selectedKeys: new Set(state.blocks.keys()), selectionPivot: null };
+      const allPortKeys = new Set(
+        getAllPortPositions(state.blocks, state.portPositions).map(posKey),
+      );
+      if (state.blocks.size === 0 && allPortKeys.size === 0) return state;
+      return {
+        selectedKeys: new Set(state.blocks.keys()),
+        selectedPortPositions: allPortKeys,
+        selectionPivot: null,
+      };
     }),
 
   selectBlocks: (keys, additive, portKeys) =>
