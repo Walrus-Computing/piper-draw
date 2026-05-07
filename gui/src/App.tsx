@@ -516,8 +516,15 @@ function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivE
   const reason = useBlockStore((s) => s.hoveredInvalidReason);
   const portWarning = useBlockStore((s) => s.portWarning);
   const clearPortWarning = useBlockStore((s) => s.clearPortWarning);
+  const freeBuild = useBlockStore((s) => s.freeBuild);
+  const toggleFreeBuild = useBlockStore((s) => s.toggleFreeBuild);
   // Prefer the persistent port warning if set; fall back to the hover tooltip.
-  const message = portWarning ?? reason;
+  const message = portWarning ?? reason?.text ?? null;
+  // Show the Free Build hint only when the active rejection is one Free Build
+  // would relieve (kind === "color"), Free Build isn't already on, and the
+  // port-warning path isn't preempting the toast (port warnings are unrelated
+  // to color rules).
+  const showFreeBuildHint = !portWarning && !freeBuild && reason?.kind === "color";
   const [topOffset, setTopOffset] = useState(0);
 
   useEffect(() => {
@@ -533,6 +540,13 @@ function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivE
   }, [portWarning, clearPortWarning]);
 
   if (!message) return null;
+  // Clearing the rejection alongside the toggle removes the now-stale red
+  // warning — without this the toast persists with an irrelevant message
+  // until the next hover/build event.
+  const enableFreeBuildAndDismiss = () => {
+    toggleFreeBuild();
+    useBlockStore.setState({ hoveredInvalidReason: null });
+  };
   return (
     <div
       style={{
@@ -548,13 +562,40 @@ function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivE
         borderRadius: "6px",
         fontFamily: "sans-serif",
         fontSize: "13px",
+        // The container stays click-through so it never shadows canvas
+        // hover/build interactions in the strip below the toolbar; only the
+        // inline Free Build button opts back into pointer events.
         pointerEvents: "none",
         boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
         maxWidth: "500px",
         textAlign: "center" as const,
       }}
     >
-      {message}
+      <div>{message}</div>
+      {showFreeBuildHint && (
+        <div style={{ marginTop: 4, fontSize: "12px" }}>
+          Turn on{" "}
+          <button
+            type="button"
+            onClick={enableFreeBuildAndDismiss}
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              color: "#721c24",
+              fontWeight: 600,
+              fontFamily: "inherit",
+              fontSize: "inherit",
+              textDecoration: "underline",
+              cursor: "pointer",
+              pointerEvents: "auto",
+            }}
+          >
+            Free Build
+          </button>{" "}
+          to edit through color-mismatched states.
+        </div>
+      )}
     </div>
   );
 }

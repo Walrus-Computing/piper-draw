@@ -271,7 +271,14 @@ interface BlockStore {
   hoveredGridPos: Position3D | null;
   hoveredBlockType: BlockType | null;
   hoveredInvalid: boolean;
-  hoveredInvalidReason: string | null;
+  /**
+   * Why the most recent placement attempt was rejected, plus a coarse `kind`
+   * so the toast can decide whether to surface the "turn on Free Build" hint.
+   * `kind: "color"` covers any rejection that Free Build would relieve
+   * (color/axis/Y conflicts, undetermined ambiguity). `kind: "other"` covers
+   * overlap and invalid-position rejections, which Free Build does NOT bypass.
+   */
+  hoveredInvalidReason: { text: string; kind: "color" | "other" } | null;
   hoveredReplace: boolean;
   selectedKeys: Set<string>;
   /** Selected PORT positions (ports are transient, so keyed by posKey string rather than stored in `blocks`). */
@@ -1354,7 +1361,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   setHoveredGridPos: (pos, blockType, invalid, reason, replace) => set((state) => {
     const bt = blockType ?? null;
     const inv = invalid ?? false;
-    const rsn = reason ?? null;
+    // Hover-driven reasons all originate from color/axis/Y conflict checks
+    // (see GridPlane.tsx and OpenPipeGhosts.tsx) — every one of them is
+    // relieved by Free Build, so they're tagged kind="color".
+    const rsn: BlockStore["hoveredInvalidReason"] = reason ? { text: reason, kind: "color" } : null;
     const rep = replace ?? false;
     // Skip no-op updates to avoid unnecessary re-renders
     if (
@@ -1363,7 +1373,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       state.hoveredGridPos?.z === pos?.z &&
       state.hoveredBlockType === bt &&
       state.hoveredInvalid === inv &&
-      state.hoveredInvalidReason === rsn &&
+      state.hoveredInvalidReason?.text === rsn?.text &&
+      state.hoveredInvalidReason?.kind === rsn?.kind &&
       state.hoveredReplace === rep
     ) return state;
     return { hoveredGridPos: pos, hoveredBlockType: bt, hoveredInvalid: inv, hoveredInvalidReason: rsn, hoveredReplace: rep };
@@ -2912,7 +2923,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       const proposed = new Map(state.blocks);
       for (const e of entries) proposed.set(e.key, e.newBlock);
 
-      const flipBlocked = "Flip blocked: selection boundary mismatches adjacent colors";
+      const flipBlocked: BlockStore["hoveredInvalidReason"] = {
+        text: "Flip blocked: selection boundary mismatches adjacent colors",
+        kind: "color",
+      };
       if (!state.freeBuild) {
         for (const e of entries) {
           const { pos, type } = e.newBlock;
@@ -3285,8 +3299,13 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       };
     })();
 
-    const reject = (reason?: string) => {
-      if (reason) set({ hoveredInvalidReason: reason });
+    // `kind` defaults to "color" because every reason produced by buildMove's
+    // freeBuild-gated checks is relieved by enabling Free Build. Pass
+    // kind: "other" explicitly for overlap/invalid-position rejections that
+    // Free Build does NOT relieve, so the toast doesn't surface a misleading
+    // "turn on Free Build" hint.
+    const reject = (reason?: string, kind: "color" | "other" = "color") => {
+      if (reason) set({ hoveredInvalidReason: { text: reason, kind } });
       return false;
     };
 
@@ -3400,8 +3419,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     }
 
     // Validate pipe position and overlap
-    if (!isValidPos(pipePos, pipeType)) return reject("Invalid pipe position");
-    if (hasBlockOverlap(pipePos, pipeType, state.blocks, state.spatialIndex)) return reject("Pipe would overlap existing blocks");
+    if (!isValidPos(pipePos, pipeType)) return reject("Invalid pipe position", "other");
+    if (hasBlockOverlap(pipePos, pipeType, state.blocks, state.spatialIndex)) return reject("Pipe would overlap existing blocks", "other");
 
     // Y cube pipe axis conflict: Y cubes only work with Z-open pipes
     if (!state.freeBuild && hasYCubePipeAxisConflict(pipeType, pipePos, state.blocks)) return reject("Y blocks only work with Z-open pipes");
@@ -3458,8 +3477,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       // In free build mode: no destTypeChange, no Hadamard switching — keep dest as-is
     } else {
       // Validate destination position and check for overlap with non-cube blocks
-      if (!isValidPos(destPos, "XZZ")) return reject("Invalid destination position");
-      if (hasBlockOverlap(destPos, "XZZ", state.blocks, state.spatialIndex)) return reject("Destination would overlap existing blocks");
+      if (!isValidPos(destPos, "XZZ")) return reject("Invalid destination position", "other");
+      if (hasBlockOverlap(destPos, "XZZ", state.blocks, state.spatialIndex)) return reject("Destination would overlap existing blocks", "other");
 
       if (!state.freeBuild) {
         // Pre-check: if existing pipes at destPos conflict with the inferred pipe,
@@ -3960,7 +3979,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     }
 
     if (!state.freeBuild && candidatePipes.length > 1) {
-      set({ hoveredInvalidReason: "Multiple undetermined pipes — cannot cycle" });
+      set({ hoveredInvalidReason: { text: "Multiple undetermined pipes — cannot cycle", kind: "color" } });
       return;
     }
 

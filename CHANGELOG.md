@@ -6,6 +6,19 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.2.1.0] - 2026-05-07
+
+### Changed
+- Free Build mode (which lets you place cubes and pipes through colour
+  mismatched intermediate states) is now a top-level toolbar button instead
+  of a hidden checkbox in Settings, with a clearly painted ON state so the
+  relaxed-rules mode is unmistakable while it's active. The duplicate
+  "Ignore color rules" entry in the Settings menu has been removed.
+- When a placement is rejected because of a colour mismatch, the red toast
+  now offers an inline "Turn on Free Build" link that toggles the mode and
+  dismisses the warning in one click. Rejections that Free Build cannot
+  bypass (overlap, invalid position) keep the original toast with no hint.
+
 ## [0.2.0.1] - 2026-05-07
 
 ### Fixed

@@ -536,13 +536,10 @@ export function Toolbar({
         <AnalyzeMenu />
       </div>
 
-      {/* Settings + File menu */}
+      {/* Free Build + Settings + File menu */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
-        <SettingsMenu
-          freeBuild={freeBuild}
-          toggleFreeBuild={toggleFreeBuild}
-          onOpenKeybindEditor={onOpenKeybindEditor}
-        />
+        <FreeBuildToggle freeBuild={freeBuild} toggleFreeBuild={toggleFreeBuild} />
+        <SettingsMenu onOpenKeybindEditor={onOpenKeybindEditor} />
         <FileMenu
           loadBlocks={loadBlocks}
           insertBlocks={insertBlocks}
@@ -1556,6 +1553,49 @@ function AnalyzeMenu() {
 }
 
 // ---------------------------------------------------------------------------
+// FreeBuildToggle — top-level toolbar button for Free Build mode
+//
+// Free Build relaxes pipe/cube color-matching checks so users can edit through
+// "wrongspace" intermediate states. Surfaced as a top-level button so the mode
+// is discoverable before users hit a rejection toast — and the rejection toast
+// itself points at this button via an inline "Turn on Free Build" hint when
+// the rejection is one Free Build would relieve.
+// ---------------------------------------------------------------------------
+
+function FreeBuildToggle({
+  freeBuild,
+  toggleFreeBuild,
+}: {
+  freeBuild: boolean;
+  toggleFreeBuild: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={freeBuild}
+      onClick={toggleFreeBuild}
+      title={
+        freeBuild
+          ? "Free Build is ON — pipe/cube color-matching checks are skipped. Click to turn off."
+          : "Free Build (off) — turn on to skip color-matching checks and edit through intermediate mismatched states."
+      }
+      style={{
+        ...btnStyle(freeBuild),
+        whiteSpace: "nowrap",
+        width: "100%",
+        // When ON, paint a warning-yellow accent on top of the active blue
+        // tint so the relaxed-rules mode is unmistakable across the app.
+        ...(freeBuild
+          ? { background: "#fff3cd", borderColor: "#f0c040", color: "#5a4500", fontWeight: 600 }
+          : {}),
+      }}
+    >
+      {freeBuild ? "Free Build: ON" : "Free Build"}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // SettingsMenu — Free Build, navigation style, keybind editor entry
 // ---------------------------------------------------------------------------
 
@@ -1565,12 +1605,8 @@ const NAV_STYLE_LABELS: Record<NavStyle, string> = {
 };
 
 function SettingsMenu({
-  freeBuild,
-  toggleFreeBuild,
   onOpenKeybindEditor,
 }: {
-  freeBuild: boolean;
-  toggleFreeBuild: () => void;
   onOpenKeybindEditor: (mode: KeybindMode) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -1598,7 +1634,7 @@ function SettingsMenu({
       <button
         onClick={() => setOpen((v) => !v)}
         title="Settings"
-        style={{ ...btnStyle(open || freeBuild), whiteSpace: "nowrap", width: "100%" }}
+        style={{ ...btnStyle(open), whiteSpace: "nowrap", width: "100%" }}
       >
         ⚙ Settings
       </button>
@@ -1622,16 +1658,6 @@ function SettingsMenu({
             fontSize: 12,
           }}
         >
-          <label style={{ display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer" }}>
-            <input type="checkbox" checked={freeBuild} onChange={toggleFreeBuild} style={{ marginTop: 2 }} />
-            <span>
-              Ignore color rules
-              <div style={{ fontSize: 10, color: "#888", whiteSpace: "nowrap" }}>
-                (“Free Build” — skips color-matching checks)
-              </div>
-            </span>
-          </label>
-
           <label style={{ display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer" }}>
             <input type="checkbox" checked={showYDefects} onChange={toggleShowYDefects} style={{ marginTop: 2 }} />
             <span>
