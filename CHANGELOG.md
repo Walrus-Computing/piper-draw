@@ -6,6 +6,18 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.2.1.4] - 2026-05-07
+
+### Fixed
+- A port placed at z=0 no longer flickers on its bottom face as the camera
+  orbits. The visible checkerboard grid (lifted by Y=0.001 to clear cube
+  bottom faces) and the port's bottom face at Y=0 are coplanar transparents,
+  so Three.js's centroid-based transparent sort would flip their draw order
+  frame-to-frame as the orbit target moved past the port. The grid now
+  renders with `renderOrder=-1`, forcing it to draw before all other
+  transparents — port bottom faces always blend over the grid, regardless
+  of camera angle.
+
 ## [0.2.1.3] - 2026-05-07
 
 ### Changed

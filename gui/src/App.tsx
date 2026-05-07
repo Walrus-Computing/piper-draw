@@ -287,8 +287,14 @@ function CheckerboardGrid() {
     ? [-Math.PI / 2, 0, 0]
     : isoGridMeshTransform(viewMode.axis).rotation;
 
+  // renderOrder=-1: force the grid plane to draw before any other transparent
+  // object. Without it, the grid (world Y=0.001) and the bottom face of a port
+  // at TQEC z=0 (world Y=0) are coplanar transparents that Three.js sorts by
+  // centroid distance. As the camera orbits, the grid's centroid (which
+  // follows the orbit target) crosses the port's centroid and the draw order
+  // flips frame-to-frame, which reads as flicker on the port's bottom face.
   return (
-    <mesh ref={ref} rotation={rotation}>
+    <mesh ref={ref} rotation={rotation} renderOrder={-1}>
       <planeGeometry args={[500, 500]} />
       <primitive object={gridMaterial} attach="material" />
     </mesh>
