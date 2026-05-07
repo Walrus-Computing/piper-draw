@@ -1561,7 +1561,7 @@ function AnalyzeMenu() {
 
 const NAV_STYLE_LABELS: Record<NavStyle, string> = {
   pan: "Drag to pan",
-  rotate: "Drag to rotate (default)",
+  rotate: "Drag to rotate",
 };
 
 function SettingsMenu({

@@ -22,6 +22,11 @@ export function NavControlsModifier({
     const apply = (alt: boolean) => {
       const controls = controlsRef.current;
       if (!controls || !controls.mouseButtons) return;
+      // Iso elevation views have enableRotate={false}, so flipping LEFT to
+      // ROTATE while Alt is held would turn drag into a silent no-op there.
+      // Skip the modifier in iso — the iso viewport's own mouseButtons
+      // (LEFT=PAN, MIDDLE=DOLLY) are correct as-shipped.
+      if (viewMode.kind !== "persp") return;
       if (navStyle === "rotate") {
         // Drag = rotate, Shift+Drag = pan (handled by OrbitControls' built-in swap).
         controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
