@@ -2,15 +2,9 @@
   <img src="assets/logo.svg" alt="piper-draw" width="640">
 </p>
 
-<p align="center">
-  <a href="https://walruscomputing.com">
-    <img src="assets/walrus-logo.png" alt="Walrus Computing" width="72">
-  </a>
-  <br>
-  <sub>Made by <a href="https://walruscomputing.com">Walrus Computing</a></sub>
-</p>
+<a href="https://walruscomputing.com" title="Made by Walrus Computing"><img align="right" src="assets/walrus-logo.png" alt="Walrus Computing" width="96"></a>
 
-An open source web application for building pipe diagrams for topological quantum error correction.
+An open source web application for building pipe diagrams for topological quantum error correction. Made by [Walrus Computing](https://walruscomputing.com).
 
 Live at [piper-draw.walruscomputing.com](https://piper-draw.walruscomputing.com).
 
