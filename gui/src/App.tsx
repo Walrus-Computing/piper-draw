@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 
@@ -1292,7 +1292,11 @@ export default function App() {
         {!photoRequest && !flowVizMode && <DragShadow />}
         {!photoRequest && !flowVizMode && <BuildCursor />}
         {!photoRequest && !flowVizMode && <OpenPipeGhosts />}
-      {!photoRequest && (flowsPanelOpen || zxPanelOpen || flowVizMode) && <PortLabels3D />}
+        {!photoRequest && (flowsPanelOpen || zxPanelOpen || flowVizMode) && (
+          <Suspense fallback={null}>
+            <PortLabels3D />
+          </Suspense>
+        )}
         {!photoRequest && <FlowSurfaceOverlay />}
         {!photoRequest && <YDefectOverlay />}
         <CameraBuildSnap controlsRef={controlsRef} />
