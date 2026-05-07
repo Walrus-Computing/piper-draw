@@ -24,9 +24,14 @@ Source: `.context/ceo-plans/2026-04-29-group-elements.md`. These were considered
 
 - **R2-leftover: auto-dissolve sweep on `convertBlockToPort` and `cycleSelectedType` cube→port branch** (P1, S, CC ~30 min) — `removeBlock` (single-block + cascade) and `deleteSelected` now run the auto-dissolve sweep, but converting a grouped cube to a port marker (port-tool click) and cycling a grouped cube past the port slot in edit mode also delete a block without restoring the ≥2-member invariant. Extract the same `applyAutoDissolve` helper used elsewhere; extend `replace` and `edit-type-cycle` UndoCommand kinds with `autoDissolvedFor` and mirror in undo+redo.
 - **R5: shift-click on a grouped block is union-only — no toggle** (P2, S, CC ~30 min) — shift+click on an ungrouped block toggles the block in/out of selection; shift+click on a grouped block always unions the whole group. Same gap on shift+marquee. Fix: when shift is held and every member of the clicked block's group is already selected, call a deselect path; otherwise union. Mirror in `SelectModePointer` marquee expander.
-- **R7: dissolve toast clobbers in-progress verify highlights** (P2, M, CC ~45 min) — `validationStore.reportEphemeralError` is the only ephemeral-toast surface, but it sets `status: "aborted"` and clears `invalidKeys`/`errors`. The auto-dissolve toast uses this channel as a side effect of unrelated deletes, wiping the rendered red invalid-block highlights. Fix: add a non-destructive toast channel (e.g. `reportEphemeralInfo`) that leaves invalidation state intact, and route the group toasts (dissolve, "Select 2+ blocks", "mixed selection") through it. Same channel-misuse pattern as the migration toast.
 - **R10: alt-drilled selection of one group member still verifies the whole group** (P2, S, CC ~20 min) — the `single-grouped` branch in `validationStore.validate` and `ZXPanel.compute` triggers when `selectedKeys.size === 1` and that one block is grouped. After alt+click drill-in, the user expects "verify just this block" but gets "verify the whole group". Fix: distinguish "selection equals an entire group" from "selection is a strict subset of a group" in the classifier; refuse or fall back to whole-scene validate for the strict-subset case, with a toast.
-- **R-circular: replace `reportGroupToast` dynamic import with a shared toast bus** (P3, M, CC ~1 hr) — current circular-import workaround uses `void import("./validationStore").then(...)` from inside synchronous reducers. Toasts fire a microtask later, racing block subscribers. Move to a small shared event-bus module that both stores depend on without cycles. Captured during /plan-eng-review codex pass too.
+
+---
+
+## Completed
+
+- **R7: dissolve toast clobbers in-progress verify highlights** — Completed: v0.1.3.0 (2026-05-01). PR 5a introduced `toastBus` with separate `error` and `info` channels. Auto-dissolve / "Select 2+" / mixed-selection / migration toasts now route through `info` and no longer clear `validationStore.invalidKeys`.
+- **R-circular: replace `reportGroupToast` dynamic import with a shared toast bus** — Completed: v0.1.3.0 (2026-05-01). Same PR. `gui/src/utils/toastBus.ts` is the shared module both stores depend on without cycles; the `void import("./validationStore").then(...)` workaround is gone.
 
 ---
 

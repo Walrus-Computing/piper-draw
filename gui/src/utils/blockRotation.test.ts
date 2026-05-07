@@ -171,9 +171,9 @@ describe("rotateBlockKind — 90° X rotation", () => {
     expect(rotateBlockKind("ZOXH", ROT_X_CCW)).toBe("ZXOH");
   });
 
-  it("rejects Y blocks under X rotation", () => {
-    expect(() => rotateBlockKind("Y", ROT_X_CCW)).toThrow(/can only rotate around the Z axis/);
-    expect(() => rotateBlockKind("Y", ROT_X_CW)).toThrow(/can only rotate around the Z axis/);
+  it("rejects Y blocks under 90° X rotation", () => {
+    expect(() => rotateBlockKind("Y", ROT_X_CCW)).toThrow(/cannot 90°-rotate around the X or Y axis/);
+    expect(() => rotateBlockKind("Y", ROT_X_CW)).toThrow(/cannot 90°-rotate around the X or Y axis/);
   });
 });
 
@@ -201,9 +201,9 @@ describe("rotateBlockKind — 90° Y rotation", () => {
     expect(rotateBlockKind("ZOXH", ROT_Y_CCW)).toBe("XOZH");
   });
 
-  it("rejects Y blocks under Y rotation", () => {
-    expect(() => rotateBlockKind("Y", ROT_Y_CCW)).toThrow(/can only rotate around the Z axis/);
-    expect(() => rotateBlockKind("Y", ROT_Y_CW)).toThrow(/can only rotate around the Z axis/);
+  it("rejects Y blocks under 90° Y rotation", () => {
+    expect(() => rotateBlockKind("Y", ROT_Y_CCW)).toThrow(/cannot 90°-rotate around the X or Y axis/);
+    expect(() => rotateBlockKind("Y", ROT_Y_CW)).toThrow(/cannot 90°-rotate around the X or Y axis/);
   });
 });
 
@@ -224,13 +224,12 @@ describe("rotateBlockKind — 180° flips", () => {
     expect(rotateBlockKind("ZXO", ROT_Z_180)).toBe("ZXO");
   });
 
-  it("allows Y blocks under Z flip (Z direction preserved)", () => {
+  it("preserves Y block type under flip on any axis", () => {
+    // 180° flips keep the Y-direction sentinel `!` on the Z position; the
+    // half-cube mesh stays flat-in-Z, so the type is unchanged.
+    expect(rotateBlockKind("Y", ROT_X_180)).toBe("Y");
+    expect(rotateBlockKind("Y", ROT_Y_180)).toBe("Y");
     expect(rotateBlockKind("Y", ROT_Z_180)).toBe("Y");
-  });
-
-  it("rejects Y blocks under X flip and Y flip (Z direction inverted)", () => {
-    expect(() => rotateBlockKind("Y", ROT_X_180)).toThrow(/can only rotate around the Z axis/);
-    expect(() => rotateBlockKind("Y", ROT_Y_180)).toThrow(/can only rotate around the Z axis/);
   });
 });
 
@@ -351,18 +350,31 @@ describe("rotateBlockAroundAxis", () => {
     expect(rotated.type).toBe("OXZH");
   });
 
-  it("rejects rotation of Y blocks around X / Y axes", () => {
+  it("rejects 90° X / Y rotation of Y blocks", () => {
     const y: Block = { pos: { x: 0, y: 0, z: 0 }, type: "Y" };
-    expect(() => rotateBlockAroundAxis(y, origin, "x", "ccw")).toThrow(/can only rotate around the Z axis/);
-    expect(() => rotateBlockAroundAxis(y, origin, "y", "cw")).toThrow(/can only rotate around the Z axis/);
-    expect(() => rotateBlockAroundAxis(y, origin, "x", "flip")).toThrow(/can only rotate around the Z axis/);
-    expect(() => rotateBlockAroundAxis(y, origin, "y", "flip")).toThrow(/can only rotate around the Z axis/);
+    expect(() => rotateBlockAroundAxis(y, origin, "x", "ccw")).toThrow(/cannot 90°-rotate around the X or Y axis/);
+    expect(() => rotateBlockAroundAxis(y, origin, "y", "cw")).toThrow(/cannot 90°-rotate around the X or Y axis/);
   });
 
-  it("allows Y blocks under Z rotation and Z flip", () => {
+  it("allows Y blocks under Z rotation and any-axis flip", () => {
     const y: Block = { pos: { x: 0, y: 3, z: 0 }, type: "Y" };
     expect(rotateBlockAroundAxis(y, origin, "z", "ccw").type).toBe("Y");
     expect(rotateBlockAroundAxis(y, origin, "z", "flip").type).toBe("Y");
+    expect(rotateBlockAroundAxis(y, origin, "x", "flip").type).toBe("Y");
+    expect(rotateBlockAroundAxis(y, origin, "y", "flip").type).toBe("Y");
+  });
+
+  it("flips a Y block's position around a non-origin pivot on every axis", () => {
+    // Y at (3, 6, 9), pivot at (1, 2, 3). Each 180° flip about the pivot
+    // negates the two non-axis coords relative to the pivot.
+    const y: Block = { pos: { x: 3, y: 6, z: 9 }, type: "Y" };
+    const pivot: Position3D = { x: 1, y: 2, z: 3 };
+    // X flip: x fixed; y' = 2*py - y = -2; z' = 2*pz - z = -3.
+    expect(rotateBlockAroundAxis(y, pivot, "x", "flip").pos).toEqual({ x: 3, y: -2, z: -3 });
+    // Y flip: y fixed; x' = -1; z' = -3.
+    expect(rotateBlockAroundAxis(y, pivot, "y", "flip").pos).toEqual({ x: -1, y: 6, z: -3 });
+    // Z flip: z fixed; x' = -1; y' = -2.
+    expect(rotateBlockAroundAxis(y, pivot, "z", "flip").pos).toEqual({ x: -1, y: -2, z: 9 });
   });
 });
 

@@ -89,9 +89,11 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
         <ul style={{ margin: 0, paddingLeft: 18 }}>
           <li>Use <b>Undo</b>/<b>Redo</b> or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z.</li>
           <li>
-            <b>Camera</b> — scroll to zoom, <kbd>Shift</kbd>/<kbd>Alt</kbd>+drag
-            to rotate, drag to pan. Use the <b>Iso ▾</b> menu in the toolbar
-            to snap to an axis-locked orthographic view.
+            <b>Camera</b> — drag to orbit, middle/right-drag (or
+            <kbd>Shift</kbd>+drag) to pan, scroll to zoom. To make pan primary,
+            switch to “Drag to pan” in Settings; the gestures swap (drag pans,
+            middle/right-drag and <kbd>Shift</kbd>/<kbd>Alt</kbd>+drag orbit).
+            Use the <b>Iso ▾</b> menu to snap to an axis-locked orthographic view.
           </li>
           <li>
             <b>Shortcuts</b> — every key binding is listed and rebindable in
@@ -150,6 +152,25 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
           </li>
         </ul>
 
+        <a
+          href="https://walruscomputing.com"
+          target="_blank"
+          rel="noreferrer"
+          title="Made by Walrus Computing"
+          style={{
+            float: "right",
+            marginLeft: 12,
+            marginTop: 8,
+            display: "inline-block",
+          }}
+        >
+          <img
+            src="/walrus-logo.png"
+            alt="Walrus Computing"
+            style={{ height: 96, width: "auto", display: "block" }}
+          />
+        </a>
+
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Files</h4>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
           <li><b>Import</b>/<b>Export</b> round-trip through Collada (.dae) files.</li>
@@ -164,8 +185,17 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
           >
             README
           </a>{" "}
-          for more details.
+          for more details, made by{" "}
+          <a
+            href="https://walruscomputing.com"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Walrus Computing
+          </a>
+          .
         </p>
+        <div style={{ clear: "both" }} />
       </div>
     </div>
   );

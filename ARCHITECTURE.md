@@ -34,7 +34,7 @@ the affected components on the next frame.
 |-----------------------|---------------------------------------------------------------------|
 | `gui/src/stores/`     | Zustand stores. `blockStore` is the universe; `groupSelectors`, `keybindStore`, `locateStore`, `validationStore` are focused. |
 | `gui/src/types/`      | Shared types. `index.ts` is currently mixed types+logic; logic is migrating out into focused utility files. |
-| `gui/src/utils/`      | Pure helpers: geometry, validation, ZX graph derivation, DAE im/export, scene share, templates, drag/snap math. No React, no Zustand subscriptions. |
+| `gui/src/utils/`      | Pure helpers: geometry, validation, ZX graph derivation, DAE im/export, scene share, templates, drag/snap math, the shared `toastBus` (error + info channels). No React, no Zustand subscriptions. |
 | `gui/src/components/` | React + R3F. `BlockInstances` renders the scene; `Toolbar`/`HelpPanel`/`ZXPanel`/`FlowsPanel` are UI panels; the rest are overlays and ghost previews. |
 | `gui/src/hooks/`      | Reusable hooks (floating panels, pulse animation, viewport fit). |
 | `gui/src/App.tsx`     | Top-level layout, keybind dispatch, pointer routing. |
@@ -81,6 +81,24 @@ new code
 
 If your change does not cleanly fit one of these slots, that is a signal —
 discuss the boundary before adding to a hot file.
+
+## Toast bus (error + info channels)
+
+Ephemeral toasts route through `gui/src/utils/toastBus.ts` — a plain event
+emitter with two channels. Producers (`blockStore`, `App.tsx`) emit; consumers
+subscribe.
+
+- **`toastBus.error.emit(msg)`** — destructive. Routes through
+  `validationStore.reportEphemeralError`, which sets `status: "aborted"` and
+  clears `errors` / `invalidKeys`. Use only for genuine action aborts
+  (rotation, flip).
+- **`toastBus.info.emit(msg)`** — non-destructive. `ValidationToast.tsx`
+  subscribes directly and renders a separate top-right overlay; verify-state
+  highlights survive intact. Use for migration notices, group-toggle hints,
+  and auto-dissolve toasts (R7 fix).
+
+The bus replaces an earlier `void import("./validationStore")` workaround that
+ran toasts a microtask later, racing block subscribers.
 
 ## Block construction invariant
 

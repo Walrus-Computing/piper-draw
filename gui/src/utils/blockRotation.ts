@@ -63,13 +63,12 @@ export function rotateBlockKind(kindStr: string, rot: number[][]): string {
     rotatedName += entry;
   }
 
-  const axesDirs = getAxesDirections(rot);
-
-  // Y / cultivation blocks: reject invalid rotations, keep original name
+  // Y / cultivation blocks: reject only when the Y-direction sentinel `!` would
+  // move off the Z axis (i.e. 90° rotations around X or Y).
   if (rotatedName.includes("!")) {
-    if (!rotatedName.endsWith("!") || axesDirs["Z"] < 0) {
+    if (!rotatedName.endsWith("!")) {
       throw new Error(
-        `${kindStr} blocks can only rotate around the Z axis.`,
+        `${kindStr} blocks cannot 90°-rotate around the X or Y axis.`,
       );
     }
     return kindStr;
@@ -230,7 +229,8 @@ export function rotatePositionAroundAxis(
  * `operation` (90° CCW/CW or 180°).
  *
  * Throws via `rotateBlockKind` when the rotation is invalid for the block
- * type (e.g. a Y block under any non-Z-preserving rotation).
+ * type (e.g. a Y block under a 90° X or Y rotation; 180° flips on any axis
+ * are accepted).
  */
 export function rotateBlockAroundAxis(
   block: Block,

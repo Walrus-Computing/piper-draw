@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 
@@ -47,7 +47,7 @@ import {
   actionToWasdKey,
   type KeyBinding,
 } from "./stores/keybindStore";
-import { useValidationStore } from "./stores/validationStore";
+import { toastBus } from "./utils/toastBus";
 import type { RotationAxis, RotationOperation } from "./utils/blockRotation";
 import { wasdToBuildDirection, tqecToThree, posKey, blockTqecSize, type Block, type IsoAxis, type ViewMode } from "./types";
 import { cameraGroundPoint } from "./utils/groundPlane";
@@ -287,8 +287,14 @@ function CheckerboardGrid() {
     ? [-Math.PI / 2, 0, 0]
     : isoGridMeshTransform(viewMode.axis).rotation;
 
+  // renderOrder=-1: force the grid plane to draw before any other transparent
+  // object. Without it, the grid (world Y=0.001) and the bottom face of a port
+  // at TQEC z=0 (world Y=0) are coplanar transparents that Three.js sorts by
+  // centroid distance. As the camera orbits, the grid's centroid (which
+  // follows the orbit target) crosses the port's centroid and the draw order
+  // flips frame-to-frame, which reads as flicker on the port's bottom face.
   return (
-    <mesh ref={ref} rotation={rotation}>
+    <mesh ref={ref} rotation={rotation} renderOrder={-1}>
       <planeGeometry args={[500, 500]} />
       <primitive object={gridMaterial} attach="material" />
     </mesh>
@@ -316,10 +322,11 @@ function ViewportCamera({ controlsRef }: { controlsRef: React.RefObject<any> }) 
           ref={controlsRef}
           makeDefault
           enableRotate
+          dampingFactor={0.2}
           zoomToCursor
           maxDistance={50000}
           screenSpacePanning={false}
-          mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: -1 as THREE.MOUSE }}
+          mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN }}
         />
       </>
     );
@@ -384,6 +391,7 @@ function IsoViewport({
         ref={controlsRef}
         makeDefault
         enableRotate={false}
+        dampingFactor={0.2}
         zoomToCursor
         maxZoom={500}
         minZoom={2}
@@ -514,8 +522,15 @@ function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivE
   const reason = useBlockStore((s) => s.hoveredInvalidReason);
   const portWarning = useBlockStore((s) => s.portWarning);
   const clearPortWarning = useBlockStore((s) => s.clearPortWarning);
+  const freeBuild = useBlockStore((s) => s.freeBuild);
+  const toggleFreeBuild = useBlockStore((s) => s.toggleFreeBuild);
   // Prefer the persistent port warning if set; fall back to the hover tooltip.
-  const message = portWarning ?? reason;
+  const message = portWarning ?? reason?.text ?? null;
+  // Show the Free Build hint only when the active rejection is one Free Build
+  // would relieve (kind === "color"), Free Build isn't already on, and the
+  // port-warning path isn't preempting the toast (port warnings are unrelated
+  // to color rules).
+  const showFreeBuildHint = !portWarning && !freeBuild && reason?.kind === "color";
   const [topOffset, setTopOffset] = useState(0);
 
   useEffect(() => {
@@ -531,6 +546,13 @@ function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivE
   }, [portWarning, clearPortWarning]);
 
   if (!message) return null;
+  // Clearing the rejection alongside the toggle removes the now-stale red
+  // warning — without this the toast persists with an irrelevant message
+  // until the next hover/build event.
+  const enableFreeBuildAndDismiss = () => {
+    toggleFreeBuild();
+    useBlockStore.setState({ hoveredInvalidReason: null });
+  };
   return (
     <div
       style={{
@@ -546,13 +568,40 @@ function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivE
         borderRadius: "6px",
         fontFamily: "sans-serif",
         fontSize: "13px",
+        // The container stays click-through so it never shadows canvas
+        // hover/build interactions in the strip below the toolbar; only the
+        // inline Free Build button opts back into pointer events.
         pointerEvents: "none",
         boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
         maxWidth: "500px",
         textAlign: "center" as const,
       }}
     >
-      {message}
+      <div>{message}</div>
+      {showFreeBuildHint && (
+        <div style={{ marginTop: 4, fontSize: "12px" }}>
+          Turn on{" "}
+          <button
+            type="button"
+            onClick={enableFreeBuildAndDismiss}
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              color: "#721c24",
+              fontWeight: 600,
+              fontFamily: "inherit",
+              fontSize: "inherit",
+              textDecoration: "underline",
+              cursor: "pointer",
+              pointerEvents: "auto",
+            }}
+          >
+            Free Build
+          </button>{" "}
+          to edit through color-mismatched states.
+        </div>
+      )}
     </div>
   );
 }
@@ -804,6 +853,8 @@ export default function App() {
           case "undo": store.undoBuildStep(); return;
           case "cycleBlock": store.cycleBlock(); return;
           case "cyclePipe": store.cyclePipe(); return;
+          case "nextPort": store.cycleToNextPort(1); return;
+          case "prevPort": store.cycleToNextPort(-1); return;
           case "deleteAtCursor": store.deleteAtBuildCursor(); return;
           case "exitBuild": store.setMode("edit"); return;
         }
@@ -898,7 +949,7 @@ export default function App() {
           const result = store.rotateSelected(axis, operation, pivotOverride);
           if (!result.ok) {
             const verb = operation === "flip" ? "Flip" : "Rotation";
-            useValidationStore.getState().reportEphemeralError(`${verb} aborted: ${result.reason}`);
+            toastBus.error.emit(`${verb} aborted: ${result.reason}`);
           }
           return;
         }
@@ -925,7 +976,9 @@ export default function App() {
           // per browser via localStorage flag.
           try {
             if (!localStorage.getItem(GROUP_KEYMAP_MIGRATION_KEY)) {
-              useValidationStore.getState().reportEphemeralError(
+              // Migration notice = info, not error — don't clobber an
+              // in-progress verify's invalid-block highlights.
+              toastBus.info.emit(
                 "G now groups selected blocks. Use Shift+G to toggle the grid.",
               );
               localStorage.setItem(GROUP_KEYMAP_MIGRATION_KEY, "1");
@@ -1272,7 +1325,7 @@ export default function App() {
       )}
       <PlacementWarning toolbarRef={toolbarRef} />
       <Canvas
-        gl={{ logarithmicDepthBuffer: true, toneMapping: THREE.ACESFilmicToneMapping, preserveDrawingBuffer: true }}
+        gl={{ toneMapping: THREE.ACESFilmicToneMapping, preserveDrawingBuffer: true }}
         onContextMenu={(e) => e.preventDefault()}
       >
         <color attach="background" args={["#CBDFC6"]} />
@@ -1288,7 +1341,11 @@ export default function App() {
         {!photoRequest && !flowVizMode && <DragShadow />}
         {!photoRequest && !flowVizMode && <BuildCursor />}
         {!photoRequest && !flowVizMode && <OpenPipeGhosts />}
-      {!photoRequest && (flowsPanelOpen || zxPanelOpen || flowVizMode) && <PortLabels3D />}
+        {!photoRequest && (flowsPanelOpen || zxPanelOpen || flowVizMode) && (
+          <Suspense fallback={null}>
+            <PortLabels3D />
+          </Suspense>
+        )}
         {!photoRequest && <FlowSurfaceOverlay />}
         {!photoRequest && <YDefectOverlay />}
         <CameraBuildSnap controlsRef={controlsRef} />

@@ -14,6 +14,7 @@ import {
   hasCubeColorConflict,
   hasPipeColorConflict,
   hasYCubePipeAxisConflict,
+  validatePipePlacement,
   isPipeType,
   isValidBlockPos,
   isValidPos,
@@ -52,15 +53,11 @@ import {
   withoutGroupId,
 } from "./groupSelectors";
 
-// Toast helper: lazy-resolves validationStore via dynamic import to avoid the
-// circular-import landmine (validationStore subscribes to blockStore at module
-// init time, so a static import here would hoist that subscription before
-// useBlockStore is defined and crash module load — surfaced by the test suite).
-function reportGroupToast(msg: string): void {
-  void import("./validationStore").then((m) => {
-    m.useValidationStore.getState().reportEphemeralError(msg);
-  });
-}
+// Group toasts route through the shared toast bus's `info` channel — they are
+// non-destructive (do not clobber `validationStore.status: "invalid"` from a
+// prior verify, fixing R7). The bus itself has no dependency on validationStore,
+// so the old dynamic-import workaround for the circular dependency is gone.
+import { toastBus } from "../utils/toastBus";
 
 /**
  * Walk `blocksAfter` (post-delete state), find any group that just dropped
@@ -110,7 +107,7 @@ function applyAutoDissolve(
 function dissolveToast(autoDissolvedFor: ReadonlyArray<{ priorGroupId: string }>): void {
   if (autoDissolvedFor.length === 0) return;
   const n = new Set(autoDissolvedFor.map((a) => a.priorGroupId)).size;
-  reportGroupToast(
+  toastBus.info.emit(
     n === 1
       ? "Group dissolved (only 1 member left)"
       : `${n} groups dissolved (only 1 member each)`,
@@ -274,7 +271,14 @@ interface BlockStore {
   hoveredGridPos: Position3D | null;
   hoveredBlockType: BlockType | null;
   hoveredInvalid: boolean;
-  hoveredInvalidReason: string | null;
+  /**
+   * Why the most recent placement attempt was rejected, plus a coarse `kind`
+   * so the toast can decide whether to surface the "turn on Free Build" hint.
+   * `kind: "color"` covers any rejection that Free Build would relieve
+   * (color/axis/Y conflicts, undetermined ambiguity). `kind: "other"` covers
+   * overlap and invalid-position rejections, which Free Build does NOT bypass.
+   */
+  hoveredInvalidReason: { text: string; kind: "color" | "other" } | null;
   hoveredReplace: boolean;
   selectedKeys: Set<string>;
   /** Selected PORT positions (ports are transient, so keyed by posKey string rather than stored in `blocks`). */
@@ -470,6 +474,7 @@ interface BlockStore {
   cyclePipe: (target?: PipeVariant) => void;
   deleteAtBuildCursor: () => void;
   moveBuildCursor: (pos: Position3D) => void;
+  cycleToNextPort: (direction: 1 | -1) => void;
   clearCameraSnap: () => void;
 
   // Free build (disables color-matching validation)
@@ -1356,7 +1361,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   setHoveredGridPos: (pos, blockType, invalid, reason, replace) => set((state) => {
     const bt = blockType ?? null;
     const inv = invalid ?? false;
-    const rsn = reason ?? null;
+    // Hover-driven reasons all originate from color/axis/Y conflict checks
+    // (see GridPlane.tsx and OpenPipeGhosts.tsx) — every one of them is
+    // relieved by Free Build, so they're tagged kind="color".
+    const rsn: BlockStore["hoveredInvalidReason"] = reason ? { text: reason, kind: "color" } : null;
     const rep = replace ?? false;
     // Skip no-op updates to avoid unnecessary re-renders
     if (
@@ -1365,7 +1373,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       state.hoveredGridPos?.z === pos?.z &&
       state.hoveredBlockType === bt &&
       state.hoveredInvalid === inv &&
-      state.hoveredInvalidReason === rsn &&
+      state.hoveredInvalidReason?.text === rsn?.text &&
+      state.hoveredInvalidReason?.kind === rsn?.kind &&
       state.hoveredReplace === rep
     ) return state;
     return { hoveredGridPos: pos, hoveredBlockType: bt, hoveredInvalid: inv, hoveredInvalidReason: rsn, hoveredReplace: rep };
@@ -1397,8 +1406,42 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         return state;
       }
       if (hasBlockOverlap(pos, blockType, state.blocks, state.spatialIndex, existing ? key : undefined)) return state;
+
+      // Working state. If validatePipePlacement decides retypes are required
+      // (issue #292: cubes adjacent to a new pipe should adapt their type
+      // rather than block placement), apply them BEFORE the normal add path.
+      // The retype + add are recorded as TWO separate undo entries (D1).
+      let preBlocks = state.blocks;
+      let preHiddenFaces = state.hiddenFaces;
+      let preUndetermined = state.undeterminedCubes;
+      let pretypeCmd: UndoCommand | null = null;
+
       if (!store.freeBuild) {
-        if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, state.blocks)) return state;
+        if (isPipeType(blockType)) {
+          const result = validatePipePlacement(blockType, pos, state.blocks);
+          if (!result.ok) return state;
+          if (result.replaces.length > 0) {
+            let curBlocks = preBlocks;
+            let curHiddenFaces = preHiddenFaces;
+            for (const e of result.replaces) {
+              ({ blocks: curBlocks, hiddenFaces: curHiddenFaces } = doRemove(curBlocks, state.spatialIndex, curHiddenFaces, e.key, e.oldBlock));
+              ({ blocks: curBlocks, hiddenFaces: curHiddenFaces } = doAdd(curBlocks, state.spatialIndex, curHiddenFaces, e.key, e.newBlock));
+            }
+            const newUndetermined = new Map(state.undeterminedCubes);
+            const undeterminedChanges: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> = [];
+            for (const e of result.replaces) {
+              const oldInfo = state.undeterminedCubes.get(e.key);
+              if (oldInfo) {
+                newUndetermined.delete(e.key);
+                undeterminedChanges.push({ key: e.key, oldInfo, newInfo: undefined });
+              }
+            }
+            preBlocks = curBlocks;
+            preHiddenFaces = curHiddenFaces;
+            preUndetermined = newUndetermined;
+            pretypeCmd = { kind: "bulk-replace", entries: result.replaces, undeterminedChanges };
+          }
+        }
         if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, state.blocks)) return state;
         if (hasYCubePipeAxisConflict(blockType, pos, state.blocks)) return state;
       }
@@ -1410,24 +1453,27 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         ? { ...existing, pos, type: blockType }
         : { pos, type: blockType };
 
+      const prependHistory = (cmds: UndoCommand[]): UndoCommand[] =>
+        pretypeCmd ? [...state.history, pretypeCmd, ...cmds].slice(-MAX_HISTORY) : [...state.history, ...cmds].slice(-MAX_HISTORY);
+
       if (existing) {
         // Skip if same type — nothing to replace
         if (existing.type === blockType) return state;
-        const removed = doRemove(state.blocks, state.spatialIndex, state.hiddenFaces, key, existing);
+        const removed = doRemove(preBlocks, state.spatialIndex, preHiddenFaces, key, existing);
         const { blocks, hiddenFaces } = doAdd(removed.blocks, state.spatialIndex, removed.hiddenFaces, key, block);
         const cmd: UndoCommand = { kind: "replace", key, oldBlock: existing, newBlock: block };
-        const newUndetermined = new Map(state.undeterminedCubes);
+        const newUndetermined = new Map(preUndetermined);
         newUndetermined.delete(key);
         return {
           blocks,
           hiddenFaces,
-          history: [...state.history, cmd].slice(-MAX_HISTORY),
+          history: prependHistory([cmd]),
           future: [],
           undeterminedCubes: newUndetermined,
         };
       }
 
-      const addResult = doAdd(state.blocks, state.spatialIndex, state.hiddenFaces, key, block);
+      const addResult = doAdd(preBlocks, state.spatialIndex, preHiddenFaces, key, block);
       let blocks = addResult.blocks;
       let hiddenFaces = addResult.hiddenFaces;
       let cmd: UndoCommand = { kind: "add", key, block };
@@ -1449,9 +1495,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           return {
             blocks,
             hiddenFaces,
-            history: [...state.history, cmd].slice(-MAX_HISTORY),
+            history: prependHistory([cmd]),
             future: [],
             portPositions: newPorts,
+            undeterminedCubes: preUndetermined,
           };
         }
       }
@@ -1463,17 +1510,19 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         return {
           blocks,
           hiddenFaces,
-          history: [...state.history, cmd].slice(-MAX_HISTORY),
+          history: prependHistory([cmd]),
           future: [],
           portPositions: newPorts,
+          undeterminedCubes: preUndetermined,
         };
       }
 
       return {
         blocks,
         hiddenFaces,
-        history: [...state.history, cmd].slice(-MAX_HISTORY),
+        history: prependHistory([cmd]),
         future: [],
+        undeterminedCubes: preUndetermined,
       };
     }),
 
@@ -2755,7 +2804,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     switch (cls.kind) {
       case "empty":
       case "single-ungrouped":
-        reportGroupToast("Select 2+ blocks to group");
+        toastBus.info.emit("Select 2+ blocks to group");
         return;
       case "single-grouped":
       case "all-same-group":
@@ -2765,12 +2814,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         get().groupSelected(state.selectedKeys);
         return;
       case "mixed-grouped-ungrouped":
-        reportGroupToast(
+        toastBus.info.emit(
           "Selection mixes grouped and ungrouped blocks. Ungroup first or select only ungrouped.",
         );
         return;
       case "multi-group":
-        reportGroupToast(
+        toastBus.info.emit(
           "Selection spans multiple groups. Ungroup first.",
         );
         return;
@@ -2874,7 +2923,10 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       const proposed = new Map(state.blocks);
       for (const e of entries) proposed.set(e.key, e.newBlock);
 
-      const flipBlocked = "Flip blocked: selection boundary mismatches adjacent colors";
+      const flipBlocked: BlockStore["hoveredInvalidReason"] = {
+        text: "Flip blocked: selection boundary mismatches adjacent colors",
+        kind: "color",
+      };
       if (!state.freeBuild) {
         for (const e of entries) {
           const { pos, type } = e.newBlock;
@@ -3096,8 +3148,15 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
   selectAll: () =>
     set((state) => {
-      if (state.blocks.size === 0) return state;
-      return { selectedKeys: new Set(state.blocks.keys()), selectionPivot: null };
+      const allPortKeys = new Set(
+        getAllPortPositions(state.blocks, state.portPositions).map(posKey),
+      );
+      if (state.blocks.size === 0 && allPortKeys.size === 0) return state;
+      return {
+        selectedKeys: new Set(state.blocks.keys()),
+        selectedPortPositions: allPortKeys,
+        selectionPivot: null,
+      };
     }),
 
   selectBlocks: (keys, additive, portKeys) =>
@@ -3247,8 +3306,13 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       };
     })();
 
-    const reject = (reason?: string) => {
-      if (reason) set({ hoveredInvalidReason: reason });
+    // `kind` defaults to "color" because every reason produced by buildMove's
+    // freeBuild-gated checks is relieved by enabling Free Build. Pass
+    // kind: "other" explicitly for overlap/invalid-position rejections that
+    // Free Build does NOT relieve, so the toast doesn't surface a misleading
+    // "turn on Free Build" hint.
+    const reject = (reason?: string, kind: "color" | "other" = "color") => {
+      if (reason) set({ hoveredInvalidReason: { text: reason, kind } });
       return false;
     };
 
@@ -3362,8 +3426,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     }
 
     // Validate pipe position and overlap
-    if (!isValidPos(pipePos, pipeType)) return reject("Invalid pipe position");
-    if (hasBlockOverlap(pipePos, pipeType, state.blocks, state.spatialIndex)) return reject("Pipe would overlap existing blocks");
+    if (!isValidPos(pipePos, pipeType)) return reject("Invalid pipe position", "other");
+    if (hasBlockOverlap(pipePos, pipeType, state.blocks, state.spatialIndex)) return reject("Pipe would overlap existing blocks", "other");
 
     // Y cube pipe axis conflict: Y cubes only work with Z-open pipes
     if (!state.freeBuild && hasYCubePipeAxisConflict(pipeType, pipePos, state.blocks)) return reject("Y blocks only work with Z-open pipes");
@@ -3420,8 +3484,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       // In free build mode: no destTypeChange, no Hadamard switching — keep dest as-is
     } else {
       // Validate destination position and check for overlap with non-cube blocks
-      if (!isValidPos(destPos, "XZZ")) return reject("Invalid destination position");
-      if (hasBlockOverlap(destPos, "XZZ", state.blocks, state.spatialIndex)) return reject("Destination would overlap existing blocks");
+      if (!isValidPos(destPos, "XZZ")) return reject("Invalid destination position", "other");
+      if (hasBlockOverlap(destPos, "XZZ", state.blocks, state.spatialIndex)) return reject("Destination would overlap existing blocks", "other");
 
       if (!state.freeBuild) {
         // Pre-check: if existing pipes at destPos conflict with the inferred pipe,
@@ -3922,7 +3986,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     }
 
     if (!state.freeBuild && candidatePipes.length > 1) {
-      set({ hoveredInvalidReason: "Multiple undetermined pipes — cannot cycle" });
+      set({ hoveredInvalidReason: { text: "Multiple undetermined pipes — cannot cycle", kind: "color" } });
       return;
     }
 
@@ -4049,6 +4113,23 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         cameraSnapTarget: { azimuth: null, targetPos: pos },
       };
     }),
+
+  cycleToNextPort: (direction) => {
+    const state = get();
+    if (state.mode !== "build") return;
+    const ordered = getOrderedPortPositions(state.blocks, state.portPositions, state.portMeta);
+    if (ordered.length === 0) return;
+    const cursorKey = state.buildCursor ? posKey(state.buildCursor) : null;
+    const idx = cursorKey ? ordered.findIndex((p) => posKey(p) === cursorKey) : -1;
+    let next: Position3D;
+    if (idx === -1) {
+      next = direction === 1 ? ordered[0] : ordered[ordered.length - 1];
+    } else {
+      const n = ordered.length;
+      next = ordered[(idx + direction + n) % n];
+    }
+    get().moveBuildCursor(next);
+  },
 
   clearCameraSnap: () => set({ cameraSnapTarget: null }),
 
