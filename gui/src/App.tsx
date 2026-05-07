@@ -516,8 +516,15 @@ function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivE
   const reason = useBlockStore((s) => s.hoveredInvalidReason);
   const portWarning = useBlockStore((s) => s.portWarning);
   const clearPortWarning = useBlockStore((s) => s.clearPortWarning);
+  const freeBuild = useBlockStore((s) => s.freeBuild);
+  const toggleFreeBuild = useBlockStore((s) => s.toggleFreeBuild);
   // Prefer the persistent port warning if set; fall back to the hover tooltip.
-  const message = portWarning ?? reason;
+  const message = portWarning ?? reason?.text ?? null;
+  // Show the Free Build hint only when the active rejection is one Free Build
+  // would relieve (kind === "color"), Free Build isn't already on, and the
+  // port-warning path isn't preempting the toast (port warnings are unrelated
+  // to color rules).
+  const showFreeBuildHint = !portWarning && !freeBuild && reason?.kind === "color";
   const [topOffset, setTopOffset] = useState(0);
 
   useEffect(() => {
@@ -548,13 +555,38 @@ function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivE
         borderRadius: "6px",
         fontFamily: "sans-serif",
         fontSize: "13px",
-        pointerEvents: "none",
+        // pointerEvents needs to be auto when the hint is interactive,
+        // but stay none in the toast-only case so it doesn't intercept hover.
+        pointerEvents: showFreeBuildHint ? "auto" : "none",
         boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
         maxWidth: "500px",
         textAlign: "center" as const,
       }}
     >
-      {message}
+      <div>{message}</div>
+      {showFreeBuildHint && (
+        <div style={{ marginTop: 4, fontSize: "12px" }}>
+          Turn on{" "}
+          <button
+            type="button"
+            onClick={toggleFreeBuild}
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              color: "#721c24",
+              fontWeight: 600,
+              fontFamily: "inherit",
+              fontSize: "inherit",
+              textDecoration: "underline",
+              cursor: "pointer",
+            }}
+          >
+            Free Build
+          </button>{" "}
+          to edit through color-mismatched states.
+        </div>
+      )}
     </div>
   );
 }

@@ -1156,7 +1156,10 @@ describe("blockStore", () => {
       setupLCorner();
       useBlockStore.getState().cyclePipe();
       const s = useBlockStore.getState();
-      expect(s.hoveredInvalidReason).toBe("Multiple undetermined pipes — cannot cycle");
+      expect(s.hoveredInvalidReason).toEqual({
+        text: "Multiple undetermined pipes — cannot cycle",
+        kind: "color",
+      });
       expect(s.blocks.get("1,0,0")?.type).toBe("OZX");
       expect(s.blocks.get("3,1,0")?.type).toBe("ZOX");
     });
@@ -1210,9 +1213,10 @@ describe("blockStore", () => {
         }],
       });
       useBlockStore.getState().cyclePipe();
-      expect(useBlockStore.getState().hoveredInvalidReason).toBe(
-        "Multiple undetermined pipes — cannot cycle",
-      );
+      expect(useBlockStore.getState().hoveredInvalidReason).toEqual({
+        text: "Multiple undetermined pipes — cannot cycle",
+        kind: "color",
+      });
     });
   });
 
