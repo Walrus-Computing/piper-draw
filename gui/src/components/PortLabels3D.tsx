@@ -1,7 +1,12 @@
 import { useMemo } from "react";
 import { Billboard, Text } from "@react-three/drei";
+import { preloadFont } from "troika-three-text";
 import { useBlockStore } from "../stores/blockStore";
 import { getAllPortPositions, posKey, tqecToThree } from "../types";
+
+// Warm troika's default font at module load so the first <Text> mount doesn't
+// suspend the Canvas.
+preloadFont({}, () => {});
 
 const IO_COLOR: Record<string, string> = {
   in: "#1a7f37",
