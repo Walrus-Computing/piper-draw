@@ -6,6 +6,15 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.2.1.1] - 2026-05-07
+
+### Fixed
+- Ctrl+A in Select mode now also selects every visible port — both manually
+  placed port markers and the implicit ports at open pipe endpoints. They
+  pulse with the selection highlight just like marquee-selected ports, and
+  a follow-on Backspace removes them along with the rest of the selection.
+  Closes #300.
+
 ## [0.2.1.0] - 2026-05-07
 
 ### Changed

@@ -85,3 +85,39 @@ describe("<OpenPipeGhosts> build-mode click-to-port (issue #293)", () => {
     expect(useBlockStore.getState().buildCursor).toEqual({ x: 0, y: 0, z: 0 });
   });
 });
+
+describe("<OpenPipeGhosts> selection highlight after Ctrl+A (issue #300)", () => {
+  it("renders a highlight mesh for every port after selectAll", async () => {
+    // Z-open pipe at (0,0,1) → inferred ports at (0,0,-1) and (0,0,3).
+    // Pre-selected cube at (3,0,0) reproduces the user-reported scenario where
+    // a block is already selected when Ctrl+A is pressed.
+    const cube: Block = { pos: { x: 3, y: 0, z: 0 }, type: "XZZ" };
+    const pipe: Block = { pos: { x: 0, y: 0, z: 1 }, type: "ZXO" };
+    const blocks = new Map<string, Block>([
+      ["3,0,0", cube],
+      ["0,0,1", pipe],
+    ]);
+    useBlockStore.setState(
+      {
+        blocks,
+        mode: "edit",
+        armedTool: "pointer",
+        selectedKeys: new Set(["3,0,0"]),
+      },
+      false,
+    );
+
+    // Baseline: no ports selected → only the SelectablePortGhost meshes render.
+    const before = await ReactThreeTestRenderer.create(<OpenPipeGhosts />);
+    const beforeMeshes = before.scene.findAllByType("Mesh").length;
+
+    useBlockStore.getState().selectAll();
+    await before.update(<OpenPipeGhosts />);
+
+    // After selectAll: 2 inferred ports get PortSelectionHighlight overlays,
+    // adding 2 more meshes. Both selectedPortPositions entries should render.
+    const afterMeshes = before.scene.findAllByType("Mesh").length;
+    expect(useBlockStore.getState().selectedPortPositions.size).toBe(2);
+    expect(afterMeshes - beforeMeshes).toBe(2);
+  });
+});

@@ -397,6 +397,29 @@ describe("blockStore", () => {
       useBlockStore.getState().selectAll();
       expect(useBlockStore.getState().selectedKeys).toBe(before);
     });
+
+    it("also selects manually placed ports", () => {
+      useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().addPortAt({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().addPortAt({ x: 6, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      expect(useBlockStore.getState().selectedKeys.size).toBe(1);
+      expect(useBlockStore.getState().selectedPortPositions.size).toBe(2);
+    });
+
+    it("selects ports even when no blocks exist", () => {
+      useBlockStore.getState().addPortAt({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().selectAll();
+      expect(useBlockStore.getState().selectedPortPositions.size).toBe(1);
+    });
+
+    it("selects inferred ports at open pipe endpoints", () => {
+      useBlockStore.setState({ pipeVariant: "ZX" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      useBlockStore.setState({ pipeVariant: null });
+      useBlockStore.getState().selectAll();
+      expect(useBlockStore.getState().selectedPortPositions.size).toBe(2);
+    });
   });
 
   describe("deleteSelected", () => {
