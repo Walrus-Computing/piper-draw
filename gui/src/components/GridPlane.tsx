@@ -8,8 +8,8 @@ import {
   snapInPlane,
   hasBlockOverlap,
   hasCubeColorConflict,
-  hasPipeColorConflict,
   hasYCubePipeAxisConflict,
+  validatePipePlacement,
   isValidPos,
   isPipeType,
   resolvePipeType,
@@ -122,7 +122,7 @@ export function GridPlane() {
       setHoveredGridPos(pos, blockType, true, undefined, isReplace);
     } else if (existing && existing.type === blockType) {
       setHoveredGridPos(null);
-    } else if (!store.freeBuild && isPipeType(blockType) && hasPipeColorConflict(blockType, pos, store.blocks)) {
+    } else if (!store.freeBuild && isPipeType(blockType) && !validatePipePlacement(blockType, pos, store.blocks).ok) {
       setHoveredGridPos(pos, blockType, true, "Pipe colors don't match the adjacent cube", isReplace);
     } else if (!store.freeBuild && !isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, store.blocks)) {
       setHoveredGridPos(pos, blockType, true, "Cube colors don't match the adjacent pipe", isReplace);
