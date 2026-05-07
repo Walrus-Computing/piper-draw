@@ -1654,6 +1654,183 @@ export function canonicalCubeForPort(
   return null;
 }
 
+export type ValidatePipeResult =
+  | { ok: true; replaces: Array<{ key: string; oldBlock: Block; newBlock: Block }> }
+  | { ok: false; reason: string };
+
+/**
+ * Decide whether a pipe placement at `pipePos` is permissible — and, if it
+ * would otherwise be rejected by `hasPipeColorConflict`, whether retyping
+ * the existing cube(s) at the pipe's endpoints (and Hadamard-toggling any
+ * neighbour pipes those retypes induce) would rescue it.
+ *
+ * Returns `{ ok: true, replaces: [] }` when the placement is already valid
+ * with no mutations needed; `{ ok: true, replaces: [...] }` when retypes
+ * would rescue (pushed as one bulk-replace by the caller); or
+ * `{ ok: false, reason }` when no retype combination works.
+ *
+ * Uses the same canonical first-valid-in-`CUBE_TYPES` rule that
+ * `canonicalCubeForPort` and `syncPortsAndPromote` use for port→cube
+ * promotion, so retype-on-place behaves consistently with the rest of the
+ * editor's cube-type resolution.
+ */
+export function validatePipePlacement(
+  pipeType: PipeType,
+  pipePos: Position3D,
+  blocks: BlocksLookup,
+): ValidatePipeResult {
+  // Fast path: no conflict, no retype needed.
+  if (!hasPipeColorConflict(pipeType, pipePos, blocks)) {
+    return { ok: true, replaces: [] };
+  }
+
+  const base = pipeType.replace("H", "");
+  const hadamard = pipeType.length > 3;
+  const openAxis = base.indexOf("O");
+  const coords: [number, number, number] = [pipePos.x, pipePos.y, pipePos.z];
+  const pipeKey = posKey(pipePos);
+  const newPipeBlock: Block = { pos: pipePos, type: pipeType };
+
+  // Overlay supports adds (Block value) and deletes (undefined value).
+  const overrides = new Map<string, Block | undefined>();
+  overrides.set(pipeKey, newPipeBlock);
+  const withOverride = (overlay: Map<string, Block | undefined>): BlocksLookup => ({
+    get(key: string) {
+      return overlay.has(key) ? overlay.get(key) : blocks.get(key);
+    },
+  });
+
+  // First pass: identify conflicting endpoint cubes. Tag them in the overlay
+  // as "removed" so each cube's options are computed assuming the OTHER
+  // endpoint cube is also flexible (otherwise both-endpoint retypes mutually
+  // block each other in `determineCubeOptionsWithPipeRetype`).
+  const conflictingEndpoints: Array<{ pos: Position3D; key: string; existing: Block; swapped: boolean }> = [];
+  for (const offset of [-1, 2]) {
+    const nCoords: [number, number, number] = [coords[0], coords[1], coords[2]];
+    nCoords[openAxis] += offset;
+    const neighborPos: Position3D = { x: nCoords[0], y: nCoords[1], z: nCoords[2] };
+    const neighborKey = posKey(neighborPos);
+    const neighbor = blocks.get(neighborKey);
+
+    if (!neighbor) continue;
+    if (neighbor.type === "Y") continue;
+    if (isPipeType(neighbor.type)) continue;
+
+    const swapped = offset === 2;
+    let endpointOk = true;
+    for (let axis = 0; axis < 3; axis++) {
+      if (axis === openAxis) continue;
+      if (pipeEndBasis(base, hadamard, openAxis, axis, swapped) !== neighbor.type[axis]) {
+        endpointOk = false;
+        break;
+      }
+    }
+    if (endpointOk) continue;
+
+    conflictingEndpoints.push({ pos: neighborPos, key: neighborKey, existing: neighbor, swapped });
+    // Treat as removed so the *other* endpoint's options consider this slot flexible.
+    overrides.set(neighborKey, undefined);
+  }
+
+  const replaces: Array<{ key: string; oldBlock: Block; newBlock: Block }> = [];
+
+  // Filter helper: a candidate cube type T must accept the NEW pipe's exact
+  // basis at this endpoint (we don't retype the user's chosen pipe).
+  const acceptsNewPipe = (T: CubeType, swapped: boolean): boolean => {
+    for (let axis = 0; axis < 3; axis++) {
+      if (axis === openAxis) continue;
+      if (pipeEndBasis(base, hadamard, openAxis, axis, swapped) !== T[axis]) return false;
+    }
+    return true;
+  };
+
+  // Step 1 (D2): independent canonical-pick retype for each conflicting endpoint.
+  // Prefer strict (no neighbour pipe retypes); fall back to wider (D4 Hadamard
+  // toggle on existing neighbour pipes) only when strict is empty.
+  for (const ep of conflictingEndpoints) {
+    const strict = determineCubeOptions(ep.pos, withOverride(overrides));
+    const strictList: readonly CubeType[] = strict.determined ? [strict.type] : strict.options;
+    const strictFiltered = strictList.filter((T) => acceptsNewPipe(T, ep.swapped));
+
+    let candidates: readonly CubeType[] = strictFiltered;
+    if (candidates.length === 0) {
+      const wider = determineCubeOptionsWithPipeRetype(ep.pos, withOverride(overrides));
+      candidates = wider.filter((T) => acceptsNewPipe(T, ep.swapped));
+    }
+    if (candidates.length === 0) {
+      return { ok: false, reason: "No cube type satisfies all attached pipes" };
+    }
+    let chosen: CubeType | null = null;
+    for (const ct of CUBE_TYPES) {
+      if (candidates.includes(ct)) {
+        chosen = ct;
+        break;
+      }
+    }
+    if (chosen === null) {
+      return { ok: false, reason: "No canonical cube type available" };
+    }
+    if (chosen === ep.existing.type) {
+      // Restore the original cube to the overlay; no retype needed.
+      overrides.set(ep.key, ep.existing);
+      continue;
+    }
+    const newCubeBlock: Block = { ...ep.existing, type: chosen };
+    overrides.set(ep.key, newCubeBlock);
+    replaces.push({ key: ep.key, oldBlock: ep.existing, newBlock: newCubeBlock });
+  }
+
+  // Step 2 (D4): for each cube retype, derive the Hadamard toggles it forces
+  // on neighbour pipes via the existing `computePipeRetypes` helper. Same
+  // logic that `cycleBlock` and `cycleSelectedType` use for R-key cycling.
+  const cubeRetypes = replaces.slice();
+  const seenPipeKeys = new Set<string>();
+  for (const replace of cubeRetypes) {
+    const cubePos = replace.newBlock.pos;
+    const newType = replace.newBlock.type as CubeType;
+    const pipeUpdates = computePipeRetypes(withOverride(overrides), cubePos, newType);
+    if (pipeUpdates === null) {
+      return { ok: false, reason: "Adjacent pipe cannot be retyped" };
+    }
+    for (const upd of pipeUpdates) {
+      if (upd.key === pipeKey) continue;
+      if (seenPipeKeys.has(upd.key)) continue;
+      seenPipeKeys.add(upd.key);
+      const oldPipe = blocks.get(upd.key);
+      if (!oldPipe) continue;
+      const newPipe: Block = { ...oldPipe, type: upd.newType };
+      overrides.set(upd.key, newPipe);
+      replaces.push({ key: upd.key, oldBlock: oldPipe, newBlock: newPipe });
+    }
+  }
+
+  // Step 3 (D2 sanity-check): apply all proposed replacements and re-run
+  // hasPipeColorConflict against the new pipe and every pipe attached to a
+  // retyped cube. If anything still conflicts, reject.
+  const finalOverlay = withOverride(overrides);
+  if (hasPipeColorConflict(pipeType, pipePos, finalOverlay)) {
+    return { ok: false, reason: "Retype does not resolve the color conflict" };
+  }
+  for (const replace of cubeRetypes) {
+    const cubePos = replace.newBlock.pos;
+    const cubeCoords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
+    for (let axis = 0; axis < 3; axis++) {
+      for (const off of [1, -2]) {
+        const nCoords: [number, number, number] = [cubeCoords[0], cubeCoords[1], cubeCoords[2]];
+        nCoords[axis] += off;
+        const npos: Position3D = { x: nCoords[0], y: nCoords[1], z: nCoords[2] };
+        const npipe = finalOverlay.get(posKey(npos));
+        if (!npipe || !isPipeType(npipe.type)) continue;
+        if (hasPipeColorConflict(npipe.type, npos, finalOverlay)) {
+          return { ok: false, reason: "Retype invalidates an adjacent pipe" };
+        }
+      }
+    }
+  }
+
+  return { ok: true, replaces };
+}
+
 /**
  * Map a WASD/Arrow key + camera azimuthal angle to a TQEC BuildDirection.
  * Camera azimuth is snapped to the nearest 90° to align with grid axes.

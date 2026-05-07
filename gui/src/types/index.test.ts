@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createBlockGeometry, createYDefectEdges, getHiddenFaceMaskForPos, FACE_NEG_X, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_X, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, getOrderedPortPositions, determineCubeOptions, determineCubeOptionsWithPipeRetype, computePipeRetypes, CUBE_TYPES, PIPE_TYPES } from "./index";
+import { createBlockGeometry, createYDefectEdges, getHiddenFaceMaskForPos, FACE_NEG_X, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_X, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, getOrderedPortPositions, determineCubeOptions, determineCubeOptionsWithPipeRetype, computePipeRetypes, validatePipePlacement, CUBE_TYPES, PIPE_TYPES } from "./index";
 import type { PipeType, CubeType, PortMeta } from "./index";
 import type { BlockType } from "./index";
 import { Vector3 } from "three";
@@ -911,5 +911,120 @@ describe("computePipeRetypes", () => {
         { key: "1,0,0", oldType: "OXZH", newType: "OZX" },
       ].sort((a, b) => a.key.localeCompare(b.key)),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pipe placement validation with cube retype-on-place (issue #292)
+// ---------------------------------------------------------------------------
+
+describe("validatePipePlacement", () => {
+  it("returns ok with empty replaces when no conflict (fast path)", () => {
+    const blocks = makeBlocks([{ x: 0, y: 0, z: 0, type: "ZXZ" }]);
+    const result = validatePipePlacement("OXZ" as PipeType, { x: 1, y: 0, z: 0 }, blocks);
+    expect(result).toEqual({ ok: true, replaces: [] });
+  });
+
+  it("returns ok with empty replaces when there are no adjacent cubes", () => {
+    const blocks = makeBlocks([]);
+    const result = validatePipePlacement("OZX" as PipeType, { x: 1, y: 0, z: 0 }, blocks);
+    expect(result).toEqual({ ok: true, replaces: [] });
+  });
+
+  it("retypes a single-cube #292 scenario to the canonical type (regression)", () => {
+    // Cube ZXZ + existing OXZ pipe (matches: T[1]='X', T[2]='Z'). User adds a
+    // perpendicular Y-open pipe XOZ at (0,1,0). XOZ head needs T[0]='X', T[2]='Z'.
+    // ZXZ has T[0]='Z' — strict check fails. Retype to a type where T[0]='X' AND
+    // T[1]='X' AND T[2]='Z' → XXZ (only valid candidate). This is the exact
+    // bug from issue #292: piper-draw should adapt the cube type, not block the click.
+    const blocks = makeBlocks([
+      { x: 0, y: 0, z: 0, type: "ZXZ" },
+      { x: 1, y: 0, z: 0, type: "OXZ" },
+    ]);
+    const result = validatePipePlacement("XOZ" as PipeType, { x: 0, y: 1, z: 0 }, blocks);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.replaces).toHaveLength(1);
+      expect(result.replaces[0].key).toBe("0,0,0");
+      expect(result.replaces[0].oldBlock.type).toBe("ZXZ");
+      expect(result.replaces[0].newBlock.type).toBe("XXZ");
+    }
+  });
+
+  it("rejects when no cube type satisfies all attached pipes", () => {
+    // Cube XXZ with two existing pipes that pin its type (OXZ + XOZ). Adding a
+    // Z-open pipe whose head needs T[0]='Z' creates an unsatisfiable joint
+    // constraint (T[0] would have to be both X and Z). Reject — no retype rescues.
+    const blocks = makeBlocks([
+      { x: 0, y: 0, z: 0, type: "XXZ" },
+      { x: 1, y: 0, z: 0, type: "OXZ" },
+      { x: 0, y: 1, z: 0, type: "XOZ" },
+    ]);
+    const result = validatePipePlacement("ZXO" as PipeType, { x: 0, y: 0, z: 1 }, blocks);
+    expect(result.ok).toBe(false);
+  });
+
+  it("retypes both endpoint cubes to the same canonical type", () => {
+    // Two free cubes (no other constraints) that both need to retype to satisfy
+    // the new pipe between them. Each independently picks the canonical first-valid.
+    const blocks = makeBlocks([
+      { x: 0, y: 0, z: 0, type: "ZXZ" },
+      { x: 3, y: 0, z: 0, type: "XZZ" },
+    ]);
+    const result = validatePipePlacement("OZX" as PipeType, { x: 1, y: 0, z: 0 }, blocks);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.replaces).toHaveLength(2);
+      const types = result.replaces.map((r) => r.newBlock.type).sort();
+      expect(types).toEqual(["ZZX", "ZZX"]);
+      const positions = result.replaces.map((r) => r.key).sort();
+      expect(positions).toEqual(["0,0,0", "3,0,0"]);
+    }
+  });
+
+  it("preserves groupId and other Block metadata when retyping a cube", () => {
+    // Block-mutator-spread-audit: when we retype, the new block must spread
+    // the original (so groupId / other metadata survives). Verify by attaching
+    // a groupId to the seed cube and checking the retyped block keeps it.
+    const blocks = new Map<string, { pos: { x: number; y: number; z: number }; type: BlockType; groupId?: string }>();
+    blocks.set("0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "ZXZ", groupId: "g1" });
+    blocks.set("1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OXZ" });
+    const result = validatePipePlacement("XOZ" as PipeType, { x: 0, y: 1, z: 0 }, blocks);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.replaces).toHaveLength(1);
+      expect(result.replaces[0].newBlock.type).toBe("XXZ");
+      expect((result.replaces[0].newBlock as { groupId?: string }).groupId).toBe("g1");
+    }
+  });
+
+  it("triggers Hadamard pipe retype on a neighbouring far-end pipe (D4)", () => {
+    // Cube A=ZXZ at (0,0,0). Existing OZXH at (-2,0,0) attaches its FAR end
+    // (offset +2 from pipe pos along open X) to A. With H, far-end uses swapped
+    // basis: T[1]='X', T[2]='Z' — ZXZ matches. Now add new OZX at (1,0,0)
+    // (head at A): needs T[1]='Z', T[2]='X'. To accommodate, A retypes; the
+    // existing OZXH neighbour drops its H so its far-end constraint matches A's
+    // new type. The replaces array must include both the cube retype AND the
+    // OZXH → OZX pipe Hadamard toggle.
+    const blocks = makeBlocks([
+      { x: 0, y: 0, z: 0, type: "ZXZ" },
+      { x: -2, y: 0, z: 0, type: "OZXH" },
+    ]);
+    const result = validatePipePlacement("OZX" as PipeType, { x: 1, y: 0, z: 0 }, blocks);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // At least one cube retype + one pipe Hadamard toggle.
+      const cubeRetypes = result.replaces.filter((r) => !r.newBlock.type.includes("O"));
+      const pipeRetypes = result.replaces.filter((r) => r.newBlock.type.includes("O"));
+      expect(cubeRetypes).toHaveLength(1);
+      expect(cubeRetypes[0].key).toBe("0,0,0");
+      expect(pipeRetypes).toHaveLength(1);
+      expect(pipeRetypes[0].key).toBe("-2,0,0");
+      expect(pipeRetypes[0].oldBlock.type).toBe("OZXH");
+      // computePipeRetypes prefers to preserve H state, so the OZXH neighbour
+      // becomes OXZH (basis swap, H kept) rather than OZX (H dropped). Either
+      // would be valid; the H-preserving choice matches R-key cycling behaviour.
+      expect(pipeRetypes[0].newBlock.type).toBe("OXZH");
+    }
   });
 });

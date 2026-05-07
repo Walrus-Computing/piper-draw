@@ -9,9 +9,9 @@ import {
   isPipeType,
   isValidPos,
   hasBlockOverlap,
-  hasPipeColorConflict,
   hasCubeColorConflict,
   hasYCubePipeAxisConflict,
+  validatePipePlacement,
   getAdjacentPos,
   getAllPortPositions,
 } from "../types";
@@ -98,7 +98,7 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
         store.setHoveredGridPos(adj, resolved, true, undefined, adjReplace);
       } else if (existingKey && store.blocks.get(existingKey)!.type === resolved) {
         store.setHoveredGridPos(null);
-      } else if (!store.freeBuild && isPipeType(resolved) && hasPipeColorConflict(resolved, adj, store.blocks)) {
+      } else if (!store.freeBuild && isPipeType(resolved) && !validatePipePlacement(resolved, adj, store.blocks).ok) {
         store.setHoveredGridPos(adj, resolved, true, "Pipe colors don't match the adjacent cube", adjReplace);
       } else if (!store.freeBuild && hasYCubePipeAxisConflict(resolved, adj, store.blocks)) {
         store.setHoveredGridPos(adj, resolved, true, "Y cube cannot be next to an X-open or Y-open pipe", adjReplace);
@@ -111,7 +111,7 @@ function InteractiveGhost({ pos, threePos }: { pos: Position3D; threePos: [numbe
 
     if (!isValidPos(pos, blockType) || hasBlockOverlap(pos, blockType, store.blocks, store.spatialIndex)) {
       store.setHoveredGridPos(pos, blockType, true);
-    } else if (isPipeType(blockType) && hasPipeColorConflict(blockType, pos, store.blocks)) {
+    } else if (isPipeType(blockType) && !validatePipePlacement(blockType, pos, store.blocks).ok) {
       store.setHoveredGridPos(pos, blockType, true, "Pipe colors don't match the adjacent cube");
     } else if (!isPipeType(blockType) && blockType !== "Y" && hasCubeColorConflict(blockType as CubeType, pos, store.blocks)) {
       store.setHoveredGridPos(pos, blockType, true, "Cube colors don't match the adjacent pipe");
