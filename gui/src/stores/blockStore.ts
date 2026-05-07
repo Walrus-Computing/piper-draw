@@ -466,6 +466,7 @@ interface BlockStore {
   cyclePipe: (target?: PipeVariant) => void;
   deleteAtBuildCursor: () => void;
   moveBuildCursor: (pos: Position3D) => void;
+  cycleToNextPort: (direction: 1 | -1) => void;
   clearCameraSnap: () => void;
 
   // Free build (disables color-matching validation)
@@ -4045,6 +4046,23 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         cameraSnapTarget: { azimuth: null, targetPos: pos },
       };
     }),
+
+  cycleToNextPort: (direction) => {
+    const state = get();
+    if (state.mode !== "build") return;
+    const ordered = getOrderedPortPositions(state.blocks, state.portPositions, state.portMeta);
+    if (ordered.length === 0) return;
+    const cursorKey = state.buildCursor ? posKey(state.buildCursor) : null;
+    const idx = cursorKey ? ordered.findIndex((p) => posKey(p) === cursorKey) : -1;
+    let next: Position3D;
+    if (idx === -1) {
+      next = direction === 1 ? ordered[0] : ordered[ordered.length - 1];
+    } else {
+      const n = ordered.length;
+      next = ordered[(idx + direction + n) % n];
+    }
+    get().moveBuildCursor(next);
+  },
 
   clearCameraSnap: () => set({ cameraSnapTarget: null }),
 

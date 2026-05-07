@@ -1867,6 +1867,125 @@ describe("blockStore", () => {
     });
   });
 
+  describe("cycleToNextPort", () => {
+    function seedThreePortsZElevated() {
+      // Three explicit ports: two at z=0, one at z=3 (elevated). ensurePortLabels
+      // assigns ranks in spatial sort order (x, y, z ascending), giving us:
+      //   rank 0: (0,0,0)
+      //   rank 1: (0,0,3)
+      //   rank 2: (3,0,0)
+      useBlockStore.setState({
+        mode: "build",
+        blocks: new Map(),
+        portPositions: new Set(["0,0,0", "3,0,0", "0,0,3"]),
+        portMeta: new Map(),
+        buildCursor: { x: 0, y: 0, z: 0 },
+        buildHistory: [],
+        cameraSnapTarget: null,
+        lastBuildAxis: null,
+      });
+      useBlockStore.getState().ensurePortLabels();
+    }
+
+    it("is a no-op when there are no ports", () => {
+      useBlockStore.setState({
+        mode: "build",
+        blocks: new Map(),
+        portPositions: new Set(),
+        portMeta: new Map(),
+        buildCursor: { x: 0, y: 0, z: 0 },
+      });
+      useBlockStore.getState().cycleToNextPort(1);
+      expect(useBlockStore.getState().buildCursor).toEqual({ x: 0, y: 0, z: 0 });
+    });
+
+    it("jumps to first port when cursor is not on any port", () => {
+      seedThreePortsZElevated();
+      useBlockStore.setState({ buildCursor: { x: 99, y: 99, z: 99 } });
+      useBlockStore.getState().cycleToNextPort(1);
+      // First port in rank order is (0,0,0).
+      expect(useBlockStore.getState().buildCursor).toEqual({ x: 0, y: 0, z: 0 });
+    });
+
+    it("jumps to last port when cursor is not on any port and direction is -1", () => {
+      seedThreePortsZElevated();
+      useBlockStore.setState({ buildCursor: { x: 99, y: 99, z: 99 } });
+      useBlockStore.getState().cycleToNextPort(-1);
+      // Last port in rank order is (3,0,0).
+      expect(useBlockStore.getState().buildCursor).toEqual({ x: 3, y: 0, z: 0 });
+    });
+
+    it("cycles forward through ports including z>0, wrapping", () => {
+      seedThreePortsZElevated();
+      // Start on first port (0,0,0); forward → z-elevated port → (3,0,0) → wrap.
+      useBlockStore.getState().cycleToNextPort(1);
+      expect(useBlockStore.getState().buildCursor).toEqual({ x: 0, y: 0, z: 3 });
+      useBlockStore.getState().cycleToNextPort(1);
+      expect(useBlockStore.getState().buildCursor).toEqual({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().cycleToNextPort(1);
+      // Wrap back to first.
+      expect(useBlockStore.getState().buildCursor).toEqual({ x: 0, y: 0, z: 0 });
+    });
+
+    it("cycles backward, wrapping", () => {
+      seedThreePortsZElevated();
+      // Start on first port (0,0,0); -1 wraps to last (3,0,0).
+      useBlockStore.getState().cycleToNextPort(-1);
+      expect(useBlockStore.getState().buildCursor).toEqual({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().cycleToNextPort(-1);
+      expect(useBlockStore.getState().buildCursor).toEqual({ x: 0, y: 0, z: 3 });
+    });
+
+    it("follows custom rank order, not spatial order", () => {
+      // Same three ports, but reverse the ranks so cycle order = (0,0,3) → (3,0,0) → (0,0,0).
+      useBlockStore.setState({
+        mode: "build",
+        blocks: new Map(),
+        portPositions: new Set(["0,0,0", "3,0,0", "0,0,3"]),
+        portMeta: new Map([
+          ["0,0,3", { label: "A", io: "in", rank: 0 }],
+          ["3,0,0", { label: "B", io: "in", rank: 1 }],
+          ["0,0,0", { label: "C", io: "in", rank: 2 }],
+        ]),
+        buildCursor: { x: 0, y: 0, z: 3 },
+      });
+      useBlockStore.getState().cycleToNextPort(1);
+      expect(useBlockStore.getState().buildCursor).toEqual({ x: 3, y: 0, z: 0 });
+      useBlockStore.getState().cycleToNextPort(1);
+      expect(useBlockStore.getState().buildCursor).toEqual({ x: 0, y: 0, z: 0 });
+      useBlockStore.getState().cycleToNextPort(1);
+      // Wraps back to rank-0 port.
+      expect(useBlockStore.getState().buildCursor).toEqual({ x: 0, y: 0, z: 3 });
+    });
+
+    it("is a no-op outside build mode", () => {
+      useBlockStore.setState({
+        mode: "edit",
+        blocks: new Map(),
+        portPositions: new Set(["0,0,0", "3,0,0"]),
+        portMeta: new Map(),
+        buildCursor: { x: 0, y: 0, z: 0 },
+      });
+      useBlockStore.getState().ensurePortLabels();
+      useBlockStore.getState().cycleToNextPort(1);
+      // buildCursor is not modified outside build mode.
+      expect(useBlockStore.getState().buildCursor).toEqual({ x: 0, y: 0, z: 0 });
+    });
+
+    it("delegates to moveBuildCursor side effects (clears buildHistory, sets cameraSnapTarget)", () => {
+      seedThreePortsZElevated();
+      // Pre-populate lastBuildAxis to confirm it gets reset.
+      useBlockStore.setState({ lastBuildAxis: 0 });
+      useBlockStore.getState().cycleToNextPort(1);
+      const s = useBlockStore.getState();
+      // From (0,0,0) forward → (0,0,3).
+      expect(s.buildCursor).toEqual({ x: 0, y: 0, z: 3 });
+      expect(s.buildHistory).toEqual([]);
+      expect(s.lastBuildAxis).toBeNull();
+      expect(s.cameraSnapTarget).toEqual({ azimuth: null, targetPos: { x: 0, y: 0, z: 3 } });
+    });
+  });
+
   describe("copy / paste", () => {
     it("copySelection snapshots selected blocks normalized to origin", () => {
       useBlockStore.getState().addBlock({ x: 3, y: 0, z: 0 });

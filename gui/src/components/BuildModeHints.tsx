@@ -22,7 +22,7 @@ export function BuildModeHints({ onCustomize }: { onCustomize: () => void }) {
     depthLabel = "Move Z";
   }
   const hints: Array<readonly [string, string]> = [
-    ["Click cube", "Move cursor here"],
+    ["Click cube/port", "Move cursor here"],
     [
       `${bindingToLabel(b.moveForward)}/${bindingToLabel(b.moveLeft)}/${bindingToLabel(b.moveBack)}/${bindingToLabel(b.moveRight)}`,
       moveLabel,
@@ -30,6 +30,7 @@ export function BuildModeHints({ onCustomize }: { onCustomize: () => void }) {
     [`${bindingToLabel(b.moveUp)}/${bindingToLabel(b.moveDown)}`, depthLabel],
     [bindingToLabel(b.cycleBlock), "Cycle block"],
     [bindingToLabel(b.cyclePipe), "Cycle pipe"],
+    [`${bindingToLabel(b.nextPort)}/${bindingToLabel(b.prevPort)}`, "Next/prev port"],
     [bindingToLabel(b.exitBuild), "Exit build"],
   ];
 

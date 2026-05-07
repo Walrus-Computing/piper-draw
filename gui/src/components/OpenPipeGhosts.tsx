@@ -207,7 +207,7 @@ function PortSelectionHighlight({ threePos }: { threePos: [number, number, numbe
 }
 
 /**
- * Non-interactive ghost cube (for delete tool / Keyboard Build mode).
+ * Non-interactive ghost cube (for delete tool).
  */
 function StaticGhost({ threePos }: { threePos: [number, number, number] }) {
   return (
@@ -227,10 +227,39 @@ function StaticGhost({ threePos }: { threePos: [number, number, number] }) {
 }
 
 /**
+ * Port ghost in Keyboard Build mode — clicking moves the build cursor here.
+ * Mesh keeps its raycast enabled so clicks register; lineSegments suppress
+ * raycast like the other interactive ghost variants.
+ */
+function BuildPortGhost({ pos, threePos }: { pos: Position3D; threePos: [number, number, number] }) {
+  const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
+    e.stopPropagation();
+    if (e.delta > 2) return;
+    useBlockStore.getState().moveBuildCursor(pos);
+  }, [pos]);
+
+  return (
+    <group position={threePos}>
+      <mesh
+        geometry={defaultBox}
+        material={ghostMaterial}
+        onClick={handleClick}
+      />
+      <lineSegments
+        geometry={defaultEdges}
+        material={ghostLineMaterial}
+        raycast={noRaycast}
+      />
+    </group>
+  );
+}
+
+/**
  * Renders white semi-transparent ghost cubes ("ports") at open pipe endpoints.
  * - Place mode: hovering shows placement preview; clicking places the block.
  * - Select mode: clicking adds the port to `selectedPortPositions` (shift-click = additive).
- * - Delete tool / Keyboard Build mode: static ghost, no interaction.
+ * - Keyboard Build mode: clicking moves the build cursor here.
+ * - Delete tool: static ghost, no interaction.
  */
 export function OpenPipeGhosts() {
   const blocks = useBlockStore((s) => s.blocks);
@@ -272,6 +301,9 @@ export function OpenPipeGhosts() {
     }
     if (mode === "edit" && !xHeld && armedTool === "pointer") {
       return <SelectablePortGhost key={key} pos={pos} threePos={threePos} />;
+    }
+    if (mode === "build") {
+      return <BuildPortGhost key={key} pos={pos} threePos={threePos} />;
     }
     return <StaticGhost key={key} threePos={threePos} />;
   };
