@@ -3,9 +3,9 @@
   <a href="https://walruscomputing.com" title="Made by Walrus Computing"><img src="assets/walrus-logo.png" alt="Made by Walrus Computing" width="96" valign="middle"></a>
 </p>
 
-An open source web application for building pipe diagrams for topological quantum error correction. Made by [Walrus Computing](https://walruscomputing.com).
+An open source web application for building pipe diagrams for topological quantum error correction. 
 
-Live at [piper-draw.walruscomputing.com](https://piper-draw.walruscomputing.com).
+Live at [piper-draw.walruscomputing.com](https://piper-draw.walruscomputing.com). Made by [Walrus Computing](https://walruscomputing.com).
 
 ## About
 Piper-draw is a visual editor for [TQEC](https://github.com/tqec/tqec) block graphs. You assemble cubes and pipes on a 3D grid, then export to Collada (`.dae`) or hand the diagram to a FastAPI backend that runs [`tqec`](https://github.com/tqec/tqec) for validation, stabilizer-flow (correlation-surface) analysis, and ZX-calculus conversion.
