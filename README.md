@@ -4,10 +4,10 @@
 
 <p align="center">
   <a href="https://walruscomputing.com">
-    <img src="assets/walrus-logo.png" alt="Walrus Computing" width="160">
+    <img src="assets/walrus-logo.png" alt="Walrus Computing" width="72">
   </a>
   <br>
-  Made by <strong>Walrus Computing</strong>
+  <sub>Made by <a href="https://walruscomputing.com">Walrus Computing</a></sub>
 </p>
 
 An open source web application for building pipe diagrams for topological quantum error correction.
