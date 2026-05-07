@@ -806,6 +806,8 @@ export default function App() {
           case "undo": store.undoBuildStep(); return;
           case "cycleBlock": store.cycleBlock(); return;
           case "cyclePipe": store.cyclePipe(); return;
+          case "nextPort": store.cycleToNextPort(1); return;
+          case "prevPort": store.cycleToNextPort(-1); return;
           case "deleteAtCursor": store.deleteAtBuildCursor(); return;
           case "exitBuild": store.setMode("edit"); return;
         }

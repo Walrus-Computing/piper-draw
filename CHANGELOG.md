@@ -6,6 +6,18 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.2.0.0] - 2026-05-07
+
+### Added
+- Click any port (white pulsing ghost cube at an open pipe endpoint) in
+  Keyboard Build mode to move the build cursor there. Previously only cubes
+  were clickable in build mode, so ports above the floor were hard to reach
+  — keyboard navigation up the Z axis was the only option. Closes #293.
+- New keyboard shortcut in Keyboard Build mode: press `P` to jump the
+  cursor to the next port and `Shift+P` to jump to the previous one. Cycle
+  order matches the per-port number labels and the Ports table. Both
+  bindings are rebindable in Settings → Keybinds → Build.
+
 ## [0.1.5.1] - 2026-05-07
 
 ### Changed

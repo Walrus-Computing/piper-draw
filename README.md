@@ -44,7 +44,7 @@ Click the **?** button in the app for an in-context summary of modes, tools, and
 Piper-draw has two interaction modes for placing blocks:
 
 - **Drag / Drop** — arm a placement tool in the toolbar (cube, pipe, or port) to click-place blocks, or switch to **Select** to pick existing blocks. Shift-click adds/removes from the selection, Ctrl+Shift-drag marquee-selects cubes, pipes, and ports. Hold the delete modifier to click-to-delete.
-- **Keyboard Build** — move a cursor with the arrow keys / WASD to extend from the last block. Cycle cube and pipe variants with `C` and `R`, undo a step with `Q`, exit with `Esc`.
+- **Keyboard Build** — move a cursor with the arrow keys / WASD to extend from the last block. Click any cube or port to jump the cursor there. Cycle cube and pipe variants with `C` and `R`, jump between ports with `P` / `Shift+P`, undo a step with `Q`, exit with `Esc`.
 
 Use the **Iso ▾** menu in the toolbar to snap to an axis-locked orthographic view; slice stepping auto-advances through depth as you build.
 

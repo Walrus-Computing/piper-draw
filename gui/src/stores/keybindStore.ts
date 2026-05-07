@@ -14,6 +14,8 @@ export type BuildAction =
   | "undo"
   | "cycleBlock"
   | "cyclePipe"
+  | "nextPort"
+  | "prevPort"
   | "deleteAtCursor"
   | "exitBuild";
 
@@ -62,7 +64,8 @@ export const ACTIONS: { [M in Mode]: readonly ActionForMode[M][] } = {
   build: [
     "moveForward", "moveBack", "moveLeft", "moveRight",
     "moveUp", "moveDown",
-    "undo", "cycleBlock", "cyclePipe", "deleteAtCursor", "exitBuild",
+    "undo", "cycleBlock", "cyclePipe", "nextPort", "prevPort",
+    "deleteAtCursor", "exitBuild",
   ],
   edit: [
     "selectAll", "deleteSelection", "clearSelection", "flipColors", "holdToDelete",
@@ -87,6 +90,8 @@ export const ACTION_LABELS: { [M in Mode]: Record<ActionForMode[M], string> } = 
     undo: "Undo step",
     cycleBlock: "Cycle block",
     cyclePipe: "Cycle pipe",
+    nextPort: "Next port",
+    prevPort: "Previous port",
     deleteAtCursor: "Delete block at cursor",
     exitBuild: "Exit build",
   },
@@ -130,6 +135,8 @@ export const DEFAULT_BINDINGS: { [M in Mode]: Record<ActionForMode[M], KeyBindin
     undo: { key: "q" },
     cycleBlock: { key: "c" },
     cyclePipe: { key: "r" },
+    nextPort: { key: "p" },
+    prevPort: { key: "p", shift: true },
     deleteAtCursor: { key: "backspace" },
     exitBuild: { key: "escape" },
   },
