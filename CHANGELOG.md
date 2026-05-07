@@ -6,6 +6,16 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.2.1.3] - 2026-05-07
+
+### Changed
+- Camera controls renamed and rewired: the Settings radio reads "Drag to orbit"
+  (was "Drag to rotate"), and middle-drag and right-drag are now the opposite
+  gesture from the primary drag — both pan when LEFT orbits, and both orbit
+  when LEFT pans. (Same effect as Shift+drag.) Iso elevation views are
+  unchanged (LEFT pans, middle still zooms). Help panel copy and the Settings
+  hint text are updated to match.
+
 ## [0.2.1.2] - 2026-05-07
 
 ### Fixed

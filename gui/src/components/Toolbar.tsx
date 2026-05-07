@@ -1601,7 +1601,7 @@ function FreeBuildToggle({
 
 const NAV_STYLE_LABELS: Record<NavStyle, string> = {
   pan: "Drag to pan",
-  rotate: "Drag to rotate",
+  rotate: "Drag to orbit",
 };
 
 function SettingsMenu({
@@ -1684,7 +1684,8 @@ function SettingsMenu({
               </label>
             ))}
             <div style={{ fontSize: 10, color: "#888", marginTop: 4 }}>
-              Middle-click drag always orbits, regardless of this setting.
+              Middle/right-click drag does the opposite gesture — pan when set
+              to orbit, orbit when set to pan.
             </div>
           </div>
 
