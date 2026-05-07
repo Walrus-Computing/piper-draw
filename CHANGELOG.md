@@ -6,6 +6,16 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.1.5.0] - 2026-05-07
+
+### Fixed
+- Computing flows for a small diagram now returns in milliseconds instead
+  of taking ~2 seconds on the first click after each backend reload. The
+  first call to `tqec`'s `find_correlation_surfaces` in any Python process
+  paid a process-global lazy-init tax inside `tqec` / `pyzx`; with
+  `uvicorn --reload` that reset on every save. The FastAPI app now warms
+  it once at startup so the first `/api/flows` POST is fast.
+
 ## [0.1.4.0] - 2026-05-07
 
 ### Fixed
