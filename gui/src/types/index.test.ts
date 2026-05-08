@@ -1027,4 +1027,104 @@ describe("validatePipePlacement", () => {
       expect(pipeRetypes[0].newBlock.type).toBe("OXZH");
     }
   });
+
+  // -------------------------------------------------------------------------
+  // Across-port pipe retype (issue #307): when a new pipe shares a port with
+  // an existing pipe whose basis is incompatible, the existing pipe retypes.
+  // -------------------------------------------------------------------------
+
+  it("#307: retypes across-port pipe via Hadamard toggle", () => {
+    // Chain: Cube_L=ZXZ -- Pipe1=OXZ -- Port -- (new OZX) -- Cube_R=ZZX.
+    // Pipe1 at tail (no H) wants port T[1]='X', T[2]='Z' → ?XZ.
+    // New pipe at head wants port T[1]='Z', T[2]='X' → ?ZX.
+    // No cube type satisfies both. Hadamard-toggling Pipe1: OXZH at tail
+    // (swapped) presents T[1]='Z', T[2]='X' → port=?ZX. Cube_L=ZXZ still
+    // matches OXZH at head (head is not swapped).
+    const blocks = makeBlocks([
+      { x: 0, y: 0, z: 0, type: "ZXZ" },
+      { x: 1, y: 0, z: 0, type: "OXZ" },
+      { x: 6, y: 0, z: 0, type: "ZZX" },
+    ]);
+    const result = validatePipePlacement("OZX" as PipeType, { x: 4, y: 0, z: 0 }, blocks);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.replaces).toHaveLength(1);
+      expect(result.replaces[0].key).toBe("1,0,0");
+      expect(result.replaces[0].oldBlock.type).toBe("OXZ");
+      expect(result.replaces[0].newBlock.type).toBe("OXZH");
+    }
+  });
+
+  it("#307: leaves valid port-endpoint placements untouched (regression)", () => {
+    // Existing pipe at port already presents a compatible basis with the new
+    // pipe at the shared port — no retype should fire.
+    const blocks = makeBlocks([
+      { x: 0, y: 0, z: 0, type: "ZXZ" },
+      { x: 1, y: 0, z: 0, type: "OXZ" },
+      { x: 6, y: 0, z: 0, type: "XXZ" },
+    ]);
+    // New pipe OXZ at (4,0,0): tail at (6,0,0)=XXZ — head/tail bases match.
+    // Port at (3,0,0) sees Pipe1 OXZ tail (?XZ) and new pipe OXZ head (?XZ) —
+    // both want the same basis, port can promote without any retype.
+    const result = validatePipePlacement("OXZ" as PipeType, { x: 4, y: 0, z: 0 }, blocks);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.replaces).toHaveLength(0);
+    }
+  });
+
+  it("#307: handles junction port — perpendicular pipe forces variant swap", () => {
+    // Port at (0,0,0). Existing X-axis OXZ at (1,0,0): head at port wants
+    // T[1]='X', T[2]='Z'. New Y-axis ZOX at (0,1,0): head at port wants
+    // T[0]='Z', T[2]='X'. Conflict at T[2]. To reconcile: X-pipe must present
+    // T[2]='X' at port → retype OXZ → OZX (variant swap, no H change).
+    const blocks = makeBlocks([{ x: 1, y: 0, z: 0, type: "OXZ" }]);
+    const result = validatePipePlacement("ZOX" as PipeType, { x: 0, y: 1, z: 0 }, blocks);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.replaces).toHaveLength(1);
+      expect(result.replaces[0].key).toBe("1,0,0");
+      expect(result.replaces[0].oldBlock.type).toBe("OXZ");
+      expect(result.replaces[0].newBlock.type).toBe("OZX");
+    }
+  });
+
+  it("#307: retypes both endpoints when new pipe is sandwiched between ports", () => {
+    // Anchor X-axis pipe OXZ at (1,0,0): both endpoints (0,0,0) and (3,0,0)
+    // are ports. Existing X-axis OZX at (-2,0,0) shares port (0,0,0); existing
+    // X-axis OZX at (4,0,0) shares port (3,0,0). Both existing pipes want
+    // port=?ZX; anchor wants port=?XZ — conflict at BOTH ports. Helper must
+    // retype both existing pipes (per-endpoint overrides accumulate across
+    // the offset loop without cross-contamination).
+    const blocks = makeBlocks([
+      { x: -2, y: 0, z: 0, type: "OZX" },
+      { x: 4, y: 0, z: 0, type: "OZX" },
+    ]);
+    const result = validatePipePlacement("OXZ" as PipeType, { x: 1, y: 0, z: 0 }, blocks);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.replaces).toHaveLength(2);
+      const keys = result.replaces.map((r) => r.key).sort();
+      expect(keys).toEqual(["-2,0,0", "4,0,0"]);
+      for (const r of result.replaces) {
+        expect(r.oldBlock.type).toBe("OZX");
+        expect(r.newBlock.type).toBe("OXZ");
+      }
+    }
+  });
+
+  it("#307: rejects when no across-port retype combination works", () => {
+    // Port at (0,0,0). Existing X-axis OXZ wants port T[1]='X', T[2]='Z'.
+    // Existing Z-axis ZXO at (0,0,1) (head not swapped) wants T[0]='Z', T[1]='X'.
+    // Combined existing constraint: T[1]='X', T[2]='Z'. New Y-axis ZOX wants
+    // T[0]='Z', T[2]='X' — conflict at T[2]. The Z-axis pipe at head has no
+    // swap (H toggles don't change head basis), so no Z-pipe variant satisfies
+    // any cube T compatible with the new pipe. Reject.
+    const blocks = makeBlocks([
+      { x: 1, y: 0, z: 0, type: "OXZ" },
+      { x: 0, y: 0, z: 1, type: "ZXO" },
+    ]);
+    const result = validatePipePlacement("ZOX" as PipeType, { x: 0, y: 1, z: 0 }, blocks);
+    expect(result.ok).toBe(false);
+  });
 });
