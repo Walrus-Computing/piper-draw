@@ -6,6 +6,25 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.3.0.0] - 2026-05-08
+
+### Added
+- **Equiseta JSON viewer.** New "Equiseta" toolbar dropdown opens a floating
+  panel that displays JSON files produced by [Equiseta](https://github.com/Walrus-Computing/equiseta)'s
+  `FTQCGraph.to_json()` serializer. Bundled with 9 example fixtures (8
+  single-cube + 1 two-cube) loaded lazily from a manifest; "Open JSON…" and
+  drag-and-drop pick arbitrary `.json` files (max 5 MB). Two view modes:
+  raw JSON tree (default) and a per-node faces grid showing the 6 face
+  colors. Strict hand-rolled schema validator surfaces unknown direction
+  keys / unknown FaceColor enum values with structured error paths. First
+  step in replacing the TQEC backend with Equiseta — the translator from
+  FTQCGraph to piper Block is deliberately deferred to a follow-up PR.
+
+### Changed
+- `triggerDaeImport` (`gui/src/utils/daeImport.ts`) now uses the new shared
+  `pickFile` helper. Behaviour preserved (silent no-op on cancel,
+  console.error + native alert on parse failure); same DAE import UX.
+
 ## [0.2.1.4] - 2026-05-07
 
 ### Fixed
