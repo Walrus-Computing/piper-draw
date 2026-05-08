@@ -316,6 +316,9 @@ interface BlockStore {
   /** Whether the right-docked ZX-diagram panel is visible. */
   zxPanelOpen: boolean;
 
+  /** Whether the left-docked Equiseta JSON viewer panel is visible. */
+  equisetaPanelOpen: boolean;
+
   /** Last-computed flows (with surface geometry), published by FlowsPanel. */
   flows: Flow[];
   /** Signature of the diagram when `flows` was last computed; used to detect stale data. */
@@ -457,6 +460,8 @@ interface BlockStore {
   reorderPort: (fromIndex: number, toIndex: number) => void;
   setFlowsPanelOpen: (open: boolean) => void;
   toggleFlowsPanel: () => void;
+  setEquisetaPanelOpen: (open: boolean) => void;
+  toggleEquisetaPanel: () => void;
 
   /** Publish computed flows (with surface geometry) for the 3D overlay to read. */
   setFlows: (flows: Flow[], signature: string) => void;
@@ -828,6 +833,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
   portMeta: new Map(),
   flowsPanelOpen: false,
   zxPanelOpen: false,
+  equisetaPanelOpen: false,
   flows: [],
   flowsSignature: null,
   selectedFlowIndex: null,
@@ -4246,6 +4252,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         ? { flowsPanelOpen: false, flowVizMode: false }
         : { flowsPanelOpen: true },
     ),
+
+  setEquisetaPanelOpen: (open) => set({ equisetaPanelOpen: open }),
+  toggleEquisetaPanel: () => set((s) => ({ equisetaPanelOpen: !s.equisetaPanelOpen })),
 
   setFlows: (flows, signature) =>
     set({
