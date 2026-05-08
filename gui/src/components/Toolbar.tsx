@@ -16,6 +16,7 @@ import { fetchTemplateManifest, loadTemplateBlocks, type TemplateEntry } from ".
 import { evalCoordExpr } from "../utils/parseCoordExpr";
 import { usePreviewImages } from "./PreviewRenderer";
 import { FpsDisplay } from "./FpsCounter";
+import { EquisetaMenu } from "./EquisetaMenu";
 import { useViewportFitScale } from "../hooks/useViewportFitScale";
 import type { ViewMode } from "../types";
 
@@ -547,6 +548,7 @@ export function Toolbar({
           onResetCamera={onResetCamera}
           blocksEmpty={blocksEmpty}
         />
+        <EquisetaMenu />
       </div>
 
       {/* Separator */}
