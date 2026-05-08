@@ -1,0 +1,60 @@
+name: ARCHITECTURE.md staleness check
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+
+jobs:
+  architecture-md-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Verify ARCHITECTURE.md updated when boundaries change
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          echo "Changed files in this PR:"
+          echo "$changed_files"
+          echo "---"
+
+          touches_boundaries=false
+          if echo "$changed_files" | grep -E '^gui/src/(stores|utils)/' > /dev/null; then
+            touches_boundaries=true
+          fi
+
+          touches_arch=false
+          if echo "$changed_files" | grep -Fx 'ARCHITECTURE.md' > /dev/null; then
+            touches_arch=true
+          fi
+
+          if [ "$touches_boundaries" = false ]; then
+            echo "PR does not touch gui/src/stores/ or gui/src/utils/ — no architecture update required."
+            exit 0
+          fi
+
+          if [ "$touches_arch" = true ]; then
+            echo "PR touches stores/ or utils/ AND updates ARCHITECTURE.md — OK."
+            exit 0
+          fi
+
+          # Allow opt-out via [arch-noop] in any commit message in the PR.
+          commit_messages="$(git log --format=%B "$BASE_SHA..$HEAD_SHA")"
+          if echo "$commit_messages" | grep -F '[arch-noop]' > /dev/null; then
+            echo "PR touches stores/ or utils/ but a commit message contains [arch-noop] — OK."
+            exit 0
+          fi
+
+          echo "::error::This PR modifies gui/src/stores/ or gui/src/utils/ but does not update ARCHITECTURE.md."
+          echo "If module boundaries changed, update ARCHITECTURE.md to reflect the new layout."
+          echo "If this is a genuine no-op for the architecture map, add [arch-noop] to a commit message."
+          exit 1

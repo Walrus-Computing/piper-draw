@@ -1,0 +1,24 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+.python-version
+.vscode
+
+# Environment files
+.env
+.env.*
+
+# GUI / Node.js
+gui/node_modules/
+gui/dist/
+
+# Security reports
+.gstack/
