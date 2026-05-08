@@ -34,7 +34,7 @@ the affected components on the next frame.
 |-----------------------|---------------------------------------------------------------------|
 | `gui/src/stores/`     | Zustand stores. `blockStore` is the universe; `groupSelectors`, `keybindStore`, `locateStore`, `validationStore` are focused. |
 | `gui/src/types/`      | Shared types. `index.ts` is currently mixed types+logic; logic is migrating out into focused utility files. |
-| `gui/src/utils/`      | Pure helpers: geometry, validation, ZX graph derivation, DAE im/export, scene share, templates, drag/snap math, the shared `toastBus` (error + info channels). No React, no Zustand subscriptions. |
+| `gui/src/utils/`      | Pure helpers: geometry, validation, ZX graph derivation, DAE im/export, scene share, templates, drag/snap math, `pipeAcrossPortRetype` (port-shared pipe reconciliation, issue #307), the shared `toastBus` (error + info channels). No React, no Zustand subscriptions. |
 | `gui/src/components/` | React + R3F. `BlockInstances` renders the scene; `Toolbar`/`HelpPanel`/`ZXPanel`/`FlowsPanel` are UI panels; the rest are overlays and ghost previews. |
 | `gui/src/hooks/`      | Reusable hooks (floating panels, pulse animation, viewport fit). |
 | `gui/src/App.tsx`     | Top-level layout, keybind dispatch, pointer routing. |
@@ -54,8 +54,8 @@ Hot files; every meaningful PR pulls them into context. Hold the line:
 
 | File                                  | Current LOC | Target LOC |
 |---------------------------------------|------------:|-----------:|
-| `gui/src/stores/blockStore.ts`        |       ~4180 |   < 2,000 |
-| `gui/src/types/index.ts`              |       ~1751 |   < 500   |
+| `gui/src/stores/blockStore.ts`        |       ~4560 |   < 2,000 |
+| `gui/src/types/index.ts`              |       ~1955 |   < 500   |
 | `gui/src/components/Toolbar.tsx`      |       ~1713 |   < 600   |
 | `gui/src/App.tsx`                     |       ~1314 |   < 600   |
 | `gui/src/components/ZXPanel.tsx`      |        ~964 |   < 600   |
