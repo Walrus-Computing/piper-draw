@@ -1,0 +1,131 @@
+import { useMemo } from "react";
+import * as THREE from "three";
+import { useValidationStore } from "../stores/validationStore";
+import { useBlockStore } from "../stores/blockStore";
+import { usePulseScale } from "../hooks/usePulseScale";
+import { tqecToThree, yBlockZOffset, posKey } from "../types";
+import type { BlockType, Position3D } from "../types";
+import { getHighlightGeo } from "./highlightGeo";
+
+const HIGHLIGHT_SCALE = 1.05;
+
+const highlightMaterial = new THREE.MeshBasicMaterial({
+  color: 0xff0000,
+  transparent: true,
+  opacity: 0.25,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
+
+const outlineMaterial = new THREE.LineBasicMaterial({
+  color: 0xff0000,
+  linewidth: 2,
+});
+
+const pulsingMaterial = new THREE.MeshBasicMaterial({
+  color: 0xff0000,
+  transparent: true,
+  opacity: 0.35,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
+
+const noRaycast = () => {};
+
+function parseKey(key: string): Position3D | null {
+  const parts = key.split(",");
+  if (parts.length !== 3) return null;
+  const [x, y, z] = parts.map(Number);
+  if (isNaN(x) || isNaN(y) || isNaN(z)) return null;
+  return { x, y, z };
+}
+
+/** Pulsing red ghost cube for the currently selected error */
+function PulsingErrorBlock({ position, blockType }: { position: [number, number, number]; blockType: BlockType }) {
+  const groupRef = usePulseScale();
+  const { box } = getHighlightGeo(blockType, HIGHLIGHT_SCALE);
+
+  return (
+    <group ref={groupRef} position={position}>
+      <mesh geometry={box} material={pulsingMaterial} raycast={noRaycast} />
+    </group>
+  );
+}
+
+export function InvalidBlockHighlights() {
+  const invalidKeys = useValidationStore((s) => s.invalidKeys);
+  const selectedErrorKey = useValidationStore((s) => s.selectedErrorKey);
+  const blocks = useBlockStore((s) => s.blocks);
+
+  const { withBlock, withoutBlock } = useMemo(() => {
+    if (invalidKeys.size === 0) return { withBlock: [], withoutBlock: [] };
+    const matched: { key: string; blockType: BlockType; pos: Position3D }[] = [];
+    const matchedKeys = new Set<string>();
+    for (const block of blocks.values()) {
+      if (invalidKeys.has(posKey(block.pos))) {
+        matched.push({ key: posKey(block.pos), blockType: block.type, pos: block.pos });
+        matchedKeys.add(posKey(block.pos));
+        if (matched.length >= 200) break;
+      }
+    }
+    // Errors at positions with no block (e.g. missing pipes)
+    const unmatched: { key: string; pos: Position3D }[] = [];
+    for (const key of invalidKeys) {
+      if (!matchedKeys.has(key)) {
+        const parsed = parseKey(key);
+        if (parsed) unmatched.push({ key, pos: parsed });
+      }
+    }
+    return { withBlock: matched, withoutBlock: unmatched };
+  }, [invalidKeys, blocks]);
+
+  if (withBlock.length === 0 && withoutBlock.length === 0) return null;
+
+  return (
+    <>
+      {withBlock.map(({ key, blockType, pos }) => {
+        const zo = blockType === "Y" ? yBlockZOffset(pos, blocks) : 0;
+        const [tx, ty, tz] = tqecToThree(pos, blockType, zo);
+
+        if (key === selectedErrorKey) {
+          return (
+            <PulsingErrorBlock
+              key={key}
+              position={[tx, ty, tz]}
+              blockType={blockType}
+            />
+          );
+        }
+
+        const { box, edges } = getHighlightGeo(blockType, HIGHLIGHT_SCALE);
+        return (
+          <group key={key} position={[tx, ty, tz]}>
+            <mesh geometry={box} material={highlightMaterial} raycast={noRaycast} />
+            <lineSegments geometry={edges} material={outlineMaterial} raycast={noRaycast} />
+          </group>
+        );
+      })}
+      {withoutBlock.map(({ key, pos }) => {
+        const [tx, ty, tz] = tqecToThree(pos, "XZZ");
+
+        if (key === selectedErrorKey) {
+          return (
+            <PulsingErrorBlock
+              key={key}
+              position={[tx, ty, tz]}
+              blockType="XZZ"
+            />
+          );
+        }
+
+        const { box, edges } = getHighlightGeo("XZZ", HIGHLIGHT_SCALE);
+        return (
+          <group key={key} position={[tx, ty, tz]}>
+            <mesh geometry={box} material={highlightMaterial} raycast={noRaycast} />
+            <lineSegments geometry={edges} material={outlineMaterial} raycast={noRaycast} />
+          </group>
+        );
+      })}
+    </>
+  );
+}

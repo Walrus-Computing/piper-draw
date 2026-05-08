@@ -1,0 +1,31 @@
+{
+  "source": "Generated from tqec.gallery (https://github.com/tqec/tqec).",
+  "regenerate": "python scripts/generate_templates.py",
+  "templates": [
+    {
+      "filename": "cnot.dae",
+      "name": "CNOT",
+      "description": "Logical CNOT gate."
+    },
+    {
+      "filename": "cz.dae",
+      "name": "CZ",
+      "description": "Logical CZ gate."
+    },
+    {
+      "filename": "move_rotation.dae",
+      "name": "Move + Rotation",
+      "description": "Patch move and rotation."
+    },
+    {
+      "filename": "three_cnots.dae",
+      "name": "Three CNOTs",
+      "description": "Three logical CNOTs in sequence."
+    },
+    {
+      "filename": "steane_encoding.dae",
+      "name": "Steane Encoding",
+      "description": "Steane code encoding circuit compressed in spacetime."
+    }
+  ]
+}
