@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Vendored Claude Code skills (gstack et al.) ship with test fixtures, fake-credential e2e tests, and public-by-design config (e.g. Supabase publishable keys). Not application secrets."
+paths = [
+    '''\.claude/skills/.*''',
+]
