@@ -1997,6 +1997,172 @@ describe("blockStore", () => {
     });
   });
 
+  describe("#307: across-port retype on cube cycle (R-key)", () => {
+    it("cycleSelectedType doesn't fire across-port retype when cycle gate already preserves port consistency", () => {
+      // Chain: ZXZ -- OXZ -- (port) -- XOZ (Y-axis) -- ?. Port at (3,0,0) auto-
+      // promotes to XXZ. Cycle Cube_A from ZXZ → ZZX: gate (determineCubeOptions-
+      // WithPipeRetype) only allows ZZX if Pipe1 can retype to a type that keeps
+      // the port promotable. Pipe1 retypes OXZ → OZXH; the port stays promotable
+      // (XXZ unchanged). Helper sees "already feasible" and does nothing.
+      const blocks = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "ZXZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OXZ" }],
+        ["3,1,0", { pos: { x: 3, y: 1, z: 0 }, type: "XOZ" }],
+      ]);
+      useBlockStore.setState({
+        blocks,
+        spatialIndex: buildSpatialIndex(blocks),
+        hiddenFaces: new Map(),
+        history: [],
+        future: [],
+        mode: "edit",
+        armedTool: "pointer",
+        freeBuild: false,
+        selectedKeys: new Set(["0,0,0"]),
+        selectedPortPositions: new Set(),
+        portPositions: new Set(),
+        undeterminedCubes: new Map(),
+        hoveredInvalidReason: null,
+      });
+      // Cycle to ZZX explicitly via target.
+      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "ZZX" });
+      const s = useBlockStore.getState();
+      expect(s.blocks.get("0,0,0")?.type).toBe("ZZX");
+      expect(s.blocks.get("1,0,0")?.type).toBe("OZXH");
+      // Across-port helper was a no-op — port already promotable post-cycle.
+      const cmd = s.history[s.history.length - 1];
+      expect(cmd.kind).toBe("edit-type-cycle");
+      if (cmd.kind === "edit-type-cycle") {
+        expect(cmd.acrossPortPipeRetypes).toBeUndefined();
+        expect(cmd.acrossPortCubeRetypes).toBeUndefined();
+      }
+    });
+
+    it("cycleSelectedType undo restores all retypes including any across-port retypes", () => {
+      // Defensive: when the helper does fire (e.g. via direct setState with
+      // an inconsistent multi-axis port state), undo must reverse everything.
+      // Here we just confirm the simple cycle case undoes cleanly.
+      const blocks = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "ZXZ" }],
+        ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OXZ" }],
+        ["3,1,0", { pos: { x: 3, y: 1, z: 0 }, type: "XOZ" }],
+      ]);
+      useBlockStore.setState({
+        blocks,
+        spatialIndex: buildSpatialIndex(blocks),
+        hiddenFaces: new Map(),
+        history: [],
+        future: [],
+        mode: "edit",
+        armedTool: "pointer",
+        freeBuild: false,
+        selectedKeys: new Set(["0,0,0"]),
+        selectedPortPositions: new Set(),
+        portPositions: new Set(),
+        undeterminedCubes: new Map(),
+        hoveredInvalidReason: null,
+      });
+      useBlockStore.getState().cycleSelectedType(1, { kind: "cube", type: "ZZX" });
+      useBlockStore.getState().undo();
+      const s = useBlockStore.getState();
+      expect(s.blocks.get("0,0,0")?.type).toBe("ZXZ");
+      expect(s.blocks.get("1,0,0")?.type).toBe("OXZ");
+      expect(s.blocks.get("3,1,0")?.type).toBe("XOZ");
+    });
+  });
+
+  describe("#307: across-port retype on keyboard build", () => {
+    it("retypes an existing across-port pipe when dest port has incompatible pipes", () => {
+      // Setup an inconsistent multi-pipe port state (achievable via direct
+      // setState — interactive placement would have rejected it). Cursor cube
+      // ZXZ at (0,0,0). Dest port (3,0,0) has two existing pipes that already
+      // conflict:
+      //   X-axis OZX at (4,0,0): wants T[1]='Z', T[2]='X'
+      //   Y-axis XOZ at (3,1,0): wants T[0]='X', T[2]='Z'
+      // Build along +X: the build path's existing H-toggle on the new pipe
+      // cannot resolve the existing mutual inconsistency. The across-port
+      // helper retypes OZX → OXZ so the port can promote to XXZ.
+      const blocks = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "ZXZ" }],
+        ["4,0,0", { pos: { x: 4, y: 0, z: 0 }, type: "OZX" }],
+        ["3,1,0", { pos: { x: 3, y: 1, z: 0 }, type: "XOZ" }],
+      ]);
+      useBlockStore.setState({
+        blocks,
+        spatialIndex: buildSpatialIndex(blocks),
+        hiddenFaces: new Map(),
+        history: [],
+        future: [],
+        mode: "build",
+        freeBuild: false,
+        buildCursor: { x: 0, y: 0, z: 0 },
+        buildHistory: [],
+        undeterminedCubes: new Map(),
+        hoveredInvalidReason: null,
+      });
+      const ok = useBlockStore.getState().buildMove({ tqecAxis: 0, sign: 1 });
+      expect(ok).toBe(true);
+      const s = useBlockStore.getState();
+      expect(s.blocks.get("4,0,0")?.type).toBe("OXZ");
+      const step = s.buildHistory[0];
+      expect(step.acrossPortPipeRetypes).toBeDefined();
+      expect(step.acrossPortPipeRetypes!).toHaveLength(1);
+      expect(step.acrossPortPipeRetypes![0].oldBlock.type).toBe("OZX");
+      expect(step.acrossPortPipeRetypes![0].newBlock.type).toBe("OXZ");
+    });
+
+    it("undo reverts across-port retype atomically with the build step", () => {
+      const blocks = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "ZXZ" }],
+        ["4,0,0", { pos: { x: 4, y: 0, z: 0 }, type: "OZX" }],
+        ["3,1,0", { pos: { x: 3, y: 1, z: 0 }, type: "XOZ" }],
+      ]);
+      useBlockStore.setState({
+        blocks,
+        spatialIndex: buildSpatialIndex(blocks),
+        hiddenFaces: new Map(),
+        history: [],
+        future: [],
+        mode: "build",
+        freeBuild: false,
+        buildCursor: { x: 0, y: 0, z: 0 },
+        buildHistory: [],
+        undeterminedCubes: new Map(),
+        hoveredInvalidReason: null,
+      });
+      useBlockStore.getState().buildMove({ tqecAxis: 0, sign: 1 });
+      expect(useBlockStore.getState().blocks.get("4,0,0")?.type).toBe("OXZ");
+      useBlockStore.getState().undoBuildStep();
+      const s = useBlockStore.getState();
+      expect(s.blocks.get("4,0,0")?.type).toBe("OZX");
+      expect(s.blocks.has("1,0,0")).toBe(false);
+      expect(s.buildHistory).toHaveLength(0);
+    });
+
+    it("keyboard build into clean port stays unchanged (regression)", () => {
+      const blocks = new Map<string, Block>([
+        ["0,0,0", { pos: { x: 0, y: 0, z: 0 }, type: "ZXZ" }],
+      ]);
+      useBlockStore.setState({
+        blocks,
+        spatialIndex: buildSpatialIndex(blocks),
+        hiddenFaces: new Map(),
+        history: [],
+        future: [],
+        mode: "build",
+        freeBuild: false,
+        buildCursor: { x: 0, y: 0, z: 0 },
+        buildHistory: [],
+        undeterminedCubes: new Map(),
+        hoveredInvalidReason: null,
+      });
+      useBlockStore.getState().buildMove({ tqecAxis: 0, sign: 1 });
+      const step = useBlockStore.getState().buildHistory[0];
+      expect(step.acrossPortPipeRetypes).toBeUndefined();
+      expect(step.acrossPortCubeRetypes).toBeUndefined();
+    });
+  });
+
   describe("ensurePortLabels — default io from pipe geometry", () => {
     function seed(blocks: Array<{ x: number; y: number; z: number; type: Block["type"] }>) {
       const map = new Map<string, Block>();
