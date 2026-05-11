@@ -1,0 +1,37 @@
+[
+  {
+    "name": "CNOT",
+    "description": "Logical CNOT gate via lattice surgery (one of TQEC's canonical examples).",
+    "filename": "cnot.bgraph"
+  },
+  {
+    "name": "CZ",
+    "description": "Logical CZ gate.",
+    "filename": "cz.bgraph"
+  },
+  {
+    "name": "Memory",
+    "description": "Single-cube logical memory experiment (Z basis observable).",
+    "filename": "memory.bgraph"
+  },
+  {
+    "name": "Stability",
+    "description": "Single-cube stability experiment (Z basis observable).",
+    "filename": "stability.bgraph"
+  },
+  {
+    "name": "Move + Rotation",
+    "description": "Moving and rotating spatial boundaries of a logical qubit.",
+    "filename": "move_rotation.bgraph"
+  },
+  {
+    "name": "Three CNOTs",
+    "description": "Three logical CNOT gates compressed in spacetime.",
+    "filename": "three_cnots.bgraph"
+  },
+  {
+    "name": "Steane Encoding",
+    "description": "Steane code encoding circuit.",
+    "filename": "steane_encoding.bgraph"
+  }
+]
