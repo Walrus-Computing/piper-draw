@@ -33,11 +33,12 @@ the affected components on the next frame.
 | Directory             | Owns                                                                |
 |-----------------------|---------------------------------------------------------------------|
 | `gui/src/stores/`     | Zustand stores. `blockStore` is the universe; `groupSelectors`, `keybindStore`, `locateStore`, `validationStore` are focused. |
-| `gui/src/types/`      | Shared types. `index.ts` is currently mixed types+logic; logic is migrating out into focused utility files. |
-| `gui/src/utils/`      | Pure helpers: geometry, validation, ZX graph derivation, DAE im/export, scene share, templates, drag/snap math, `pipeAcrossPortRetype` (port-shared pipe reconciliation, issue #307), the shared `toastBus` (error + info channels). No React, no Zustand subscriptions. |
-| `gui/src/components/` | React + R3F. `BlockInstances` renders the scene; `Toolbar`/`HelpPanel`/`ZXPanel`/`FlowsPanel` are UI panels; the rest are overlays and ghost previews. |
-| `gui/src/hooks/`      | Reusable hooks (floating panels, pulse animation, viewport fit). |
-| `gui/src/App.tsx`     | Top-level layout, keybind dispatch, pointer routing. |
+| `gui/src/types/`      | Shared types. `index.ts` is currently mixed types+logic; logic is migrating out into focused utility files. `bgraph.ts` holds API request/response types for `/api/bgraph_*`. |
+| `gui/src/utils/`      | Pure helpers: geometry, validation, ZX graph derivation, DAE im/export, scene share, drag/snap math, `pipeAcrossPortRetype` (port-shared pipe reconciliation, issue #307), the shared `toastBus` (error + info channels). `bgraphApi.ts` is a thin `fetch` wrapper for the backend bgraph endpoints; `bgraphImportToBlocks.ts` converts an API response into a `Block` Map and applies the sandwich-cube canonicalization rule. `bgraphToasts.ts` holds shared toast wording constants. No React, no Zustand subscriptions. |
+| `gui/src/components/` | React + R3F. `BlockInstances` renders the scene; `Toolbar`/`HelpPanel`/`ZXPanel`/`FlowsPanel` are UI panels. The bgraph stack lives here too: `PasteBgraphModal` (unified Load/Insert via file picker or paste), `BgraphGalleryPanel` (floating panel for bundled tqec.gallery examples), `BgraphDialogs` (single-mount host), `ImportSubmenu` / `ExportSubmenu` (side submenus opened from File ▾ Import ▸ / Export ▸), `FileDropOverlay` (window-level drag-drop with dashed-border overlay), and the dev-only `RoundTripVerifyButton`. The rest are overlays and ghost previews. |
+| `gui/src/hooks/`      | Reusable hooks: `useFloatingPanel` (drag + resize + persist), `useFileDropHandler` (window-level drag-drop dispatch by extension), `useBgraphActions` (shared bgraph import/export handlers + dialog state), `usePulseScale`, `useViewportFitScale`. |
+| `gui/src/App.tsx`     | Top-level layout, keybind dispatch, pointer routing. Mounts `<FileDropOverlay />` for canvas drag-drop. |
+| `server.py` + root    | FastAPI app and route handlers (`/api/validate`, `/api/flows`, `/api/zx`). `bgraph_endpoints.py` is a focused module that mounts `/api/bgraph_export` and `/api/bgraph_import` via an `APIRouter`, wrapping `tqec.interop.bgraph.{load_bgraph, write_bgraph}` with piper-draw policy (5 MB / 10k block caps, dup-port-label rejection, empty-graph rejection, strict `BlockGraph.validate()` pre-write). |
 
 ### Boundaries (enforced manually today, lint-enforced after PR 9 / E4)
 

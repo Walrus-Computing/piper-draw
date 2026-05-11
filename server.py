@@ -34,6 +34,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Bgraph router (TQEC BlockGraph text format — import/export).
+# Mounted under /api so the existing route prefix convention holds.
+from bgraph_endpoints import bgraph_router  # noqa: E402
+
+app.include_router(bgraph_router, prefix="/api")
+
 # Cap on the circuit size we'll run `pyzx.compare_tensors` against for the
 # extracted-circuit ≡ original-graph check. Tensor contraction is exponential
 # in qubit count, so beyond ~6 qubits the check becomes prohibitively slow.

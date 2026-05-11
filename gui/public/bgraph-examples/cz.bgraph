@@ -1,0 +1,20 @@
+BLOCKGRAPH 0.1.0;
+
+METADATA: attr_name; value;
+source; TQEC.
+circuit_name; circuit;
+
+CUBES: index;x;y;z;kind;label;
+(0, 0, 0);0;0;0;PORT;In_1;
+(0, 0, 1);0;0;1;XZX;;
+(0, 0, 2);0;0;2;PORT;Out_1;
+(1, 0, 1);1;0;1;XXZ;;
+(1, -1, 1);1;-1;1;PORT;In_2;
+(1, 1, 1);1;1;1;PORT;Out_2;
+
+PIPES: src;tgt;kind;
+(0, 0, 0);(0, 0, 1);XZO;
+(0, 0, 1);(0, 0, 2);XZO;
+(0, 0, 1);(1, 0, 1);OZXH;
+(1, -1, 1);(1, 0, 1);XOZ;
+(1, 0, 1);(1, 1, 1);XOZ;

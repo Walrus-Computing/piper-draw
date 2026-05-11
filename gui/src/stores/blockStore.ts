@@ -4493,9 +4493,15 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         return { portMeta: next };
       }
 
-      // Reject duplicates (TQEC requires unique port labels).
+      // Reject duplicates (TQEC requires unique port labels). The rejection is
+      // loud — emit an error toast so the user sees why their edit didn't stick.
+      // Bgraph export (D8=C) assumes scene state never carries dup labels; this
+      // is the data-layer invariant that backs that assumption.
       for (const [k, m] of state.portMeta) {
-        if (k !== key && m.label === trimmed) return state;
+        if (k !== key && m.label === trimmed) {
+          toastBus.error.emit(`Duplicate port label '${trimmed}'; pick a unique label.`);
+          return state;
+        }
       }
       next.set(key, { ...existing, label: trimmed });
       return { portMeta: next };
