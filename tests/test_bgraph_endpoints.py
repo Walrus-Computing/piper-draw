@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from fastapi import HTTPException
 
 from bgraph_endpoints import (
     BgraphExportRequest,
@@ -19,7 +20,6 @@ from bgraph_endpoints import (
     bgraph_export,
     bgraph_import,
 )
-from fastapi import HTTPException
 
 
 def _run(coro):
@@ -333,15 +333,15 @@ class TestCoordConversionParity:
     """
 
     def test_piper_to_tqec_matches_server(self):
-        from server import _piper_to_tqec_pos as server_pp
         from bgraph_endpoints import _piper_to_tqec_pos as bgraph_pp
+        from server import _piper_to_tqec_pos as server_pp
 
         for pos in [[0, 0, 0], [3, 6, 9], [-3, 0, 6], [3.0, 0.0, 0.0]]:
             assert server_pp(pos) == bgraph_pp(pos), f"divergence at {pos}"
 
     def test_tqec_to_piper_matches_server(self):
-        from server import _tqec_to_piper_pos as server_tp
         from bgraph_endpoints import _tqec_to_piper_pos as bgraph_tp
+        from server import _tqec_to_piper_pos as server_tp
 
         for tqec_pos in [(0, 0, 0), (1, 2, 3), (-1, -2, 0)]:
             assert server_tp(tqec_pos) == bgraph_tp(tqec_pos), (
@@ -349,8 +349,8 @@ class TestCoordConversionParity:
             )
 
     def test_pipe_endpoints_matches_server(self):
-        from server import _pipe_endpoints as server_pe
         from bgraph_endpoints import _pipe_endpoints as bgraph_pe
+        from server import _pipe_endpoints as server_pe
 
         for pos in [[1, 0, 0], [0, 1, 0], [0, 0, 1], [4, 3, 0], [-2, 0, 0]]:
             assert server_pe(pos) == bgraph_pe(pos), f"divergence at {pos}"

@@ -13,7 +13,6 @@ The script is idempotent — re-running overwrites the existing files.
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 from tqec import gallery

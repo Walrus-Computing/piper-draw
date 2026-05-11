@@ -74,8 +74,8 @@ class BgraphExportRequest(BaseModel):
     # We re-declare the block input shape rather than importing from server.py
     # to keep this module loadable without triggering server.py's lifespan
     # init (which warms up tqec.gallery).
-    blocks: list["BlockInputLocal"]
-    port_labels: list["PortLabelInputLocal"] = []
+    blocks: list[BlockInputLocal]
+    port_labels: list[PortLabelInputLocal] = []
     scene_name: str | None = None
     # When False (default), the export calls BlockGraph.validate() before
     # writing. A scene with mismatched cube/pipe colors, dangling pipes, or
@@ -210,13 +210,14 @@ def _blocks_to_graph_dict(
             if not label:
                 # CEO plan D8=C — no silent fallback to port_{n}. The Ports
                 # panel must provide a label before export is allowed.
+                piper_pos = [endpoint[i] * 3 for i in range(3)]
                 raise HTTPException(
                     status_code=400,
                     detail={
                         "code": "bgraph_missing_port_label",
                         "message": (
-                            f"Port at piper-draw position {list(endpoint[i] * 3 for i in range(3))} "
-                            "has no label. Set a label in the Ports panel before exporting."
+                            f"Port at piper-draw position {piper_pos} has no label. "
+                            "Set a label in the Ports panel before exporting."
                         ),
                     },
                 )

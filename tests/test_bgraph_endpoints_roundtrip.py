@@ -273,7 +273,10 @@ class TestGalleryExamples:
 # ---------------------------------------------------------------------------
 
 
-def _gallery_examples_as_blocks() -> list[tuple[str, list[BlockInputLocal], list[PortLabelInputLocal]]]:
+_GalleryRow = tuple[str, list[BlockInputLocal], list[PortLabelInputLocal]]
+
+
+def _gallery_examples_as_blocks() -> list[_GalleryRow]:
     """Convert each bundled gallery bgraph into piper-draw blocks via the
     real /api/bgraph_import endpoint. These become the input for the
     export-then-validate pass.
