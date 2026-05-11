@@ -6,6 +6,70 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.2.3.0] - 2026-05-11
+
+### Added
+- **Bgraph import/export** ([#309](https://github.com/Walrus-Computing/piper-draw/issues/309)).
+  Piper-draw now reads and writes TQEC's `.bgraph` plain-text format
+  (`tqec.interop.bgraph`, [tqec/tqec#864](https://github.com/tqec/tqec/pull/864)).
+  File ▾ gains `Import ▸` and `Export ▸` side submenus that contain all
+  file-format operations (`.dae` and `.bgraph` together — see "Changed" below).
+  - **Unified bgraph modal**: `Load bgraph…` and `Insert bgraph…` open the
+    same modal — choose a file or paste a bgraph string, then submit. Replaces
+    the earlier three-item layout (Load .bgraph / Insert .bgraph / Paste
+    bgraph). The (action × source) grid is now fully covered: file-or-paste
+    can be combined with replace-or-insert.
+  - **Browse examples…** replaces both the legacy `Templates ▸` menu and the
+    bgraph-specific `Load example…`. Each row has Load (replace) and `+`
+    (insert) buttons. Backed by `.bgraph` exclusively; the `.dae` template
+    library is gone (see "Removed").
+  - **Paste bgraph** opens a centered modal — paste a bgraph straight from a
+    TQEC notebook, ⌘/Ctrl+Enter to import. 5 MB cap with inline size readout.
+  - **Load example…** opens a floating panel with 7 pre-bundled TQEC graphs
+    (CNOT, CZ, Memory, Stability, Move + Rotation, Three CNOTs, Steane
+    Encoding). One click to load any of them.
+  - **Drag-and-drop** a `.bgraph` (or `.dae`) onto the canvas to load it.
+    Dashed-border overlay confirms the canvas is accepting the drop.
+  - **Lossless TQEC-data round-trip** — cubes, pipes, kinds, port labels, and
+    Y-cubes all survive piper-draw → bgraph → piper-draw, verified by a CI
+    round-trip test that builds a 9-block scene with ports and Y-cubes,
+    serializes, re-imports, and asserts block-by-block equality.
+  - **Strict export validation.** Every bgraph export now runs
+    `BlockGraph.validate()` before writing — the same graph-level checks
+    `/api/validate` runs interactively. A scene with mismatched cube/pipe
+    colors, dangling pipes, or Y-cube axis conflicts is rejected at export
+    time with a 400 `bgraph_invalid_graph` error and the field-pointed
+    TQEC message. Pass `force=true` in the request to snapshot an
+    in-progress scene anyway. Tests added: every bundled gallery example,
+    when exported through piper-draw, round-trips via TQEC's own
+    `BlockGraph.from_bgraph` + `graph.validate()` — end-to-end proof that
+    piper-draw exports are valid TQEC input.
+  - Sandwich-cube ambiguity (e.g. `XZX` vs `ZZX` for cubes between two
+    same-axis pipes) is normalized to the first valid `CUBE_TYPES` entry on
+    import — same rule the DAE importer uses — and a `Normalized N cube types`
+    toast tells the user when this happens.
+
+### Changed
+- **Ports panel — duplicate-label rejection is now loud.** Editing a port to a
+  label already used by another port still blocks the change (existing
+  behavior) but now also surfaces a `Duplicate port label '<l>'; pick a unique
+  label.` error toast so the user sees the rejection instead of the field
+  silently snapping back.
+- **File ▾ menu reorganized.** Top-level entries went from a flat list of
+  12 items to 5: `Import ▸`, `Export ▸`, Share link, Screenshot, Clear all.
+  Grouping by intent (open vs save) keeps the menu scannable as more file
+  formats land. The existing `Import…` / `Insert…` / `Export` labels are now
+  explicit about format (`Load .dae…`, `Insert .dae…`, `Export .dae`) since
+  they sit next to bgraph siblings.
+
+### Removed
+- **`.dae` template library** (`gui/public/templates/`, `scripts/generate_templates.py`,
+  `gui/src/utils/templates.ts`). The five bundled `.dae` templates (CNOT, CZ,
+  move + rotation, three CNOTs, Steane encoding) duplicated the new bgraph
+  examples — same scenes, different format, same `tqec.gallery` source. Use
+  `Browse examples…` instead; the bgraph gallery includes those five plus
+  memory and stability.
+
 ## [0.2.1.4] - 2026-05-07
 
 ### Fixed
