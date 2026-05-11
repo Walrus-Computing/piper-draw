@@ -2032,6 +2032,68 @@ describe("blockStore", () => {
     });
   });
 
+  describe("setPortLabel — duplicate-label rejection (D8=C)", () => {
+    function seedTwoPorts() {
+      useBlockStore.setState({
+        blocks: new Map(),
+        portPositions: new Set(["0,0,0", "3,0,0"]),
+        portMeta: new Map([
+          ["0,0,0", { label: "a", io: "in" as const, rank: 0 }],
+          ["3,0,0", { label: "b", io: "in" as const, rank: 1 }],
+        ]),
+      });
+    }
+
+    it("rejects setting port to a label already used by another port", () => {
+      seedTwoPorts();
+      useBlockStore.getState().setPortLabel({ x: 3, y: 0, z: 0 }, "a");
+      // Store untouched: port at (3,0,0) still has label "b".
+      expect(useBlockStore.getState().portMeta.get("3,0,0")?.label).toBe("b");
+    });
+
+    it("emits an error toast on dup-label rejection", async () => {
+      const { toastBus } = await import("../utils/toastBus");
+      const captured: string[] = [];
+      const unsubscribe = toastBus.error.subscribe((msg) => captured.push(msg));
+      try {
+        seedTwoPorts();
+        useBlockStore.getState().setPortLabel({ x: 3, y: 0, z: 0 }, "a");
+        expect(captured).toHaveLength(1);
+        expect(captured[0]).toContain("Duplicate port label");
+        expect(captured[0]).toContain("'a'");
+      } finally {
+        unsubscribe();
+      }
+    });
+
+    it("no toast and stores label when the new value is unique", async () => {
+      const { toastBus } = await import("../utils/toastBus");
+      const captured: string[] = [];
+      const unsubscribe = toastBus.error.subscribe((msg) => captured.push(msg));
+      try {
+        seedTwoPorts();
+        useBlockStore.getState().setPortLabel({ x: 3, y: 0, z: 0 }, "c");
+        expect(captured).toHaveLength(0);
+        expect(useBlockStore.getState().portMeta.get("3,0,0")?.label).toBe("c");
+      } finally {
+        unsubscribe();
+      }
+    });
+
+    it("no toast when the new value equals the existing label (no-op)", async () => {
+      const { toastBus } = await import("../utils/toastBus");
+      const captured: string[] = [];
+      const unsubscribe = toastBus.error.subscribe((msg) => captured.push(msg));
+      try {
+        seedTwoPorts();
+        useBlockStore.getState().setPortLabel({ x: 3, y: 0, z: 0 }, "b");
+        expect(captured).toHaveLength(0);
+      } finally {
+        unsubscribe();
+      }
+    });
+  });
+
   describe("reorderPort", () => {
     function seedFourPorts() {
       useBlockStore.setState({
