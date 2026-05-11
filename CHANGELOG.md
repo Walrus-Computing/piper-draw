@@ -6,6 +6,14 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.2.3.1] - 2026-05-11
+
+### Fixed
+- **Dev site restored**: `piper-draw-dev.walruscomputing.com` was returning
+  503 because the Docker image shipped in v0.2.3.0 did not include
+  `bgraph_endpoints.py`, causing `server.py` to crash on import. The Dockerfile
+  now copies `bgraph_endpoints.py` alongside `server.py`.
+
 ## [0.2.3.0] - 2026-05-11
 
 ### Added
