@@ -141,9 +141,7 @@ def _write_manifest() -> None:
     ordered = [f"{n}.json" for n in SINGLE_CUBE_NAMES] + ["two_cubes.json"]
     for filename in ordered:
         name, description = MANIFEST_DESCRIPTIONS[filename]
-        examples.append(
-            {"filename": filename, "name": name, "description": description}
-        )
+        examples.append({"filename": filename, "name": name, "description": description})
     manifest = {
         "source": f"https://github.com/{EQUISETA_REPO}/pull/29",
         "regenerate": (
