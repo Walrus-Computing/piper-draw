@@ -36,7 +36,8 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 EQUISETA_REPO = "Walrus-Computing/equiseta"
-EQUISETA_REF = "b77aed151d92ca9b97f67bf7f6eddd22ada902fe"  # peter-janderks/ftqcgraph-to-json (PR #29)
+# Source SHA is the head of peter-janderks/ftqcgraph-to-json (equiseta PR #29).
+EQUISETA_REF = "b77aed151d92ca9b97f67bf7f6eddd22ada902fe"
 LOCAL_CLONE = Path.home() / "conductor" / "repos" / "equiseta"
 
 # (filename, source path inside equiseta repo)
