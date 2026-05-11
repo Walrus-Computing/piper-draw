@@ -17,6 +17,7 @@ import { GhostBlock } from "./components/GhostBlock";
 import { PasteGhost } from "./components/PasteGhost";
 import { AxisLabels } from "./components/AxisLabels";
 import { FpsSampler } from "./components/FpsCounter";
+import { FileDropOverlay } from "./components/FileDropOverlay";
 import { OrientationGizmo } from "./components/OrientationGizmo";
 import { Toolbar } from "./components/Toolbar";
 import { ValidationToast } from "./components/ValidationToast";
@@ -1262,6 +1263,7 @@ export default function App() {
         onOpenKeybindEditor={setKeybindEditorMode}
       />
       <ValidationToast toolbarRef={toolbarRef} controlsRef={controlsRef} />
+      <FileDropOverlay />
       {sharedSceneBanner && (
         <SharedSceneBanner
           previousSnapshot={sharedSceneBanner.previousSnapshot}

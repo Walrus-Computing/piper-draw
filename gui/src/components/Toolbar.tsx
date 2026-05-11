@@ -4,15 +4,16 @@ import { useValidationStore } from "../stores/validationStore";
 import { useKeybindStore, type Mode as KeybindMode, type NavStyle } from "../stores/keybindStore";
 import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, determineCubeOptionsWithPipeRetype, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
-import { downloadDae } from "../utils/daeExport";
-import { triggerDaeImport } from "../utils/daeImport";
+import { useBgraphActions } from "../hooks/useBgraphActions";
+import { BgraphDialogs } from "./BgraphDialogs";
+import { ImportSubmenu } from "./ImportSubmenu";
+import { ExportSubmenu } from "./ExportSubmenu";
 import {
   buildShareUrl,
   encodeSnapshotToHashParam,
   isCompressionStreamSupported,
 } from "../utils/sceneShare";
 import { captureSnapshot } from "../utils/sceneSnapshot";
-import { fetchTemplateManifest, loadTemplateBlocks, type TemplateEntry } from "../utils/templates";
 import { evalCoordExpr } from "../utils/parseCoordExpr";
 import { usePreviewImages } from "./PreviewRenderer";
 import { FpsDisplay } from "./FpsCounter";
@@ -1135,7 +1136,7 @@ function SelectionInspector({
 }
 
 // ---------------------------------------------------------------------------
-// FileMenu — Import / Export / Photo / Templates / Clear dropdown
+// FileMenu — Import / Export / Photo / Clear dropdown
 // ---------------------------------------------------------------------------
 
 function FileMenu({
@@ -1152,10 +1153,23 @@ function FileMenu({
   blocksEmpty: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [templatesOpen, setTemplatesOpen] = useState(false);
-  const [templates, setTemplates] = useState<TemplateEntry[] | null>(null);
-  const [templatesError, setTemplatesError] = useState<string | null>(null);
-  const [loadingFile, setLoadingFile] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const bgraph = useBgraphActions({
+    loadBlocks,
+    insertBlocks,
+    onItemClick: () => setOpen(false),
+  });
+
+  // Mutually exclusive side-submenu toggles — opening one closes the other.
+  const openImport = () => {
+    setExportOpen(false);
+    setImportOpen((v) => !v);
+  };
+  const openExport = () => {
+    setImportOpen(false);
+    setExportOpen((v) => !v);
+  };
   const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "too-long" | "error">("idle");
   const shareTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -1171,39 +1185,13 @@ function FileMenu({
     const onDocClick = (e: MouseEvent) => {
       if (!wrapRef.current?.contains(e.target as Node)) {
         setOpen(false);
-        setTemplatesOpen(false);
+        setImportOpen(false);
+        setExportOpen(false);
       }
     };
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
-
-  const toggleTemplates = async () => {
-    const next = !templatesOpen;
-    setTemplatesOpen(next);
-    if (next && templates === null && templatesError === null) {
-      try {
-        setTemplates(await fetchTemplateManifest());
-      } catch (err) {
-        setTemplatesError(err instanceof Error ? err.message : String(err));
-      }
-    }
-  };
-
-  const pickTemplate = async (entry: TemplateEntry, action: "load" | "insert") => {
-    setLoadingFile(entry.filename);
-    try {
-      const blocks = await loadTemplateBlocks(entry.filename);
-      if (action === "insert") insertBlocks(blocks);
-      else loadBlocks(blocks);
-      setOpen(false);
-      setTemplatesOpen(false);
-    } catch (err) {
-      alert(`Failed to ${action} template: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setLoadingFile(null);
-    }
-  };
 
   const item = (disabled: boolean): React.CSSProperties => ({
     ...btnStyle(false),
@@ -1265,7 +1253,7 @@ function FileMenu({
       <button
         onClick={() => setOpen((v) => !v)}
         style={{ ...btnStyle(open), whiteSpace: "nowrap", width: "100%" }}
-        title="Import / Export / Templates / Clear"
+        title="Import / Export / Share / Screenshot / Clear"
       >
         File ▾
       </button>
@@ -1288,35 +1276,56 @@ function FileMenu({
           }}
         >
           <button
-            onClick={() => {
-              triggerDaeImport(loadBlocks);
-              setOpen(false);
+            onClick={openImport}
+            style={{
+              ...item(false),
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              background: importOpen ? "#e8f0fe" : "#fff",
             }}
-            title="Load a .dae file (replaces current scene)"
-            style={item(false)}
+            title="Open or paste a file"
           >
-            Import…
+            Import <span style={{ opacity: 0.6, marginLeft: 6 }}>{importOpen ? "▾" : "▸"}</span>
           </button>
+          {importOpen && (
+            <ImportSubmenu
+              itemStyle={item(false)}
+              onItemClick={() => {
+                setImportOpen(false);
+                setOpen(false);
+              }}
+              loadBlocks={loadBlocks}
+              insertBlocks={insertBlocks}
+              bgraph={bgraph}
+            />
+          )}
           <button
-            onClick={() => {
-              triggerDaeImport(insertBlocks);
-              setOpen(false);
-            }}
-            title="Insert a .dae file next to current scene; inserted blocks stay selected so you can drag them into place"
-            style={item(false)}
-          >
-            Insert…
-          </button>
-          <button
-            onClick={() => {
-              downloadDae(useBlockStore.getState().blocks);
-              setOpen(false);
-            }}
+            onClick={openExport}
             disabled={blocksEmpty}
-            style={item(blocksEmpty)}
+            style={{
+              ...item(blocksEmpty),
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              background: exportOpen ? "#e8f0fe" : "#fff",
+            }}
+            title="Save scene to file"
           >
-            Export
+            Export <span style={{ opacity: 0.6, marginLeft: 6 }}>{exportOpen ? "▾" : "▸"}</span>
           </button>
+          {exportOpen && (
+            <ExportSubmenu
+              itemStyle={item(false)}
+              itemStyleDisabled={item(true)}
+              blocksEmpty={blocksEmpty}
+              onItemClick={() => {
+                setExportOpen(false);
+                setOpen(false);
+              }}
+              bgraph={bgraph}
+            />
+          )}
           <button
             onClick={() => {
               void onShare();
@@ -1338,77 +1347,6 @@ function FileMenu({
           >
             Screenshot
           </button>
-          <button
-            onClick={toggleTemplates}
-            style={{
-              ...item(false),
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              background: templatesOpen ? "#e8f0fe" : "#fff",
-            }}
-          >
-            Templates <span style={{ opacity: 0.6, marginLeft: 6 }}>{templatesOpen ? "▾" : "▸"}</span>
-          </button>
-          {templatesOpen && (
-            <div
-              style={{
-                position: "absolute",
-                top: 0,
-                left: "100%",
-                marginLeft: 4,
-                background: "#fff",
-                border: "1px solid #ccc",
-                borderRadius: 4,
-                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-                padding: 4,
-                minWidth: 220,
-                zIndex: 1001,
-                display: "flex",
-                flexDirection: "column",
-                gap: 2,
-              }}
-            >
-              {templatesError && <div style={{ padding: 6, color: "#c0392b", fontSize: 12 }}>{templatesError}</div>}
-              {!templatesError && templates === null && <div style={{ padding: 6, fontSize: 12, color: "#666" }}>Loading…</div>}
-              {templates?.map((t) => (
-                <div key={t.filename} style={{ display: "flex", gap: 2 }}>
-                  <button
-                    onClick={() => pickTemplate(t, "load")}
-                    disabled={loadingFile !== null}
-                    title={`Load (replace scene): ${t.description} (${t.filename})`}
-                    style={{
-                      ...btnStyle(false),
-                      textAlign: "left",
-                      padding: "6px 10px",
-                      flex: 1,
-                      opacity: loadingFile && loadingFile !== t.filename ? 0.5 : 1,
-                    }}
-                  >
-                    {loadingFile === t.filename ? `${t.name}…` : t.name}
-                  </button>
-                  <button
-                    onClick={() => pickTemplate(t, "insert")}
-                    disabled={loadingFile !== null}
-                    title={`Insert next to current scene (selected for placement): ${t.name}`}
-                    style={{
-                      ...btnStyle(false),
-                      padding: "6px 8px",
-                      opacity: loadingFile && loadingFile !== t.filename ? 0.5 : 1,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    +
-                  </button>
-                </div>
-              ))}
-              {templates && (
-                <div style={{ padding: "4px 6px 2px", fontSize: 10, color: "#888" }}>
-                  From <a href="https://github.com/tqec/tqec" target="_blank" rel="noreferrer">tqec</a>
-                </div>
-              )}
-            </div>
-          )}
           <div style={{ height: 1, background: "#eee", margin: "4px 0" }} />
           <button
             onClick={() => {
@@ -1424,6 +1362,7 @@ function FileMenu({
           </button>
         </div>
       )}
+      <BgraphDialogs actions={bgraph} />
     </div>
   );
 }
