@@ -1,5 +1,28 @@
 # TODOs
 
+## Deferred from CEO + ENG plan: View Equiseta JSON (2026-05-08)
+
+Source: `~/.gstack/projects/peter-janderks-piper-draw-raw/ceo-plans/2026-05-08-view-equiseta-json.md`
+plus the branch's plan file. Decided during /plan-ceo-review (E1z, E5) and
+left in scope after /plan-eng-review.
+
+- **Zod (or other JSON-schema validation library)** (P3, S, CC ~30 min) —
+  revisit when ≥3 JSON schemas live in the codebase or the hand-rolled
+  validator at `gui/src/utils/equisetaJsonSchema.ts` gets unwieldy. Trigger:
+  schema-count crosses 3, or validator file passes ~250 LOC. Migration is
+  mechanical (rewrite the parse functions in zod's DSL).
+- **Compare mode for Equiseta JSON viewer** (P3, M, CC ~1.5 hr) — second
+  drop slot in `EquisetaJsonPanel`; load fileA + fileB, render side-by-side
+  with a "these fields differ" tint. Useful when tweaking the equiseta
+  serializer to confirm the dump didn't drift, or when comparing two
+  builders. Depends on the basic viewer (this PR) landing first.
+
+(Mobile / narrow-viewport polish was originally deferred but scope-promoted
+into the implementation PR — viewport-clamped panel default geometry now
+ships with the feature.)
+
+---
+
 ## Deferred from CEO plan: Group Elements (2026-04-29)
 
 Source: `.context/ceo-plans/2026-04-29-group-elements.md`. These were considered during the CEO plan review and explicitly deferred so the v1 group-elements PR stays focused.

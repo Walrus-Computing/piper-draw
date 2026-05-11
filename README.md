@@ -60,6 +60,7 @@ Select two or more blocks and press `G` to bundle them into a group. Grouped blo
 ### Files
 - **Import** / **Export** round-trip through Collada (`.dae`) files.
 - **Templates** — load a bundled example diagram (CNOT, CZ, move + rotation, three CNOTs, Steane encoding) as a starting point, or insert one into the current scene.
+- **Equiseta JSON viewer** — the **Equiseta ▾** toolbar dropdown opens a floating panel that displays JSON files produced by [Equiseta](https://github.com/Walrus-Computing/equiseta)'s `FTQCGraph.to_json()` serializer. Pick a bundled fixture, drop a `.json` file onto the panel, or use **Open JSON…**. Switch between a raw JSON tree and a per-node faces grid showing the 6 face colors. (Read-only viewer for now; a translator from Equiseta graphs to piper blocks is planned.)
 
 ### Bundled templates
 The `.dae` files served from `gui/public/templates/` are generated from [`tqec.gallery`](https://github.com/tqec/tqec/tree/main/src/tqec/gallery) — they originate from the TQEC project and are bundled here for convenience. Re-run the generator if TQEC is updated:

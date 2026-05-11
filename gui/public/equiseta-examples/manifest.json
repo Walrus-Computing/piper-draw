@@ -1,0 +1,51 @@
+{
+  "source": "https://github.com/Walrus-Computing/equiseta/pull/29",
+  "regenerate": "Run scripts/sync_equiseta_examples.py to refresh from the equiseta repo. See gui/public/equiseta-examples/README.md.",
+  "examples": [
+    {
+      "filename": "all_open.json",
+      "name": "All open",
+      "description": "Every face OPEN. Minimal connector cube."
+    },
+    {
+      "filename": "all_red.json",
+      "name": "All red",
+      "description": "Every face RED."
+    },
+    {
+      "filename": "all_blue.json",
+      "name": "All blue",
+      "description": "Every face BLUE."
+    },
+    {
+      "filename": "zxx_memory.json",
+      "name": "ZXX memory",
+      "description": "RED top/bottom, BLUE sides. Surface-code memory cube (Z time-boundary, X space-boundary)."
+    },
+    {
+      "filename": "xzz_memory.json",
+      "name": "XZZ memory",
+      "description": "BLUE top/bottom, RED sides. Opposite-basis memory cube."
+    },
+    {
+      "filename": "hadamard_top.json",
+      "name": "Hadamard top",
+      "description": "RED bottom and sides, HADAMARD on top."
+    },
+    {
+      "filename": "port_io.json",
+      "name": "Port I/O",
+      "description": "RED sides, PORT top and bottom."
+    },
+    {
+      "filename": "y_defect_ridges.json",
+      "name": "Y defect ridges",
+      "description": "ZXX faces with K_SOUTH_WEST=true, K_SOUTH_EAST=false. Demonstrates all three is_y_defect states."
+    },
+    {
+      "filename": "two_cubes.json",
+      "name": "Two cubes",
+      "description": "Two BLUE cubes sharing one OPEN face along the i-axis."
+    }
+  ]
+}
