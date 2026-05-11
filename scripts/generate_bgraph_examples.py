@@ -80,9 +80,7 @@ def main() -> None:
         bgraph_str = write_bgraph(graph)
         filename = f"{slug}.bgraph"
         (out_dir / filename).write_text(bgraph_str)
-        manifest.append(
-            {"name": display_name, "description": description, "filename": filename}
-        )
+        manifest.append({"name": display_name, "description": description, "filename": filename})
         print(f"wrote {filename} ({len(bgraph_str)} bytes)")
 
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

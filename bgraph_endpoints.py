@@ -157,9 +157,18 @@ def _pipe_endpoints(pos: list[float]) -> tuple[tuple[int, int, int], tuple[int, 
 # warm-up just by importing the router into tests).
 CUBE_TYPES = {"XZZ", "ZXZ", "ZXX", "XXZ", "ZZX", "XZX", "Y"}
 PIPE_TYPES = {
-    "OZX", "OXZ", "OZXH", "OXZH",
-    "ZOX", "XOZ", "ZOXH", "XOZH",
-    "ZXO", "XZO", "ZXOH", "XZOH",
+    "OZX",
+    "OXZ",
+    "OZXH",
+    "OXZH",
+    "ZOX",
+    "XOZ",
+    "ZOXH",
+    "XOZH",
+    "ZXO",
+    "XZO",
+    "ZXOH",
+    "XZOH",
 }
 
 
@@ -265,13 +274,9 @@ def _graph_dict_to_blocks(graph_dict: dict) -> tuple[list[BlockOutput], list[Por
         cube_positions.add(pos_tuple)
         kind = cube["kind"]
         if kind == "PORT":
-            port_labels.append(
-                PortLabelOut(pos=_tqec_to_piper_pos(pos_tuple), label=cube["label"])
-            )
+            port_labels.append(PortLabelOut(pos=_tqec_to_piper_pos(pos_tuple), label=cube["label"]))
         else:
-            out_blocks.append(
-                BlockOutput(pos=_tqec_to_piper_pos(pos_tuple), type=kind)
-            )
+            out_blocks.append(BlockOutput(pos=_tqec_to_piper_pos(pos_tuple), type=kind))
 
     for pipe in graph_dict["pipes"]:
         u_tqec = tuple(pipe["u"])

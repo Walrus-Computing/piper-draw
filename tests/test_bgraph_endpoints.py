@@ -48,22 +48,14 @@ class TestBgraphExport:
 
     def test_single_cube_succeeds(self):
         # One ZXZ cube at piper-draw (0,0,0)
-        resp = _run(
-            bgraph_export(
-                BgraphExportRequest(blocks=[_block([0, 0, 0], "ZXZ")])
-            )
-        )
+        resp = _run(bgraph_export(BgraphExportRequest(blocks=[_block([0, 0, 0], "ZXZ")])))
         assert resp.bgraph.startswith("BLOCKGRAPH 0.1.0;")
         assert "ZXZ" in resp.bgraph
 
     def test_metadata_source_is_piper_draw(self):
         # TQEC's write_bgraph emits `source; TQEC.`; we rewrite it on export
         # so the file honestly identifies the producer.
-        resp = _run(
-            bgraph_export(
-                BgraphExportRequest(blocks=[_block([0, 0, 0], "ZXZ")])
-            )
-        )
+        resp = _run(bgraph_export(BgraphExportRequest(blocks=[_block([0, 0, 0], "ZXZ")])))
         assert "source; piper-draw;" in resp.bgraph
         assert "source; TQEC." not in resp.bgraph
 
@@ -81,11 +73,7 @@ class TestBgraphExport:
 
     def test_metadata_circuit_name_default_when_unset(self):
         # Empty/missing scene_name falls back to "piper-draw scene".
-        resp = _run(
-            bgraph_export(
-                BgraphExportRequest(blocks=[_block([0, 0, 0], "ZXZ")])
-            )
-        )
+        resp = _run(bgraph_export(BgraphExportRequest(blocks=[_block([0, 0, 0], "ZXZ")])))
         assert "circuit_name; piper-draw scene;" in resp.bgraph
 
     def test_strict_validation_rejects_invalid_graph(self):
@@ -241,9 +229,7 @@ class TestBgraphImport:
         assert resp.mode == "load"
 
     def test_mode_insert_passes_through(self):
-        resp = _run(
-            bgraph_import(BgraphImportRequest(bgraph=_MINIMAL_BGRAPH, mode="insert"))
-        )
+        resp = _run(bgraph_import(BgraphImportRequest(bgraph=_MINIMAL_BGRAPH, mode="insert")))
         assert resp.mode == "insert"
 
     def test_empty_bgraph_rejected(self):
@@ -344,9 +330,7 @@ class TestCoordConversionParity:
         from server import _tqec_to_piper_pos as server_tp
 
         for tqec_pos in [(0, 0, 0), (1, 2, 3), (-1, -2, 0)]:
-            assert server_tp(tqec_pos) == bgraph_tp(tqec_pos), (
-                f"divergence at {tqec_pos}"
-            )
+            assert server_tp(tqec_pos) == bgraph_tp(tqec_pos), f"divergence at {tqec_pos}"
 
     def test_pipe_endpoints_matches_server(self):
         from bgraph_endpoints import _pipe_endpoints as bgraph_pe

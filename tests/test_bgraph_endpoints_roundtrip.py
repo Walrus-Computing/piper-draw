@@ -75,11 +75,7 @@ class TestRoundTrip:
         original_blocks = [_block([0, 0, 0], "ZXZ"), _block([1, 0, 0], "OXZ")]
         original_labels = [_port_label([3, 0, 0], "out_0")]
         exp = _run(
-            bgraph_export(
-                BgraphExportRequest(
-                    blocks=original_blocks, port_labels=original_labels
-                )
-            )
+            bgraph_export(BgraphExportRequest(blocks=original_blocks, port_labels=original_labels))
         )
         imp = _run(bgraph_import(BgraphImportRequest(bgraph=exp.bgraph)))
         # Cube + pipe should round-trip exactly.
@@ -97,24 +93,20 @@ class TestRoundTrip:
         # Layout: chain of three ZXCubes connected by x-axis pipes, with
         # open pipes at both ends terminating in labeled ports.
         original_blocks = [
-            _block([0, 0, 0], "ZXZ"),    # cube A
-            _block([3, 0, 0], "ZXZ"),    # cube B
-            _block([6, 0, 0], "ZXZ"),    # cube C
-            _block([1, 0, 0], "OXZ"),    # pipe A↔B (open x, y=X, z=Z — matches ZXZ)
-            _block([4, 0, 0], "OXZ"),    # pipe B↔C
-            _block([-2, 0, 0], "OXZ"),   # open pipe left of A → port_left
-            _block([7, 0, 0], "OXZ"),    # open pipe right of C → port_right
+            _block([0, 0, 0], "ZXZ"),  # cube A
+            _block([3, 0, 0], "ZXZ"),  # cube B
+            _block([6, 0, 0], "ZXZ"),  # cube C
+            _block([1, 0, 0], "OXZ"),  # pipe A↔B (open x, y=X, z=Z — matches ZXZ)
+            _block([4, 0, 0], "OXZ"),  # pipe B↔C
+            _block([-2, 0, 0], "OXZ"),  # open pipe left of A → port_left
+            _block([7, 0, 0], "OXZ"),  # open pipe right of C → port_right
         ]
         original_labels = [
             _port_label([-3, 0, 0], "port_left"),
             _port_label([9, 0, 0], "port_right"),
         ]
         exp = _run(
-            bgraph_export(
-                BgraphExportRequest(
-                    blocks=original_blocks, port_labels=original_labels
-                )
-            )
+            bgraph_export(BgraphExportRequest(blocks=original_blocks, port_labels=original_labels))
         )
         imp = _run(bgraph_import(BgraphImportRequest(bgraph=exp.bgraph)))
         assert _block_set(imp.blocks) == _block_set(original_blocks), (
@@ -136,11 +128,7 @@ class TestRoundTrip:
         original_labels: list[PortLabelInputLocal] = []
         # First round-trip
         b1 = _run(
-            bgraph_export(
-                BgraphExportRequest(
-                    blocks=original_blocks, port_labels=original_labels
-                )
-            )
+            bgraph_export(BgraphExportRequest(blocks=original_blocks, port_labels=original_labels))
         ).bgraph
         i1 = _run(bgraph_import(BgraphImportRequest(bgraph=b1)))
         # Re-export the imported scene
@@ -170,6 +158,7 @@ class TestCoordSwapParity:
 
         # Build the equivalent graph via TQEC's own API.
         from tqec.utils.position import Position3D
+
         g = BlockGraph()
         g.add_cube(Position3D(0, 0, 0), "ZXZ")
         tqec_bgraph = write_bgraph(g)
@@ -200,14 +189,11 @@ class TestCoordSwapParity:
         original_blocks = [_block([0, 0, 0], "ZXZ"), _block([1, 0, 0], "OXZ")]
         original_labels = [_port_label([3, 0, 0], "out")]
         exp = _run(
-            bgraph_export(
-                BgraphExportRequest(
-                    blocks=original_blocks, port_labels=original_labels
-                )
-            )
+            bgraph_export(BgraphExportRequest(blocks=original_blocks, port_labels=original_labels))
         )
 
         from tqec.utils.position import Position3D
+
         g = BlockGraph()
         g.add_cube(Position3D(0, 0, 0), "ZXZ")
         g.add_cube(Position3D(1, 0, 0), "PORT", label="out")
@@ -288,10 +274,7 @@ def _gallery_examples_as_blocks() -> list[_GalleryRow]:
         except Exception:
             continue
         blocks_in = [BlockInputLocal(pos=list(b.pos), type=b.type) for b in imp.blocks]
-        port_labels = [
-            PortLabelInputLocal(pos=list(p.pos), label=p.label)
-            for p in imp.port_labels
-        ]
+        port_labels = [PortLabelInputLocal(pos=list(p.pos), label=p.label) for p in imp.port_labels]
         out.append((name, blocks_in, port_labels))
     return out
 
@@ -324,11 +307,7 @@ class TestEndToEndTQECCompat:
             _port_label([-3, 0, 0], "port_left"),
             _port_label([9, 0, 0], "port_right"),
         ]
-        exp = _run(
-            bgraph_export(
-                BgraphExportRequest(blocks=blocks, port_labels=labels)
-            )
-        )
+        exp = _run(bgraph_export(BgraphExportRequest(blocks=blocks, port_labels=labels)))
         graph = BlockGraph.from_bgraph(exp.bgraph)
         graph.validate()
         # Sanity: same logical block count as we sent in.
@@ -336,17 +315,11 @@ class TestEndToEndTQECCompat:
         assert len(graph.pipes) >= 4
 
     @pytest.mark.parametrize("name,blocks,labels", _gallery_examples_as_blocks())
-    def test_gallery_example_export_validates_via_tqec(
-        self, name: str, blocks: list, labels: list
-    ):
+    def test_gallery_example_export_validates_via_tqec(self, name: str, blocks: list, labels: list):
         """For every bundled gallery example: re-export through piper-draw,
         re-parse via TQEC's from_bgraph, then call graph.validate(). All
         examples are real TQEC research graphs, so a failure here means
         piper-draw's export pipeline corrupted a known-good graph."""
-        exp = _run(
-            bgraph_export(
-                BgraphExportRequest(blocks=blocks, port_labels=labels)
-            )
-        )
+        exp = _run(bgraph_export(BgraphExportRequest(blocks=blocks, port_labels=labels)))
         graph = BlockGraph.from_bgraph(exp.bgraph)
         graph.validate()
