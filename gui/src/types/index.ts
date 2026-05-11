@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { applyCubeSeedCascade, resolveAcrossPortPipes } from "../utils/pipeAcrossPortRetype";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1034,7 +1035,7 @@ export function hasBlockOverlap(pos: Position3D, type: BlockType, blocks: Map<st
  * higher position = tail in TQEC). `swapped` = true means this end sees the
  * swapped colors.
  */
-function pipeEndBasis(base: string, hadamard: boolean, openAxis: number, axis: number, swapped: boolean): string {
+export function pipeEndBasis(base: string, hadamard: boolean, openAxis: number, axis: number, swapped: boolean): string {
   if (!hadamard || !swapped) return base[axis];
   // Swap: return the other closed axis's character
   const closedAxes = [0, 1, 2].filter(a => a !== openAxis);
@@ -1376,7 +1377,7 @@ class BlocksOverlay implements BlocksLookup {
  * other end). Naive `inferPipeType(T, axis) + maybeH` is wrong for far-end
  * with H because the chars need to be swapped first.
  */
-function pipeRetypeCandidates(
+export function pipeRetypeCandidates(
   cubePos: Position3D,
   cubeKey: string,
   T: CubeType,
@@ -1780,10 +1781,18 @@ export function validatePipePlacement(
     replaces.push({ key: ep.key, oldBlock: ep.existing, newBlock: newCubeBlock });
   }
 
+  // Step 1.5: across-port pipe retypes. Reconciles ports where the new pipe
+  // shares an endpoint with an existing pipe whose basis is incompatible.
+  // Reuses overrides accumulated from Step 1 so cube retypes and across-port
+  // retypes are jointly consistent. See `resolveAcrossPortPipes` for details.
+  const portResult = resolveAcrossPortPipes({ pipePos, pipeType, blocks, overrides });
+  if (!portResult.ok) return { ok: false, reason: portResult.reason };
+  for (const e of portResult.pipeRetypes) replaces.push(e);
+
   // Step 2 (D4): for each cube retype, derive the Hadamard toggles it forces
   // on neighbour pipes via the existing `computePipeRetypes` helper. Same
   // logic that `cycleBlock` and `cycleSelectedType` use for R-key cycling.
-  const cubeRetypes = replaces.slice();
+  const cubeRetypes = replaces.filter((r) => !isPipeType(r.newBlock.type));
   const seenPipeKeys = new Set<string>();
   for (const replace of cubeRetypes) {
     const cubePos = replace.newBlock.pos;
@@ -1804,14 +1813,25 @@ export function validatePipePlacement(
     }
   }
 
+  // Step 2b: cascade far-cube retypes triggered by Step 1.5's pipe retypes.
+  // Reuses the same canonical-pick + computePipeRetypes flow on the seed cubes.
+  if (portResult.extraCubeSeeds.length > 0) {
+    const cascade = applyCubeSeedCascade(
+      portResult.extraCubeSeeds, blocks, overrides, replaces, pipeKey, seenPipeKeys,
+    );
+    if (!cascade.ok) return { ok: false, reason: cascade.reason };
+  }
+
   // Step 3 (D2 sanity-check): apply all proposed replacements and re-run
   // hasPipeColorConflict against the new pipe and every pipe attached to a
-  // retyped cube. If anything still conflicts, reject.
+  // retyped cube. Includes Step 1's endpoint cube retypes AND Step 2b's
+  // cascade-added cubes (re-snapshot from `replaces` to catch both).
   const finalOverlay = withOverride(overrides);
   if (hasPipeColorConflict(pipeType, pipePos, finalOverlay)) {
     return { ok: false, reason: "Retype does not resolve the color conflict" };
   }
-  for (const replace of cubeRetypes) {
+  const allCubeRetypes = replaces.filter((r) => !isPipeType(r.newBlock.type));
+  for (const replace of allCubeRetypes) {
     const cubePos = replace.newBlock.pos;
     const cubeCoords: [number, number, number] = [cubePos.x, cubePos.y, cubePos.z];
     for (let axis = 0; axis < 3; axis++) {

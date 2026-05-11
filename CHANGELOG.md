@@ -69,6 +69,21 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
   examples — same scenes, different format, same `tqec.gallery` source. Use
   `Browse examples…` instead; the bgraph gallery includes those five plus
   memory and stability.
+## [0.2.2.0] - 2026-05-08
+
+### Fixed
+- Pipe types now reconcile across a shared port. Drag-placing a pipe whose
+  endpoint lands at a port already shared with another pipe no longer
+  silently fails: when the two pipes' bases at the port are incompatible,
+  the existing pipe auto-retypes (Hadamard toggle or variant swap) so the
+  port can promote to a canonical cube. Same fix applies to the keyboard
+  build path (W/A/S/D extending into a port with attached pipes) and to the
+  R-key cube cycle (when retyping a cube would invalidate a pipe across a
+  port). When no chain of retypes can resolve the conflict, the placement
+  is rejected and the existing red-ghost UX surfaces the reason. Far cubes
+  invalidated by a pipe retype cascade automatically. Undo/redo reverts
+  the entire chain (anchor + pipe retypes + cascaded cubes) atomically.
+  Issue #307.
 
 ## [0.2.1.4] - 2026-05-07
 
