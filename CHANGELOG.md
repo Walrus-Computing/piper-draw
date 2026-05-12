@@ -6,6 +6,22 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.6.1.0] - 2026-05-12
+
+### Added
+- **One-click view for Equiseta JSON.** Clicking an example in the `Equiseta ▾` dropdown (or drag-dropping / file-picking any JSON) now auto-imports into the scene — the preview panel still opens, but no extra "Import" click is needed to see the diagram. Valid fixtures (e.g. `zxx_memory.json`, `port_io.json`, `y_defect_ridges.json`) render in one click.
+- **Enable Free Build button inside the validation toast.** When an auto-imported scene fails TQEC validation, the existing `ValidationToast` now shows a red solid-fill "Enable Free Build" button as the primary action. One click and you're viewing the invalid scene without warnings. The button only appears when Free Build is OFF — no no-op affordance.
+
+### Changed
+- **Server-down distinguished from semantic-invalid.** When `/api/validate` is unreachable or returns a non-2xx response, the validation toast now renders in the amber/error variant with the "Verification server not available" message — distinct from the red "scene fails TQEC rules" variant. The `ValidationResult` schema gained an optional `transportError` discriminator (`gui/src/utils/validate.ts`) and `validationStore` sets `status: "error"` for transport failures instead of conflating them with semantic-invalid. Replaces a fragile substring-match in `ValidationToast.tsx`.
+- **Validation runs automatically after import.** `runEquisetaImport` (replace mode) now fires `useValidationStore.validate()` so the toast appears immediately for invalid scenes. The existing `requestVersion` token in `validationStore` discards stale results when imports race, so rapid fixture-clicks always reflect the latest scene.
+
+### Fixed
+- **Stale-scene race on rapid fixture clicks.** If a slow fixture's fetch resolved after a faster fixture had already loaded, the slow one used to silently overwrite the new scene. `loadEquisetaFixture` / `loadEquisetaText` now re-check `equisetaJsonStore.loadToken` before calling `runEquisetaImport`, so late arrivals are dropped instead of clobbering the active scene.
+
+### Known limitations
+- Fixtures whose nodes have all-blue (`ZZZ`) or all-red (`XXX`) face patterns (`all_blue.json`, `all_red.json`, `hadamard_top.json`, `blue_pair_east_west.json`, `red_pair_east_west.json`) are still rejected by the importer with an "unsupported pattern" toast — they never reach the scene. The autovalidate + Free Build flow can't help these because the importer never produces blocks. Rendering single-colour fixtures requires extending `CUBE_TYPES` or adding a decorative-block path; tracked separately in TODOS.
+
 ## [0.6.0.0] - 2026-05-12
 
 ### Added
