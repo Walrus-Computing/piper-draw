@@ -7,10 +7,10 @@ plus the branch's eng-review test plan. Decided during /plan-ceo-review +
 /plan-eng-review and explicitly deferred to keep the v0.4 single-node import
 PR focused.
 
-- **Multi-node import + edge translation** (P2, M, CC ~1 hr) — lift the
-  D6 single-node guard; map `edges[]` to pipes; resolve same-cube
-  ambiguities. Unlocks `two_cubes.json` and any future multi-node
-  Equiseta output. Trigger: v0.5 milestone.
+- ~~**Multi-node import + edge translation**~~ — **Completed in v0.5.0.0
+  (2026-05-12).** `equisetaImport.ts` handles multi-cube graphs; edges map
+  to pipes via the seam-axis + perpendicular-basis convention in
+  `equisetaEdgeToPipe.ts`. 8 new bundled fixtures added.
 - **Export (Blocks → FTQCGraph JSON)** (P2, L, CC ~2 hr) — the inverse
   of the v0.4 translator; needed for full TQEC retirement. Depends on
   the convention table being authoritative (locked in eng-review).
@@ -51,16 +51,14 @@ Source: `~/.claude/plans/system-instruction-you-are-working-twinkling-duckling.m
 plus the /autoplan dual-voice review. Decided during /autoplan SELECTIVE EXPANSION
 and final approval gate, explicitly held out of the v0.6.1.0 ship.
 
-- **Render single-colour fixtures (`all_blue.json`, `all_red.json`, `hadamard_top.json`,
-  `blue_pair_east_west.json`, `red_pair_east_west.json`)** (P2, M, CC ~1 hr) —
-  these fixtures fail the importer with "unsupported pattern ZZZ/XXX" before
-  `loadBlocks` runs, so the new auto-import + Free Build affordance can't
-  help them. Two paths to consider: (1) extend `CUBE_TYPES` with `ZZZ`/`XXX`
-  variants that render as solid all-blue / all-red cubes, or (2) emit a
-  decorative "free-build-only" block kind from `equisetaToBlocks` for these
-  patterns. Path (1) is purer but couples to the TQEC color invariant
-  elsewhere; path (2) reuses the slab/paint precedent. **Trigger:** user
-  feedback that they actually need to view single-colour fixtures.
+- ~~**Render single-colour fixtures (`all_blue.json`, `all_red.json`,
+  `hadamard_top.json`, `blue_pair_east_west.json`, `red_pair_east_west.json`)**~~
+  — **Completed in v0.7.0.0 (2026-05-12).** Approach B (Block.freeBuildOnly
+  flag) per /autoplan 2026-05-12. Translator now picks a deterministic
+  canonical fallback (`ZZZ → XZZ`, `XXX → ZXX`; pipes: `O.. → OZX`,
+  `.O. → ZOX`, `..O → ZXO`) and emits `freeBuildOnly: { reason, displayPattern }`
+  so the renderer overrides face materials. Also covers `zxx_time_evolution.json`
+  and `port_io_pair.json` (pipe-pattern fallback).
 - **Tri-state validation outcome (E1)** (P2, M) — distinguish
   "intentionally-non-TQEC fixture" from "user-error invalid scene" so the
   toast can use a third copy variant. v0.6.1.0 ships the
@@ -74,14 +72,16 @@ and final approval gate, explicitly held out of the v0.6.1.0 ship.
   CEO reviewer noted the deeper UX gap is "I can't remember what each fixture
   looks like." Render a small 64px scene preview alongside the manifest entries.
   Skipped because it requires offline-rendering each fixture at build time.
-- **ValidationToast a11y overhaul** (P2, S, CC ~30 min) — both /autoplan design
-  reviewers flagged the toast as critical-but-broken: no `role="status"`, no
-  `aria-live`, action elements are `<span>` not `<button>`, color-only signal.
-  Out of v0.6.1.0 scope but in the blast radius of any future toast work.
-- **ValidationToast responsive overhaul** (P3, S, CC ~30 min) — fixed
-  `maxWidth: 500px` + centered `transform: translateX(-50%)`. Brittle on
-  narrower viewports / split-pane usage. Same design-review surface as the
-  a11y overhaul.
+- ~~**ValidationToast a11y overhaul**~~ — **Completed in v0.7.0.0 (2026-05-12).**
+  Added `role="status"` + `aria-live="polite"` to all toast variants; converted
+  the clickable error message from `<span>` to `<button>`; added non-colour
+  icon prefix (⚠/ⓘ/✓) so colour-blind users see a distinct signal. Pulled
+  into the freeBuildOnly PR because the toast became the load-bearing v1
+  signal for view-only blocks per /autoplan 2026-05-12 design phase.
+- ~~**ValidationToast responsive overhaul**~~ — **Completed in v0.7.0.0
+  (2026-05-12).** Replaced fixed `maxWidth: 500px` with
+  `width: min(500px, 100vw - 32px)` so narrow viewports and split-pane no
+  longer clip the toast. Shipped alongside the a11y overhaul.
 - **AbortController on `validate()` fetch** (P3, S, CC ~20 min) — when rapid
   imports happen, the existing `requestVersion` token discards stale results
   on arrival but the in-flight fetches keep running and waste server work.
@@ -92,6 +92,52 @@ and final approval gate, explicitly held out of the v0.6.1.0 ship.
   `runEquisetaImport` wiring. Deferred because it couples `blockStore` to
   `validationStore` (`blockStore` is a CLAUDE.md hot file); revisit only if
   `.dae` import grows similar requirements.
+
+---
+
+## Deferred from /autoplan: View any FTQCGraph JSON via freeBuildOnly (2026-05-12)
+
+Source: `~/.gstack/projects/peter-janderks-piper-draw-raw/pderks-peter-janderks-import-any-json-free-mode-design-20260512-193150.md`
+plus the /autoplan dual-voice review. Decided during the autoplan SELECTIVE
+EXPANSION and final approval gate; held out of v0.7.0.0 to keep the PR
+right-sized.
+
+- **Distinct visual mark on `freeBuildOnly` blocks** (P3, S, CC ~45 min) —
+  corner badge / dashed outline / desaturation so view-only blocks visually
+  read apart from valid TQEC blocks even after the toast dismisses. v1 ships
+  the status pill + auto-Free-Build affordance instead. Trigger: user
+  feedback that the pill alone isn't strong enough.
+- **CI grep rule for bare `{pos, type}` Block construction** (P3, XS, CC ~15 min)
+  — D2 from the autoplan eng-review test plan. A pre-commit hook or ESLint
+  custom rule fails new bare `{pos, type}` constructions in `blockStore.ts`
+  / `types/index.ts`. The D1 property test (`blockStore.test.ts:freeBuildOnly`
+  suite) already catches the same regression class at test time; the grep
+  rule is the static-analysis polish. Trigger: another optional Block field
+  is added (each new field is a fresh spread-audit reason).
+- **Observability counters for fallback rate** (P3, XS, CC ~20 min) — Codex
+  flagged in the eng-review dual-voice. Track how often the
+  `pickCubeTypeWithFallback` / `resolvePipeTypeWithFallback` path fires in
+  production so silent fallbacks can be spotted before they become a
+  semantic divergence. Today the only path is fixture imports; if/when
+  arbitrary FTQCGraph JSON becomes a common user input, this metric tells
+  us when the fallback table needs extending.
+- **Renderer integration test for `displayPattern` override** (P3, S, CC ~45 min)
+  — E-suite from the test plan. Verifies a `freeBuildOnly` cube with
+  `displayPattern = "ZZZ"` actually shows 6 blue faces in the rendered scene.
+  Requires React Testing Library + Three.js geometry-inspection setup. Manual
+  verification covers v1; automated test is polish.
+- **StatusPill component test** (P3, XS, CC ~15 min) — G-suite. Asserts pill
+  is hidden when 0 freeBuildOnly blocks; shows correct singular/plural label
+  for 1+. Manual verification covers v1.
+- **Cycle-undo semantic for view-only cubes** (P3, S, CC ~30 min) — design doc
+  spec'd: "cycle clears `freeBuildOnly`; undo restores it". Today: cycle
+  preserves the field (spread `{...b, type: newType}`) so cycling a view-only
+  cube keeps the view-only marker on the new canonical type, which is
+  semantically wrong. Fix: explicitly drop `freeBuildOnly` on cycle forward;
+  store the dropped value in the cube-cycle undo command so undo can restore
+  it. Workaround today: re-import the source JSON to recover view-only state.
+  Trigger: user reports surprise that cycling a view-only cube doesn't
+  promote it to "real" canonical.
 
 ---
 
