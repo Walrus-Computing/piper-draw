@@ -125,6 +125,8 @@ function MenuButton({
         border: panelOpen ? "2px solid #4a9eff" : "2px solid #ccc",
         borderRadius: 4,
         background: panelOpen ? "#e8f0fe" : "#fff",
+        width: "100%",
+        whiteSpace: "nowrap",
       }}
     >
       Equiseta {open ? "▴" : "▾"}
@@ -322,7 +324,7 @@ export function EquisetaMenu() {
   };
 
   return (
-    <div ref={wrapRef} style={{ position: "relative", display: "inline-block" }}>
+    <div ref={wrapRef} style={{ position: "relative" }}>
       <MenuButton open={open} panelOpen={panelOpen} onToggle={toggle} />
       {open && (
         <DropdownPanel
