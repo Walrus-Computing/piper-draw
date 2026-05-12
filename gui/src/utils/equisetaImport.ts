@@ -16,7 +16,7 @@
  * are documented in `equisetaEdgeToPipe.ts`.
  */
 
-import type { Block, CubeType } from "../types";
+import { posKey, SLAB_TYPE, type Block, type CubeType, type Position3D } from "../types";
 import { type FaceColor, type FaceDirection, type FtqcGraph, type FtqcNode } from "./equisetaJsonSchema";
 import {
   diffAxis,
@@ -49,6 +49,8 @@ export interface ImportSuccess {
   portCount: number;
   /** Hadamard pipe satellites emitted from face=hadamard markers (non-seam faces). */
   hadamardCount: number;
+  /** Slabs auto-emitted for XY 2×2 cube clusters. */
+  slabCount: number;
   /**
    * Primary groupId — for single-component imports, the shared id of every
    * block. For multi-component (e.g., disconnected_pair) imports, the first
@@ -319,6 +321,31 @@ export function equisetaToBlocks(graph: FtqcGraph): ImportResult {
     pipeCount++;
   }
 
+  // JSON coords are on a 1-unit cube grid; piper-draw scales by 3. A 2×2 XY
+  // cluster anchored at (i,j,k) yields a slab at piper-draw (3i+1, 3j+1, 3k)
+  // — the pipe-slot gap between the four cubes. Lower-left-anchor check
+  // emits each cluster exactly once.
+  let slabCount = 0;
+  for (const node of graph.nodes) {
+    const [i, j, k] = node.coordinate;
+    if (
+      !nodeIndex.has(coordKey([i + 1, j, k])) ||
+      !nodeIndex.has(coordKey([i, j + 1, k])) ||
+      !nodeIndex.has(coordKey([i + 1, j + 1, k]))
+    ) {
+      continue;
+    }
+    const slabPos: Position3D = { x: 3 * i + 1, y: 3 * j + 1, z: 3 * k };
+    const slabK = posKey(slabPos);
+    if (acc.blocks.has(slabK)) continue;
+    acc.blocks.set(slabK, {
+      pos: slabPos,
+      type: SLAB_TYPE,
+      groupId: groupIdFor(coordKey(node.coordinate)),
+    });
+    slabCount++;
+  }
+
   return {
     ok: true,
     empty: false,
@@ -329,6 +356,7 @@ export function equisetaToBlocks(graph: FtqcGraph): ImportResult {
     pipeCount,
     portCount: acc.portCount,
     hadamardCount: acc.hadamardCount,
+    slabCount,
     groupId: acc.firstGroupId ?? newGroupId(),
   };
 }
@@ -367,6 +395,9 @@ export function summarizeSuccess(
     parts.push(
       `${result.hadamardCount} hadamard ${result.hadamardCount === 1 ? "pipe" : "pipes"}`,
     );
+  }
+  if (result.slabCount > 0) {
+    parts.push(`${result.slabCount} ${result.slabCount === 1 ? "slab" : "slabs"}`);
   }
   const body = parts.join(" + ");
   return filename ? `${verb} ${body} from ${filename}` : `${verb} ${body}`;
