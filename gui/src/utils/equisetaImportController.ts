@@ -11,6 +11,7 @@
  */
 
 import { useBlockStore } from "../stores/blockStore";
+import { useValidationStore } from "../stores/validationStore";
 import type { PortMeta } from "../types";
 import type { FtqcGraph } from "./equisetaJsonSchema";
 import {
@@ -55,6 +56,16 @@ export function runEquisetaImport(
       portPositions: result.portPositions,
     });
     toastBus.info.emit(summarizeSuccess(result, sourceLabel));
+    // Auto-trigger validation so ValidationToast appears immediately for the
+    // freshly-loaded scene. The block-change subscription in validationStore.ts
+    // (169-216) may have ALSO fired a validate() synchronously inside loadBlocks
+    // when prior status was "invalid" with overlapping error positions — both
+    // requests reach the server, but `requestVersion` (validationStore.ts:35) is
+    // bumped by each `validate()` call, so the later one wins and the earlier
+    // result is dropped on arrival. Accepting one redundant request on that rare
+    // path beats the stale-validation bug a status-loading guard would create
+    // when a fast B-import lands while A's validate is still in flight.
+    useValidationStore.getState().validate().catch(() => { /* future-proof */ });
     return;
   }
   // mode === "append" (Insert). insertBlocks doesn't carry ports in v1.
