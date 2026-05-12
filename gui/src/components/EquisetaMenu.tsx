@@ -17,7 +17,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useBlockStore } from "../stores/blockStore";
-import { fetchEquisetaManifest, type ManifestEntry } from "../utils/equisetaJsonLoad";
+import {
+  fetchEquisetaManifest,
+  type ManifestGroup,
+} from "../utils/equisetaJsonLoad";
 import {
   loadEquisetaFixture,
   loadEquisetaViaPicker,
@@ -25,7 +28,8 @@ import {
 
 // Filename list for the manifest-fetch-failure fallback. Names are
 // derived from the filename so the dropdown is usable even with no
-// descriptions.
+// descriptions. Kept flat (no grouping) since the failure path is already
+// a degraded experience — extra structure would just be noise.
 const FALLBACK_FILENAMES = [
   "all_open.json",
   "all_red.json",
@@ -35,7 +39,14 @@ const FALLBACK_FILENAMES = [
   "hadamard_top.json",
   "port_io.json",
   "y_defect_ridges.json",
-  "two_cubes.json",
+  "blue_pair_east_west.json",
+  "red_pair_east_west.json",
+  "zxx_memory_pair.json",
+  "xzz_memory_pair.json",
+  "zxx_time_evolution.json",
+  "hadamard_pipe.json",
+  "port_io_pair.json",
+  "disconnected_pair.json",
 ];
 
 function nameFromFilename(filename: string): string {
@@ -121,16 +132,50 @@ function MenuButton({
   );
 }
 
+const groupLabelStyle: React.CSSProperties = {
+  fontSize: 10,
+  color: "#888",
+  padding: "4px 12px 2px 18px",
+  fontWeight: "bold",
+  letterSpacing: "0.4px",
+};
+
+function GroupedExamples({
+  groups,
+  onPick,
+}: {
+  groups: ManifestGroup[];
+  onPick: (filename: string, displayName: string) => void;
+}) {
+  return (
+    <>
+      {groups.map((group, gi) => (
+        <div key={`${group.label}-${gi}`}>
+          {group.label !== "" && <div style={groupLabelStyle}>{group.label.toUpperCase()}</div>}
+          {group.examples.map((entry) => (
+            <DropdownItem
+              key={entry.filename}
+              label={entry.name}
+              description={entry.description}
+              onClick={() => onPick(entry.filename, entry.name)}
+            />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
 function ExamplesSection({
   manifestLoading,
   manifestError,
-  examples,
+  groups,
   onPick,
   onRetry,
 }: {
   manifestLoading: boolean;
   manifestError: string | null;
-  examples: ManifestEntry[] | null;
+  groups: ManifestGroup[] | null;
   onPick: (filename: string, displayName: string) => void;
   onRetry: () => void;
 }) {
@@ -161,19 +206,8 @@ function ExamplesSection({
       </>
     );
   }
-  if (examples) {
-    return (
-      <>
-        {examples.map((entry) => (
-          <DropdownItem
-            key={entry.filename}
-            label={entry.name}
-            description={entry.description}
-            onClick={() => onPick(entry.filename, entry.name)}
-          />
-        ))}
-      </>
-    );
+  if (groups) {
+    return <GroupedExamples groups={groups} onPick={onPick} />;
   }
   return null;
 }
@@ -181,14 +215,14 @@ function ExamplesSection({
 function DropdownPanel({
   manifestLoading,
   manifestError,
-  examples,
+  groups,
   onOpenPicker,
   onPick,
   onRetry,
 }: {
   manifestLoading: boolean;
   manifestError: string | null;
-  examples: ManifestEntry[] | null;
+  groups: ManifestGroup[] | null;
   onOpenPicker: () => void;
   onPick: (filename: string, displayName: string) => void;
   onRetry: () => void;
@@ -232,7 +266,7 @@ function DropdownPanel({
       <ExamplesSection
         manifestLoading={manifestLoading}
         manifestError={manifestError}
-        examples={examples}
+        groups={groups}
         onPick={onPick}
         onRetry={onRetry}
       />
@@ -242,7 +276,7 @@ function DropdownPanel({
 
 export function EquisetaMenu() {
   const [open, setOpen] = useState(false);
-  const [examples, setExamples] = useState<ManifestEntry[] | null>(null);
+  const [groups, setGroups] = useState<ManifestGroup[] | null>(null);
   const [manifestError, setManifestError] = useState<string | null>(null);
   const [manifestLoading, setManifestLoading] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -262,7 +296,7 @@ export function EquisetaMenu() {
     setManifestError(null);
     const r = await fetchEquisetaManifest();
     setManifestLoading(false);
-    if (r.ok) setExamples(r.examples);
+    if (r.ok) setGroups(r.groups);
     else {
       setManifestError(r.message);
       console.error("EquisetaMenu: manifest fetch failed:", r.message);
@@ -272,7 +306,7 @@ export function EquisetaMenu() {
   const toggle = async () => {
     const next = !open;
     setOpen(next);
-    if (next && examples === null && manifestError === null && !manifestLoading) {
+    if (next && groups === null && manifestError === null && !manifestLoading) {
       await fetchManifest();
     }
   };
@@ -294,7 +328,7 @@ export function EquisetaMenu() {
         <DropdownPanel
           manifestLoading={manifestLoading}
           manifestError={manifestError}
-          examples={examples}
+          groups={groups}
           onOpenPicker={onOpenPicker}
           onPick={onPick}
           onRetry={fetchManifest}

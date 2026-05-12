@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { parseFtqcGraph } from "./equisetaJsonSchema";
+import { canonicalizeEquisetaJson, parseFtqcGraph } from "./equisetaJsonSchema";
 
 const FIXTURES_DIR = join(process.cwd(), "public", "equiseta-examples");
 
-const FIXTURE_NAMES = [
+const SINGLE_CUBE_FIXTURES = [
   "all_open.json",
   "all_red.json",
   "all_blue.json",
@@ -14,10 +14,22 @@ const FIXTURE_NAMES = [
   "hadamard_top.json",
   "port_io.json",
   "y_defect_ridges.json",
-  "two_cubes.json",
 ];
 
-describe("parseFtqcGraph (happy path: 9 bundled fixtures)", () => {
+const TWO_CUBE_FIXTURES = [
+  "blue_pair_east_west.json",
+  "red_pair_east_west.json",
+  "zxx_memory_pair.json",
+  "xzz_memory_pair.json",
+  "zxx_time_evolution.json",
+  "hadamard_pipe.json",
+  "port_io_pair.json",
+  "disconnected_pair.json",
+];
+
+const FIXTURE_NAMES = [...SINGLE_CUBE_FIXTURES, ...TWO_CUBE_FIXTURES];
+
+describe("parseFtqcGraph (happy path: bundled fixtures)", () => {
   for (const name of FIXTURE_NAMES) {
     it(`accepts ${name}`, () => {
       const text = readFileSync(join(FIXTURES_DIR, name), "utf8");
@@ -30,7 +42,7 @@ describe("parseFtqcGraph (happy path: 9 bundled fixtures)", () => {
     });
   }
 
-  it("the bundled fixtures dir contains exactly the 9 expected files plus manifest.json + README.md", () => {
+  it("the bundled fixtures dir contains exactly the expected files plus manifest.json + README.md", () => {
     const all = readdirSync(FIXTURES_DIR).sort();
     expect(all).toEqual(
       [...FIXTURE_NAMES, "README.md", "manifest.json"].sort(),
@@ -151,6 +163,64 @@ describe("parseFtqcGraph (malformed inputs)", () => {
       expect(r.path).toBe("$.nodes[0].ridges.K_SOUTH_WEST");
       expect(r.expected).toBe("true | false | null");
     }
+  });
+});
+
+describe("canonicalizeEquisetaJson + upstream-format acceptance", () => {
+  it("drops the top-level `version` field", () => {
+    const r = canonicalizeEquisetaJson({ version: "0.0.0", nodes: [], edges: [] });
+    expect(r).toEqual({ nodes: [], edges: [] });
+  });
+
+  it("lowercases UPPERCASE face direction keys per node", () => {
+    const upper = {
+      nodes: [
+        {
+          coordinate: [0, 0, 0],
+          faces: {
+            TOP: "red", BOTTOM: "red", NORTH: "red",
+            SOUTH: "red", EAST: "red", WEST: "red",
+          },
+          ridges: stubRidges(),
+        },
+      ],
+      edges: [],
+    };
+    const r = canonicalizeEquisetaJson(upper) as {
+      nodes: { faces: Record<string, string> }[];
+    };
+    expect(Object.keys(r.nodes[0].faces).sort()).toEqual(
+      ["bottom", "east", "north", "south", "top", "west"],
+    );
+  });
+
+  it("is idempotent — running twice yields the same value", () => {
+    const once = canonicalizeEquisetaJson({ version: "1", nodes: [], edges: [] });
+    const twice = canonicalizeEquisetaJson(once);
+    expect(twice).toEqual(once);
+  });
+
+  it("parseFtqcGraph accepts raw upstream-style JSON (UPPERCASE + version)", () => {
+    const raw = {
+      version: "0.0.0",
+      nodes: [
+        {
+          coordinate: [0, 0, 0],
+          faces: {
+            BOTTOM: "blue", EAST: "open", NORTH: "blue",
+            SOUTH: "blue", TOP: "blue", WEST: "blue",
+          },
+          ridges: stubRidges(),
+        },
+      ],
+      edges: [],
+    };
+    const r = parseFtqcGraph(raw);
+    if (!r.ok) {
+      throw new Error(`expected ok, got ${r.path} ${r.expected} ${r.got}`);
+    }
+    expect(r.value.nodes[0].faces.bottom).toBe("blue");
+    expect(r.value.nodes[0].faces.east).toBe("open");
   });
 });
 

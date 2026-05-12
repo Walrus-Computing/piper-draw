@@ -9,6 +9,7 @@ import {
   type ImportSuccess,
 } from "./equisetaImport";
 import { parseFtqcGraph, type FaceColor, type FtqcGraph, type RidgeId } from "./equisetaJsonSchema";
+import { isValidBlockPos, isValidPipePos, isPipeType } from "../types";
 
 const FIXTURES_DIR = join(process.cwd(), "public", "equiseta-examples");
 
@@ -139,14 +140,17 @@ describe("equisetaToBlocks — bundled fixture rejections (D6, E2)", () => {
     expect(r).toEqual({ ok: false, reason: "unsupported-pattern", pattern: "XXX" });
   });
 
-  it("two_cubes.json → multi-node rejection (D6)", () => {
-    const r = equisetaToBlocks(loadFixture("two_cubes.json"));
-    if (r.ok) throw new Error("expected reject");
-    expect(r.reason).toBe("multi-node");
-    if (r.reason === "multi-node") {
-      expect(r.nodes).toBe(2);
-      expect(r.edges).toBe(1);
-    }
+  it("blue_pair_east_west.json (all-BLUE pair) → unsupported-pattern ZZZ on first cube", () => {
+    // Same degenerate case as the legacy single-cube `all_blue.json`: each
+    // cube in the pair resolves to ZZZ (not in CUBE_TYPES). Surfaces an
+    // unsupported-pattern toast — same precedent as `all_red.json`/`all_blue.json`.
+    const r = equisetaToBlocks(loadFixture("blue_pair_east_west.json"));
+    expect(r).toEqual({ ok: false, reason: "unsupported-pattern", pattern: "ZZZ" });
+  });
+
+  it("red_pair_east_west.json (all-RED pair) → unsupported-pattern XXX on first cube", () => {
+    const r = equisetaToBlocks(loadFixture("red_pair_east_west.json"));
+    expect(r).toEqual({ ok: false, reason: "unsupported-pattern", pattern: "XXX" });
   });
 });
 
@@ -160,9 +164,18 @@ describe("equisetaToBlocks — synthetic edge cases", () => {
     expect(r).toEqual({ ok: true, empty: true });
   });
 
-  it("1 node + 1 synthetic edge → multi-node rejection", () => {
+  it("1 node + 1 synthetic edge with dangling endpoint → edge-dangling", () => {
     const graph: FtqcGraph = {
-      nodes: [buildNode({})],
+      nodes: [
+        buildNode({
+          east: "open",
+          west: "blue",
+          north: "blue",
+          south: "blue",
+          top: "red",
+          bottom: "red",
+        }),
+      ],
       edges: [
         [
           [0, 0, 0],
@@ -172,10 +185,9 @@ describe("equisetaToBlocks — synthetic edge cases", () => {
     };
     const r = equisetaToBlocks(graph);
     if (r.ok) throw new Error("expected reject");
-    expect(r.reason).toBe("multi-node");
-    if (r.reason === "multi-node") {
-      expect(r.nodes).toBe(1);
-      expect(r.edges).toBe(1);
+    expect(r.reason).toBe("edge-dangling");
+    if (r.reason === "edge-dangling") {
+      expect(r.endpoint).toEqual([1, 0, 0]);
     }
   });
 
@@ -294,6 +306,291 @@ describe("equisetaToBlocks — group + invariants", () => {
 // Suite 5: Toast summary helpers
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Suite 6: Two-cube fixtures (v0.5)
+// ---------------------------------------------------------------------------
+
+describe("equisetaToBlocks — two-cube fixtures (v0.5)", () => {
+  it("zxx_memory_pair.json → 2 ZZX cubes + 1 OZX pipe", () => {
+    const r = equisetaToBlocks(loadFixture("zxx_memory_pair.json"));
+    assertSuccess(r);
+    expect(r.cubeCount).toBe(2);
+    expect(r.pipeCount).toBe(1);
+    expect(r.portCount).toBe(0);
+    expect(r.hadamardCount).toBe(0);
+    // 2 cubes + 1 pipe = 3 blocks
+    expect(r.blocks.size).toBe(3);
+    expect(r.blocks.get("0,0,0")?.type).toBe("ZZX");
+    expect(r.blocks.get("3,0,0")?.type).toBe("ZZX");
+    // Pipe between them at x=1.5 on X-axis
+    const pipeBlocks = [...r.blocks.values()].filter((b) => b.type === "OZX");
+    expect(pipeBlocks).toHaveLength(1);
+  });
+
+  it("xzz_memory_pair.json → 2 XXZ cubes + 1 pipe", () => {
+    const r = equisetaToBlocks(loadFixture("xzz_memory_pair.json"));
+    assertSuccess(r);
+    expect(r.cubeCount).toBe(2);
+    expect(r.pipeCount).toBe(1);
+    expect(r.blocks.get("0,0,0")?.type).toBe("XXZ");
+    expect(r.blocks.get("3,0,0")?.type).toBe("XXZ");
+  });
+
+  it("zxx_time_evolution.json → edge-no-pipe-type (ZZO not in PIPE_TYPES)", () => {
+    // Two ZZX cubes stacked on K (time). Open axis Z; pipe would be "ZZO"
+    // (cube perpendicular bases are Z,Z). piper-draw's PIPE_TYPES require
+    // mixed perpendicular bases (one Z, one X) — same-basis pipes aren't
+    // modeled in the surface-code semantics. Same root cause as blue_pair.
+    const r = equisetaToBlocks(loadFixture("zxx_time_evolution.json"));
+    if (r.ok) throw new Error("expected reject");
+    expect(r.reason).toBe("edge-no-pipe-type");
+    if (r.reason === "edge-no-pipe-type") {
+      expect(r.pattern).toBe("ZZO");
+    }
+  });
+
+  it("port_io_pair.json → edge-no-pipe-type (ZZO not in PIPE_TYPES)", () => {
+    // Same shape as zxx_time_evolution: ZZX cubes stacked on K with PORT
+    // on outer faces. The seam pipe would still be ZZO — unrepresentable.
+    // The OUTER port markers are correctly emitted on the non-seam Z faces;
+    // the import fails on the pipe step.
+    const r = equisetaToBlocks(loadFixture("port_io_pair.json"));
+    if (r.ok) throw new Error("expected reject");
+    expect(r.reason).toBe("edge-no-pipe-type");
+  });
+
+  it("hadamard_pipe.json → ZZX + XXZ cubes joined by OZXH (bases flip across H)", () => {
+    // A Hadamard pipe swaps X/Z bases along its axis, so the cubes on either
+    // side carry opposite bases on the perpendicular faces. Upstream fixture
+    // (equiseta f7a63ea): cube A is zxx_memory (ZZX), cube B is xzz_memory
+    // (XXZ). Y axis flips Z↔X, Z axis flips X↔Z. Pipe code uses cube A's
+    // bases (smaller-coord convention) → OZXH.
+    const r = equisetaToBlocks(loadFixture("hadamard_pipe.json"));
+    assertSuccess(r);
+    expect(r.cubeCount).toBe(2);
+    expect(r.pipeCount).toBe(1);
+    expect(r.blocks.get("0,0,0")?.type).toBe("ZZX");
+    expect(r.blocks.get("3,0,0")?.type).toBe("XXZ");
+    const pipeBlocks = [...r.blocks.values()].filter((b) => b.type === "OZXH");
+    expect(pipeBlocks).toHaveLength(1);
+  });
+
+  it("every successful two-cube fixture lands every block on a valid grid slot", () => {
+    // Sweep across the 4 representable two-cube fixtures and confirm both
+    // cubes (≡ 0 mod 3) and pipes (one axis ≡ 1 mod 3) are on slots the
+    // renderer accepts.
+    for (const name of [
+      "zxx_memory_pair.json",
+      "xzz_memory_pair.json",
+      "hadamard_pipe.json",
+      "disconnected_pair.json",
+    ]) {
+      const r = equisetaToBlocks(loadFixture(name));
+      assertSuccess(r);
+      for (const block of r.blocks.values()) {
+        const validSlot = isPipeType(block.type)
+          ? isValidPipePos(block.pos)
+          : isValidBlockPos(block.pos);
+        if (!validSlot) {
+          throw new Error(
+            `${name}: block at ${JSON.stringify(block.pos)} (type ${block.type}) is not on a valid grid slot`,
+          );
+        }
+      }
+    }
+  });
+
+  it("disconnected_pair.json → 2 cubes, 0 pipes, no satellites", () => {
+    const r = equisetaToBlocks(loadFixture("disconnected_pair.json"));
+    assertSuccess(r);
+    expect(r.cubeCount).toBe(2);
+    expect(r.pipeCount).toBe(0);
+    expect(r.portCount).toBe(0);
+    expect(r.hadamardCount).toBe(0);
+    expect(r.blocks.size).toBe(2);
+    expect(r.blocks.get("0,0,0")?.type).toBe("ZZX");
+    expect(r.blocks.get("9,0,0")?.type).toBe("ZZX");
+    // Two distinct groupIds (one per component).
+    const groupIds = new Set([...r.blocks.values()].map((b) => b.groupId));
+    expect(groupIds.size).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite 7: Edge-validation error paths
+// ---------------------------------------------------------------------------
+
+function blueWestOpenEastNode(coord: [number, number, number]) {
+  return buildNode(
+    {
+      east: "open",
+      west: "blue",
+      north: "blue",
+      south: "blue",
+      top: "red",
+      bottom: "red",
+    },
+    coord,
+  );
+}
+
+function blueEastOpenWestNode(coord: [number, number, number]) {
+  return buildNode(
+    {
+      east: "blue",
+      west: "open",
+      north: "blue",
+      south: "blue",
+      top: "red",
+      bottom: "red",
+    },
+    coord,
+  );
+}
+
+describe("equisetaToBlocks — edge validation errors", () => {
+  it("edge with non-adjacent endpoints (>1 step apart) → edge-non-adjacent", () => {
+    const graph: FtqcGraph = {
+      nodes: [blueWestOpenEastNode([0, 0, 0]), blueEastOpenWestNode([2, 0, 0])],
+      edges: [[[0, 0, 0], [2, 0, 0]]],
+    };
+    const r = equisetaToBlocks(graph);
+    if (r.ok) throw new Error("expected reject");
+    expect(r.reason).toBe("edge-non-adjacent");
+  });
+
+  it("edge differing on 2 axes → edge-non-adjacent", () => {
+    const graph: FtqcGraph = {
+      nodes: [blueWestOpenEastNode([0, 0, 0]), blueEastOpenWestNode([1, 1, 0])],
+      edges: [[[0, 0, 0], [1, 1, 0]]],
+    };
+    const r = equisetaToBlocks(graph);
+    if (r.ok) throw new Error("expected reject");
+    expect(r.reason).toBe("edge-non-adjacent");
+  });
+
+  it("edge with endpoint not in nodes[] → edge-dangling", () => {
+    const graph: FtqcGraph = {
+      nodes: [blueWestOpenEastNode([0, 0, 0])],
+      edges: [[[0, 0, 0], [1, 0, 0]]],
+    };
+    const r = equisetaToBlocks(graph);
+    if (r.ok) throw new Error("expected reject");
+    expect(r.reason).toBe("edge-dangling");
+    if (r.reason === "edge-dangling") {
+      expect(r.endpoint).toEqual([1, 0, 0]);
+    }
+  });
+
+  it("self-loop edge → edge-self-loop", () => {
+    const graph: FtqcGraph = {
+      nodes: [blueWestOpenEastNode([0, 0, 0])],
+      edges: [[[0, 0, 0], [0, 0, 0]]],
+    };
+    const r = equisetaToBlocks(graph);
+    if (r.ok) throw new Error("expected reject");
+    expect(r.reason).toBe("edge-self-loop");
+  });
+
+  it("duplicate edge (order-invariant) → edge-duplicate", () => {
+    const graph: FtqcGraph = {
+      nodes: [blueWestOpenEastNode([0, 0, 0]), blueEastOpenWestNode([1, 0, 0])],
+      edges: [
+        [[0, 0, 0], [1, 0, 0]],
+        [[1, 0, 0], [0, 0, 0]],
+      ],
+    };
+    const r = equisetaToBlocks(graph);
+    if (r.ok) throw new Error("expected reject");
+    expect(r.reason).toBe("edge-duplicate");
+  });
+
+  it("seam faces incompatible (open + blue) → edge-seam-incompatible", () => {
+    const graph: FtqcGraph = {
+      nodes: [
+        blueWestOpenEastNode([0, 0, 0]), // east = open
+        buildNode(
+          // west = blue (not open), east = blue
+          { east: "blue", west: "blue", north: "blue", south: "blue", top: "red", bottom: "red" },
+          [1, 0, 0],
+        ),
+      ],
+      edges: [[[0, 0, 0], [1, 0, 0]]],
+    };
+    const r = equisetaToBlocks(graph);
+    if (r.ok) throw new Error("expected reject");
+    expect(r.reason).toBe("edge-seam-incompatible");
+    if (r.reason === "edge-seam-incompatible") {
+      expect(r.facing.a).toBe("open");
+      expect(r.facing.b).toBe("blue");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite 8: Axis-permutation table + edge-order invariance
+// ---------------------------------------------------------------------------
+
+describe("equisetaToBlocks — axis-permutation table", () => {
+  // For each axis and each direction, construct an open-face pair of cubes
+  // and verify the resulting pipe sits at the expected midpoint. Run with
+  // both edge orderings to confirm invariance.
+  type AxisCase = {
+    name: string;
+    coordA: [number, number, number];
+    coordB: [number, number, number];
+    seamFaceA: "east" | "west" | "north" | "south" | "top" | "bottom";
+    seamFaceB: "east" | "west" | "north" | "south" | "top" | "bottom";
+    expectedPipePos: { x: number; y: number; z: number };
+  };
+
+  const baseFaces = {
+    east: "blue", west: "blue", north: "blue", south: "blue", top: "red", bottom: "red",
+  };
+
+  const cases: AxisCase[] = [
+    {
+      name: "X-axis (+i)",
+      coordA: [0, 0, 0], coordB: [1, 0, 0],
+      seamFaceA: "east", seamFaceB: "west",
+      expectedPipePos: { x: 1, y: 0, z: 0 },
+    },
+    {
+      name: "Y-axis (+j)",
+      coordA: [0, 0, 0], coordB: [0, 1, 0],
+      seamFaceA: "north", seamFaceB: "south",
+      expectedPipePos: { x: 0, y: 1, z: 0 },
+    },
+  ];
+
+  for (const c of cases) {
+    for (const [labelOrder, edge] of [
+      ["forward", [c.coordA, c.coordB]] as const,
+      ["reversed", [c.coordB, c.coordA]] as const,
+    ]) {
+      it(`${c.name} ${labelOrder} → pipe at expected midpoint`, () => {
+        const facesA = { ...baseFaces, [c.seamFaceA]: "open" } as Record<string, FaceColor>;
+        const facesB = { ...baseFaces, [c.seamFaceB]: "open" } as Record<string, FaceColor>;
+        const graph: FtqcGraph = {
+          nodes: [buildNode(facesA, c.coordA), buildNode(facesB, c.coordB)],
+          edges: [edge as unknown as FtqcGraph["edges"][number]],
+        };
+        const r = equisetaToBlocks(graph);
+        assertSuccess(r);
+        expect(r.cubeCount).toBe(2);
+        expect(r.pipeCount).toBe(1);
+        const pipeBlock = [...r.blocks.values()].find(
+          (b) => b.pos.x === c.expectedPipePos.x && b.pos.y === c.expectedPipePos.y && b.pos.z === c.expectedPipePos.z,
+        );
+        expect(pipeBlock).toBeTruthy();
+        // Guard: pipe must sit on a renderable pipe slot. Catches fractional
+        // / off-grid positions that would silently fail rendering.
+        if (pipeBlock) expect(isValidPipePos(pipeBlock.pos)).toBe(true);
+      });
+    }
+  }
+});
+
 describe("summarizeSuccess / summarizeError", () => {
   it("success toast: cube + 2 ports + filename", () => {
     const r = equisetaToBlocks(loadFixture("port_io.json"));
@@ -315,15 +612,6 @@ describe("summarizeSuccess / summarizeError", () => {
     expect(summarizeSuccess(r, "all_open.json")).toBe(
       "Imported 1 port marker (all-open) from all_open.json",
     );
-  });
-
-  it("error toast: multi-node (pluralizes correctly)", () => {
-    expect(
-      summarizeError({ ok: false, reason: "multi-node", nodes: 2, edges: 1 }),
-    ).toBe("Multi-node Equiseta import not yet supported (got 2 nodes, 1 edge)");
-    expect(
-      summarizeError({ ok: false, reason: "multi-node", nodes: 1, edges: 0 }),
-    ).toBe("Multi-node Equiseta import not yet supported (got 1 node, 0 edges)");
   });
 
   it("error toast: no-basis-info", () => {

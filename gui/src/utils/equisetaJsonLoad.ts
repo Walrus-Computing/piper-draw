@@ -93,8 +93,13 @@ export interface ManifestEntry {
   description: string;
 }
 
+export interface ManifestGroup {
+  label: string;
+  examples: ManifestEntry[];
+}
+
 export type FetchManifestResult =
-  | { ok: true; examples: ManifestEntry[] }
+  | { ok: true; groups: ManifestGroup[]; examples: ManifestEntry[] }
   | { ok: false; message: string };
 
 export async function fetchEquisetaManifest(
@@ -105,27 +110,67 @@ export async function fetchEquisetaManifest(
     const resp = await fetch(url);
     if (!resp.ok) return { ok: false, message: `HTTP ${resp.status}` };
     const json = await resp.json();
-    if (!isManifestShape(json)) {
+    const parsed = parseManifestShape(json);
+    if (parsed === null) {
       return { ok: false, message: "manifest.json shape unexpected" };
     }
-    return { ok: true, examples: json.examples };
+    return { ok: true, groups: parsed.groups, examples: parsed.examples };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : String(e) };
   }
 }
 
-function isManifestShape(value: unknown): value is { examples: ManifestEntry[] } {
+function isManifestEntry(value: unknown): value is ManifestEntry {
   if (value === null || typeof value !== "object") return false;
-  const v = value as { examples?: unknown };
-  if (!Array.isArray(v.examples)) return false;
-  return v.examples.every(
-    (e) =>
-      e !== null &&
-      typeof e === "object" &&
-      typeof (e as ManifestEntry).filename === "string" &&
-      typeof (e as ManifestEntry).name === "string" &&
-      typeof (e as ManifestEntry).description === "string",
+  const e = value as ManifestEntry;
+  return (
+    typeof e.filename === "string" &&
+    typeof e.name === "string" &&
+    typeof e.description === "string"
   );
+}
+
+/**
+ * Parse either the new grouped manifest shape (`groups: [{label, examples}]`)
+ * or the legacy flat shape (`examples: [...]`). Always returns both `groups`
+ * and a flat `examples` projection — flat consumers (fallback list, search)
+ * stay simple, structured consumers (the dropdown) get the labels.
+ */
+function parseManifestShape(
+  value: unknown,
+): { groups: ManifestGroup[]; examples: ManifestEntry[] } | null {
+  if (value === null || typeof value !== "object") return null;
+  const v = value as { examples?: unknown; groups?: unknown };
+
+  if (Array.isArray(v.groups)) {
+    const groups: ManifestGroup[] = [];
+    const flat: ManifestEntry[] = [];
+    for (const g of v.groups) {
+      if (g === null || typeof g !== "object") return null;
+      const gObj = g as { label?: unknown; examples?: unknown };
+      if (typeof gObj.label !== "string" || !Array.isArray(gObj.examples)) return null;
+      const items: ManifestEntry[] = [];
+      for (const e of gObj.examples) {
+        if (!isManifestEntry(e)) return null;
+        items.push(e);
+        flat.push(e);
+      }
+      groups.push({ label: gObj.label, examples: items });
+    }
+    return { groups, examples: flat };
+  }
+
+  if (Array.isArray(v.examples)) {
+    const flat: ManifestEntry[] = [];
+    for (const e of v.examples) {
+      if (!isManifestEntry(e)) return null;
+      flat.push(e);
+    }
+    // Legacy single-group: render unlabeled by collapsing to one group.
+    return { groups: [{ label: "", examples: flat }], examples: flat };
+  }
+
+  return null;
 }
 
 // -----------------------------------------------------------------------
