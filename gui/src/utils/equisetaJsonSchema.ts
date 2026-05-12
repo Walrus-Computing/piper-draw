@@ -13,6 +13,13 @@
  * Strict mode surfaces equiseta-side schema drift loudly. This is a viewer,
  * not a forgiving renderer. Source-of-truth schema lives in equiseta PR #29
  * (`equiseta/graphical_ir.py`).
+ *
+ * **Canonicalization (runtime, pre-strict):** upstream equiseta added a top-level
+ * `version` field and switched face direction keys to UPPERCASE somewhere
+ * between PR #29 and the `two-qubit-json-examples` branch. We canonicalize at
+ * parse entry (`canonicalizeEquisetaJson`) — drop `version`, lowercase the
+ * face keys — so strict validation still runs on a known shape and arbitrary
+ * fresh upstream JSON (drag-drop / file picker) loads without complaint.
  */
 
 export const FACE_DIRECTIONS = ["top", "bottom", "north", "south", "east", "west"] as const;
@@ -189,14 +196,57 @@ function isFail<T>(v: Failed | T): v is Failed {
 }
 
 /**
+ * Pre-strict canonicalization: drop the upstream `version` marker and lowercase
+ * face direction keys. Leaves every other shape (node-level keys, ridge keys,
+ * color values) untouched so the strict validator still catches real drift.
+ *
+ * Exported for unit testing. Idempotent — running it twice yields the same
+ * result.
+ */
+export function canonicalizeEquisetaJson(value: unknown): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const obj = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === "version") continue;
+    if (k === "nodes" && Array.isArray(v)) {
+      out.nodes = v.map((node) => canonicalizeNode(node));
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function canonicalizeNode(node: unknown): unknown {
+  if (node === null || typeof node !== "object" || Array.isArray(node)) {
+    return node;
+  }
+  const obj = node as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...obj };
+  if (obj.faces && typeof obj.faces === "object" && !Array.isArray(obj.faces)) {
+    const facesIn = obj.faces as Record<string, unknown>;
+    const facesOut: Record<string, unknown> = {};
+    for (const [fk, fv] of Object.entries(facesIn)) {
+      facesOut[fk.toLowerCase()] = fv;
+    }
+    out.faces = facesOut;
+  }
+  return out;
+}
+
+/**
  * Parse and validate an unknown JSON-like value as an Equiseta FTQCGraph.
  * Returns a Result object; never throws.
  */
 export function parseFtqcGraph(value: unknown): ParseResult {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return fail("$", "object", value);
+  const canonical = canonicalizeEquisetaJson(value);
+  if (canonical === null || typeof canonical !== "object" || Array.isArray(canonical)) {
+    return fail("$", "object", canonical);
   }
-  const obj = value as Record<string, unknown>;
+  const obj = canonical as Record<string, unknown>;
   if (!("nodes" in obj)) return fail("$.nodes", "present", "missing");
   if (!("edges" in obj)) return fail("$.edges", "present", "missing");
   for (const k of Object.keys(obj)) {

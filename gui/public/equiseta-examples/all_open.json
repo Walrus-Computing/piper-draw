@@ -1,4 +1,5 @@
 {
+  "version": "0.0.0",
   "nodes": [
     {
       "coordinate": [
@@ -7,12 +8,12 @@
         0
       ],
       "faces": {
-        "bottom": "open",
-        "east": "open",
-        "north": "open",
-        "south": "open",
-        "top": "open",
-        "west": "open"
+        "BOTTOM": "open",
+        "EAST": "open",
+        "NORTH": "open",
+        "SOUTH": "open",
+        "TOP": "open",
+        "WEST": "open"
       },
       "ridges": {
         "I_BOT_SOUTH": null,

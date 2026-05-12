@@ -9,7 +9,7 @@ inside the piper-draw GUI.
 These files are copied verbatim from the equiseta repo at:
 
 - Branch: `peter-janderks/ftqcgraph-to-json` (PR #29)
-- Source SHA: `b77aed151d92ca9b97f67bf7f6eddd22ada902fe`
+- Source SHA: `7fe129ce42684cd12340a50fd0721d7a7e0a9d13`
 
 ## Regenerating
 

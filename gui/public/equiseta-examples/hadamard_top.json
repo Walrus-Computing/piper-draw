@@ -1,4 +1,5 @@
 {
+  "version": "0.0.0",
   "nodes": [
     {
       "coordinate": [
@@ -7,12 +8,12 @@
         0
       ],
       "faces": {
-        "bottom": "red",
-        "east": "red",
-        "north": "red",
-        "south": "red",
-        "top": "hadamard",
-        "west": "red"
+        "BOTTOM": "red",
+        "EAST": "red",
+        "NORTH": "red",
+        "SOUTH": "red",
+        "TOP": "hadamard",
+        "WEST": "red"
       },
       "ridges": {
         "I_BOT_SOUTH": null,

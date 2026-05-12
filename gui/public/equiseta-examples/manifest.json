@@ -1,51 +1,96 @@
 {
-  "source": "https://github.com/Walrus-Computing/equiseta/pull/29",
+  "source": "https://github.com/Walrus-Computing/equiseta/tree/7fe129ce42684cd12340a50fd0721d7a7e0a9d13/examples",
   "regenerate": "Run scripts/sync_equiseta_examples.py to refresh from the equiseta repo. See gui/public/equiseta-examples/README.md.",
-  "examples": [
+  "groups": [
     {
-      "filename": "all_open.json",
-      "name": "All open",
-      "description": "Every face OPEN. Minimal connector cube."
+      "label": "Single cube",
+      "examples": [
+        {
+          "filename": "all_open.json",
+          "name": "All open",
+          "description": "Every face OPEN. Minimal connector cube."
+        },
+        {
+          "filename": "all_red.json",
+          "name": "All red",
+          "description": "Every face RED."
+        },
+        {
+          "filename": "all_blue.json",
+          "name": "All blue",
+          "description": "Every face BLUE."
+        },
+        {
+          "filename": "zxx_memory.json",
+          "name": "ZXX memory",
+          "description": "RED top/bottom, BLUE sides. Surface-code memory cube (Z time-boundary, X space-boundary)."
+        },
+        {
+          "filename": "xzz_memory.json",
+          "name": "XZZ memory",
+          "description": "BLUE top/bottom, RED sides. Opposite-basis memory cube."
+        },
+        {
+          "filename": "hadamard_top.json",
+          "name": "Hadamard top",
+          "description": "RED bottom and sides, HADAMARD on top."
+        },
+        {
+          "filename": "port_io.json",
+          "name": "Port I/O",
+          "description": "RED sides, PORT top and bottom."
+        },
+        {
+          "filename": "y_defect_ridges.json",
+          "name": "Y defect ridges",
+          "description": "ZXX faces with K_SOUTH_WEST=true, K_SOUTH_EAST=false. Demonstrates all three is_y_defect states."
+        }
+      ]
     },
     {
-      "filename": "all_red.json",
-      "name": "All red",
-      "description": "Every face RED."
-    },
-    {
-      "filename": "all_blue.json",
-      "name": "All blue",
-      "description": "Every face BLUE."
-    },
-    {
-      "filename": "zxx_memory.json",
-      "name": "ZXX memory",
-      "description": "RED top/bottom, BLUE sides. Surface-code memory cube (Z time-boundary, X space-boundary)."
-    },
-    {
-      "filename": "xzz_memory.json",
-      "name": "XZZ memory",
-      "description": "BLUE top/bottom, RED sides. Opposite-basis memory cube."
-    },
-    {
-      "filename": "hadamard_top.json",
-      "name": "Hadamard top",
-      "description": "RED bottom and sides, HADAMARD on top."
-    },
-    {
-      "filename": "port_io.json",
-      "name": "Port I/O",
-      "description": "RED sides, PORT top and bottom."
-    },
-    {
-      "filename": "y_defect_ridges.json",
-      "name": "Y defect ridges",
-      "description": "ZXX faces with K_SOUTH_WEST=true, K_SOUTH_EAST=false. Demonstrates all three is_y_defect states."
-    },
-    {
-      "filename": "two_cubes.json",
-      "name": "Two cubes",
-      "description": "Two BLUE cubes sharing one OPEN face along the i-axis."
+      "label": "Two cubes",
+      "examples": [
+        {
+          "filename": "blue_pair_east_west.json",
+          "name": "Blue pair (east-west)",
+          "description": "Two all-BLUE cubes joined east-west via OPEN. Degenerate (ZZZ) \u2014 surfaces an unsupported-pattern toast."
+        },
+        {
+          "filename": "red_pair_east_west.json",
+          "name": "Red pair (east-west)",
+          "description": "Two all-RED cubes joined east-west via OPEN. Degenerate (XXX) \u2014 surfaces an unsupported-pattern toast."
+        },
+        {
+          "filename": "zxx_memory_pair.json",
+          "name": "ZXX memory pair",
+          "description": "Two ZXX-memory cubes merged east-west via OPEN. Lattice-surgery merge along the X axis."
+        },
+        {
+          "filename": "xzz_memory_pair.json",
+          "name": "XZZ memory pair",
+          "description": "Two XZZ-memory cubes merged east-west via OPEN. Opposite-basis counterpart of zxx_memory_pair."
+        },
+        {
+          "filename": "zxx_time_evolution.json",
+          "name": "ZXX time evolution",
+          "description": "Two ZXX cubes stacked along K (time) sharing an OPEN face. piper-draw can't model the ZZO seam pipe \u2014 surfaces an unsupported-pipe toast."
+        },
+        {
+          "filename": "hadamard_pipe.json",
+          "name": "Hadamard pipe",
+          "description": "Two ZXX cubes joined east-west via a HADAMARD pipe (basis change between qubits)."
+        },
+        {
+          "filename": "port_io_pair.json",
+          "name": "Port I/O pair",
+          "description": "Two ZXX cubes stacked along K with PORT on outer faces. Same ZZO seam pipe limitation as zxx_time_evolution \u2014 surfaces an unsupported-pipe toast."
+        },
+        {
+          "filename": "disconnected_pair.json",
+          "name": "Disconnected pair",
+          "description": "Two ZXX cubes at non-adjacent coordinates \u2014 no edge, no pipe."
+        }
+      ]
     }
   ]
 }
