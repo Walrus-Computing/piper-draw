@@ -1521,6 +1521,73 @@ describe("blockStore", () => {
       expect(st.armedTool).toBe("cube");
       expect(st.cubeType).toBe("XZZ");
     });
+
+    it("includes the Y-twist pipe variants in the cycle when free-build is on", () => {
+      useBlockStore.setState({ freeBuild: true, armedTool: "pipe", pipeVariant: "XZH" });
+      // After XZH (last non-Y pipe), the next two cycles should land on ZXY then XZY.
+      useBlockStore.getState().cycleArmedType(1);
+      expect(useBlockStore.getState().pipeVariant).toBe("ZXY");
+      useBlockStore.getState().cycleArmedType(1);
+      expect(useBlockStore.getState().pipeVariant).toBe("XZY");
+    });
+
+    it("disarms a Y-twist variant when free-build is toggled off", () => {
+      useBlockStore.setState({ freeBuild: true, armedTool: "pipe", pipeVariant: "ZXY" });
+      useBlockStore.getState().toggleFreeBuild();
+      const st = useBlockStore.getState();
+      expect(st.freeBuild).toBe(false);
+      expect(st.armedTool).toBe("pointer");
+      expect(st.pipeVariant).toBe(null);
+    });
+  });
+
+  describe("Y-twist pipe placement", () => {
+    it("rejects placing a Y-twist pipe outside free-build", () => {
+      useBlockStore.setState({ freeBuild: false, armedTool: "pipe", pipeVariant: "ZXY" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.has("1,0,0")).toBe(false);
+    });
+
+    it("accepts a Y-twist pipe placement when free-build is on", () => {
+      useBlockStore.setState({ freeBuild: true, armedTool: "pipe", pipeVariant: "ZXY" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      const block = useBlockStore.getState().blocks.get("1,0,0");
+      expect(block?.type).toBe("OZXY");
+    });
+
+    it("cyclePipe (build-mode R-key) skips Y-twist variants outside free-build", () => {
+      // Cursor at an empty port, pipe to its right, second endpoint also empty.
+      // Both ends ambiguous → cyclePipe always runs; no neighbour cubes →
+      // every candidate passes validation. Without the freeBuild filter, the
+      // R-key cycle would land on a Y-twist variant.
+      useBlockStore.setState({
+        mode: "build",
+        buildCursor: { x: 0, y: 0, z: 0 },
+        freeBuild: false,
+        blocks: new Map([
+          ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ]),
+      });
+      for (let i = 0; i < 8; i++) {
+        useBlockStore.getState().cyclePipe();
+        const t = useBlockStore.getState().blocks.get("1,0,0")!.type;
+        expect(t.endsWith("Y")).toBe(false);
+      }
+    });
+
+    it("cyclePipe with explicit Y-twist target is rejected outside free-build", () => {
+      useBlockStore.setState({
+        mode: "build",
+        buildCursor: { x: 0, y: 0, z: 0 },
+        freeBuild: false,
+        blocks: new Map([
+          ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ]),
+      });
+      useBlockStore.getState().cyclePipe("ZXY");
+      // Type unchanged because ZXY isn't in the cycle when freeBuild is off.
+      expect(useBlockStore.getState().blocks.get("1,0,0")!.type).toBe("OZX");
+    });
   });
 
   describe("cycleSelectedType — freeBuild bypasses validation", () => {
@@ -2691,6 +2758,33 @@ describe("blockStore", () => {
       // Both groups must be intact after the no-op.
       expect(useBlockStore.getState().blocks.get("0,0,0")?.groupId).toBe(gA);
       expect(useBlockStore.getState().blocks.get("6,0,0")?.groupId).toBe(gB);
+    });
+  });
+
+  describe("paintFace — repaint", () => {
+    it("overwrites an existing cell color when paintFace is called twice on the same key", () => {
+      // Place a slab. Slabs need free-build mode and a 2x2 inner gap pos.
+      useBlockStore.setState({ freeBuild: true, armedTool: "slab", cubeType: "slab" });
+      const pos = { x: 1, y: 1, z: 0 };
+      const slab: Block = { pos, type: "slab" };
+      const blocks = new Map<string, Block>();
+      blocks.set("1,1,0", slab);
+      useBlockStore.setState({ blocks, spatialIndex: buildSpatialIndex(blocks) });
+
+      // First paint: cell q=4 (center top) → red.
+      useBlockStore.getState().paintFace(pos, "2:4", "#ff0000");
+      expect(useBlockStore.getState().blocks.get("1,1,0")?.faceColors).toEqual({ "2:4": "#ff0000" });
+
+      // Repaint same cell with a different color → blue must overwrite red.
+      useBlockStore.getState().paintFace(pos, "2:4", "#0000ff");
+      expect(useBlockStore.getState().blocks.get("1,1,0")?.faceColors).toEqual({ "2:4": "#0000ff" });
+
+      // Paint a second cell q=0 → both keys should coexist with their own colors.
+      useBlockStore.getState().paintFace(pos, "2:0", "#00ff00");
+      expect(useBlockStore.getState().blocks.get("1,1,0")?.faceColors).toEqual({
+        "2:4": "#0000ff",
+        "2:0": "#00ff00",
+      });
     });
   });
 });

@@ -6,6 +6,25 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.6.0.0] - 2026-05-12
+
+### Added
+- **Slab element** (free-build only). A fourth element kind alongside cubes, pipes, and ports — a free-build-only authoring affordance that fills the 2×2 interior of a square formed by four horizontal pipes on the XY plane. Renders as two solid grey horizontal plates flush with the top and bottom faces of the surrounding pipes. The Slab toolbar button only appears when free-build is on, and toggling free-build off auto-disarms the tool. Persists via scene snapshot; `.dae` export silently filters slabs out. Upstream PR #255.
+- **Y-twist pipes** (free-build only). Pipes can now carry a magenta Y-defect ring that replaces the Hadamard band, modelling a Y-basis twist. Authored via a free-build-only toolbar tool. Upstream PR #257.
+- **Free-build Paint tool.** Per-face colour overrides on cubes, pipes, and slabs — repaint individual faces without changing the underlying type. Toolbar tool appears under a new "Free-build" group when free-build is on. Upstream PR #258.
+- **Per-cell slab paint** (3×3). Each top/bottom plate of a slab splits into a 3×3 grid (9 cells per face) so each cell can be painted independently with the Paint tool.
+- **Per-strip pipe paint.** Every pipe face (plain, Hadamard, Y-twist) exposes three paintable strips along the open axis. Plain and Y-twist pipes use equal thirds for a fat click target; Hadamard keeps its thin yellow band.
+- **Paint tool reaches slab bottom face** when looking up at the model from below — `GridPlane` no longer swallows the click.
+- Documentation for the **Share link** feature (File ▾ menu) in the README and in-app help. Upstream PR #268.
+
+### Changed
+- Wrong-tool clicks on existing slabs now show a yellow banner explaining what to do ("Switch to the Paint tool to recolor an existing slab"), instead of silently failing. Slab tool armed but clicking a non-gap target shows a similar hint.
+- Hadamard→Y-twist auto-promote on band repaint now preserves the painted band override, since Y-twist faces also expose a paintable band strip.
+
+### Fixed
+- HMR cache invalidation: `blockInstancesShared` clears its geometry caches when the module hot-reloads, so dev sessions no longer see stale geometry after editing `types/index.ts`.
+- React Fast Refresh on `BlockInstances.tsx`: extracted the geometry-cache helpers into `blockInstancesShared.ts` so the component file is component-only. Saves now hot-swap state in place instead of triggering a full module reload.
+
 ## [0.5.0.0] - 2026-05-12
 
 ### Added

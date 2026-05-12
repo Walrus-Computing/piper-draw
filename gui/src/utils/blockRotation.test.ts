@@ -45,6 +45,12 @@ describe("rotateBlockKind — 90° Z rotation", () => {
     expect(rotateBlockKind("XOZH", ROT_Z_CCW)).toBe("OXZH");
   });
 
+  it("preserves the Y-twist suffix", () => {
+    expect(rotateBlockKind("OZXY", ROT_Z_CCW)).toBe("ZOXY");
+    expect(rotateBlockKind("XOZY", ROT_Z_CCW)).toBe("OXZY");
+    expect(rotateBlockKind("ZXOY", ROT_Z_CCW)).toBe("XZOY");
+  });
+
   it("leaves Y blocks unchanged (Z rotation is legal)", () => {
     expect(rotateBlockKind("Y", ROT_Z_CCW)).toBe("Y");
     expect(rotateBlockKind("Y", ROT_Z_CW)).toBe("Y");
@@ -126,6 +132,13 @@ describe("rotateBlockAroundZ", () => {
     const pipe: Block = { pos: { x: 1, y: 0, z: 0 }, type: "OZXH" };
     const rotated = rotateBlockAroundZ(pipe, origin, "cw");
     expect(rotated.type).toBe("XOZH");
+  });
+
+  it("flips Y-twist direction when a pipe rotates into a negative axis", () => {
+    // Same direction-canonicalisation as Hadamard, but for Y-twist pipes.
+    const pipe: Block = { pos: { x: 1, y: 0, z: 0 }, type: "OZXY" };
+    const rotated = rotateBlockAroundZ(pipe, origin, "cw");
+    expect(rotated.type).toBe("XOZY");
   });
 
   it("rotates around a non-origin pivot correctly", () => {

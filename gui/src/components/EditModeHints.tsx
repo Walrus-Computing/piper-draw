@@ -74,6 +74,11 @@ export function EditModeHints({ onCustomize }: { onCustomize: () => void }) {
         `Step in ${viewMode.axis.toUpperCase()} direction`,
       ]);
     }
+  } else if (armedTool === "paint") {
+    hints.push(
+      ["Click face", "Paint with selected color"],
+      [`Hold ${bindingToLabel(b.holdToDelete)}`, "Click-to-delete"],
+    );
   } else {
     const placeLabel =
       armedTool === "port" ? "Place port"

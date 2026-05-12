@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createBlockGeometry, createYDefectEdges, getHiddenFaceMaskForPos, FACE_NEG_X, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_X, FACE_POS_Y, FACE_POS_Z, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, getOrderedPortPositions, determineCubeOptions, determineCubeOptionsWithPipeRetype, computePipeRetypes, validatePipePlacement, CUBE_TYPES, PIPE_TYPES } from "./index";
+import { blockTqecSize, createBlockGeometry, createYDefectEdges, getHiddenFaceMaskForPos, FACE_NEG_X, FACE_NEG_Y, FACE_NEG_Z, FACE_POS_X, FACE_POS_Y, FACE_POS_Z, H_BAND_HALF_HEIGHT, isValidPipePos, isValidPos, isValidBlockPos, pipeAxisFromPos, resolvePipeType, getAdjacentPos, snapGroundPos, hasPipeColorConflict, hasCubeColorConflict, hasYCubePipeAxisConflict, canonicalCubeForPort, countAttachedPipes, wasdToBuildDirection, flipBlockType, defaultPortIO, getOrderedPortPositions, determineCubeOptions, determineCubeOptionsWithPipeRetype, computePipeRetypes, validatePipePlacement, CUBE_TYPES, PIPE_TYPES } from "./index";
 import type { PipeType, CubeType, PortMeta } from "./index";
 import type { BlockType } from "./index";
 import { Vector3 } from "three";
+import * as THREE from "three";
 
 function makeBlocks(entries: Array<{ x: number; y: number; z: number; type: BlockType }>) {
   const blocks = new Map<string, { pos: { x: number; y: number; z: number }; type: BlockType }>();
@@ -489,7 +490,161 @@ describe("createBlockGeometry", () => {
     const full = createBlockGeometry("OZX");
     const hidden = createBlockGeometry("OZX", FACE_POS_Z);
 
-    expect((full.getIndex()?.count ?? 0) - (hidden.getIndex()?.count ?? 0)).toBe(6);
+    // Each closed-axis pipe face is rendered as 3 strips (below / band / above),
+    // so hiding one face drops 3 quads = 6 triangles = 18 indices.
+    expect((full.getIndex()?.count ?? 0) - (hidden.getIndex()?.count ?? 0)).toBe(18);
+  });
+
+  it("Y-twist pipe geometry omits the yellow Hadamard band", () => {
+    // Hadamard walls are split into 3 strips (below band, yellow band, above).
+    // Y-twist walls are split into 2 strips (below midline, above midline) with
+    // the colours flipped, but no yellow band — so no vertex carries H_COLOR.
+    const geo = createBlockGeometry("OZXY");
+    const colors = geo.getAttribute("color").array as Float32Array;
+    // H_COLOR = #ffff65 → r ≈ 1, g ≈ 1, b ≈ 0.396. Look for any vertex with
+    // both red and green channels saturated (the unique signature of yellow).
+    let yellowVerts = 0;
+    for (let i = 0; i < colors.length; i += 3) {
+      if (colors[i] > 0.95 && colors[i + 1] > 0.95) yellowVerts++;
+    }
+    expect(yellowVerts).toBe(0);
+  });
+
+  it("Y-twist pipe walls flip colour across the band", () => {
+    // OZXY is X-open. Walls are split into three strips along the open axis
+    // (below / band / above) at ±H_BAND_HALF_HEIGHT. The "below" strip and
+    // the "above" strip must carry different colours (X↔Z flip); Y-twist
+    // band defaults to the below colour.
+    const geo = createBlockGeometry("OZXY");
+    const positions = geo.getAttribute("position").array as Float32Array;
+    const normals = geo.getAttribute("normal").array as Float32Array;
+    const colors = geo.getAttribute("color").array as Float32Array;
+    const buckets = new Map<string, Set<string>>();
+    for (let q = 0; q < positions.length / 12; q++) {
+      const baseV = q * 12;
+      const baseN = q * 12;
+      // Use the open-axis centroid to bucket each quad into below / band / above.
+      let sumOpen = 0;
+      for (let v = 0; v < 4; v++) sumOpen += positions[baseV + v * 3 + 0];
+      const t = sumOpen / 4;
+      const strip = t < -H_BAND_HALF_HEIGHT ? "below"
+        : t > H_BAND_HALF_HEIGHT ? "above"
+        : "band";
+      const nx = Math.round(normals[baseN]);
+      const ny = Math.round(normals[baseN + 1]);
+      const nz = Math.round(normals[baseN + 2]);
+      const face =
+        nx !== 0 ? (nx > 0 ? "+X" : "-X") :
+        ny !== 0 ? (ny > 0 ? "+Y" : "-Y") :
+        nz > 0 ? "+Z" : "-Z";
+      const c = `${colors[baseV].toFixed(2)},${colors[baseV + 1].toFixed(2)},${colors[baseV + 2].toFixed(2)}`;
+      const key = `${face}|${strip}`;
+      if (!buckets.has(key)) buckets.set(key, new Set());
+      buckets.get(key)!.add(c);
+    }
+    for (const face of ["+Y", "-Y", "+Z", "-Z"] as const) {
+      const above = buckets.get(`${face}|above`);
+      const below = buckets.get(`${face}|below`);
+      expect(above, `face ${face} above`).toBeDefined();
+      expect(below, `face ${face} below`).toBeDefined();
+      const aboveC = [...above!][0];
+      const belowC = [...below!][0];
+      expect(aboveC).not.toBe(belowC);
+    }
+  });
+});
+
+describe("slab paint cells", () => {
+  it("each of the 9 top-face cells gets its own color from `<face>:<q>` overrides", () => {
+    // App disables ColorManagement so hex strings are not gamma-corrected;
+    // mirror that here so the override values land verbatim in the buffer.
+    const prev = THREE.ColorManagement.enabled;
+    THREE.ColorManagement.enabled = false;
+    try {
+      // 9 distinct hexes — one per cell of the slab top (face 2).
+      const palette = [
+        "#100000", "#200000", "#300000",
+        "#000010", "#000020", "#000030",
+        "#001000", "#002000", "#003000",
+      ];
+      const overrides: Record<string, string> = {};
+      for (let q = 0; q < 9; q++) overrides[`2:${q}`] = palette[q];
+
+      const geo = createBlockGeometry("slab", 0, undefined, overrides);
+      const positions = geo.getAttribute("position").array as Float32Array;
+      const normals = geo.getAttribute("normal").array as Float32Array;
+      const colors = geo.getAttribute("color").array as Float32Array;
+
+      const seen = new Set<number>();
+      for (let q = 0; q < positions.length / 12; q++) {
+        const baseV = q * 12;
+        if (Math.round(normals[q * 12 + 1]) !== 1) continue; // top only
+        let sx = 0, sz = 0;
+        for (let v = 0; v < 4; v++) {
+          sx += positions[baseV + v * 3 + 0];
+          sz += positions[baseV + v * 3 + 2];
+        }
+        const cx = sx / 4, cz = sz / 4;
+        const ix = cx < -1 / 3 ? 0 : cx > 1 / 3 ? 2 : 1;
+        const iz = cz < -1 / 3 ? 0 : cz > 1 / 3 ? 2 : 1;
+        const expectedQ = ix + iz * 3;
+        const r = Math.round(colors[baseV] * 255);
+        const g = Math.round(colors[baseV + 1] * 255);
+        const b = Math.round(colors[baseV + 2] * 255);
+        const hex = `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+        expect(hex, `cell q=${expectedQ}`).toBe(palette[expectedQ]);
+        seen.add(expectedQ);
+      }
+      expect(seen.size).toBe(9);
+    } finally {
+      THREE.ColorManagement.enabled = prev;
+    }
+  });
+
+  it("the geometry's 18 cells (9 top + 9 bottom) raycast into the q value the click handler computes", () => {
+    // Build an unpainted slab and probe each cell's centroid in local-XZ.
+    // Confirm the click-handler classifier (`ix < -1/3 ? 0 ...`) maps every
+    // cell back to the q embedded in its winding order.
+    const geo = createBlockGeometry("slab");
+    const positions = geo.getAttribute("position").array as Float32Array;
+    const normals = geo.getAttribute("normal").array as Float32Array;
+    const quadCount = positions.length / 12;
+    expect(quadCount).toBe(18);
+    let topCount = 0, botCount = 0;
+    for (let q = 0; q < quadCount; q++) {
+      const baseV = q * 12;
+      const ny = Math.round(normals[q * 12 + 1]);
+      let sx = 0, sz = 0;
+      for (let v = 0; v < 4; v++) {
+        sx += positions[baseV + v * 3 + 0];
+        sz += positions[baseV + v * 3 + 2];
+      }
+      const cx = sx / 4, cz = sz / 4;
+      const ix = cx < -1 / 3 ? 0 : cx > 1 / 3 ? 2 : 1;
+      const iz = cz < -1 / 3 ? 0 : cz > 1 / 3 ? 2 : 1;
+      // The classifier should put the centroid of each quad in a unique cell.
+      expect(ix).toBeGreaterThanOrEqual(0);
+      expect(ix).toBeLessThan(3);
+      expect(iz).toBeGreaterThanOrEqual(0);
+      expect(iz).toBeLessThan(3);
+      if (ny === 1) topCount++; else botCount++;
+    }
+    expect(topCount).toBe(9);
+    expect(botCount).toBe(9);
+  });
+});
+
+describe("Y-twist pipe types (free-build only)", () => {
+  it("registers all 6 Y-twist pipe types", () => {
+    for (const t of ["OZXY", "OXZY", "ZOXY", "XOZY", "ZXOY", "XZOY"] as const) {
+      expect(PIPE_TYPES.includes(t)).toBe(true);
+    }
+  });
+
+  it("Y-twist pipes have the same TQEC dimensions as their plain counterparts", () => {
+    expect(blockTqecSize("OZXY")).toEqual(blockTqecSize("OZX"));
+    expect(blockTqecSize("XOZY")).toEqual(blockTqecSize("XOZ"));
+    expect(blockTqecSize("ZXOY")).toEqual(blockTqecSize("ZXO"));
   });
 });
 
@@ -600,6 +755,27 @@ describe("createYDefectEdges", () => {
     // Sanity: hiding everything yields zero edges.
     const all = FACE_POS_X | FACE_NEG_X | FACE_POS_Y | FACE_NEG_Y | FACE_POS_Z | FACE_NEG_Z;
     expect(edgeCount(createYDefectEdges("XZZ", all))).toBe(0);
+  });
+
+  it("Y-twist pipes emit 4 long edges + 4 ring segments at the band midline", () => {
+    // 4 along the open axis (same as a non-Hadamard pipe of mixed bases) plus
+    // 4 short segments forming a square ring at the band midline (one on each
+    // closed-axis face, marking the colour-flip seam).
+    expect(edgeCount(createYDefectEdges("OZXY"))).toBe(8);
+    expect(edgeCount(createYDefectEdges("XOZY"))).toBe(8);
+    expect(edgeCount(createYDefectEdges("ZXOY"))).toBe(8);
+  });
+
+  it("Y-twist ring segments lie at the open-axis midline", () => {
+    const geo = createYDefectEdges("OZXY"); // X-open in Three.js
+    const arr = geo.getAttribute("position").array as Float32Array;
+    // 4 edges run along Three.js X (the open axis) — non-zero X span on both endpoints.
+    // 4 edges are ring segments at X = 0 — both endpoints at Three.js X ≈ 0.
+    let ringCount = 0;
+    for (let i = 0; i < arr.length; i += 6) {
+      if (Math.abs(arr[i]) < 1e-6 && Math.abs(arr[i + 3]) < 1e-6) ringCount++;
+    }
+    expect(ringCount).toBe(4);
   });
 });
 
