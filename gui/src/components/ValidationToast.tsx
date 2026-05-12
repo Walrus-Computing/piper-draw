@@ -29,8 +29,13 @@ const baseStyle: React.CSSProperties = {
   fontFamily: "sans-serif",
   fontSize: "13px",
   boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+  // Responsive fix (autoplan 2026-05-12 design phase, TODOS.md L81-84):
+  // clamp instead of fixed 500px so narrow viewports + split-pane don't clip.
+  // 16px margin each side; cap at 500px on desktop.
+  width: "min(500px, calc(100vw - 32px))",
   maxWidth: "500px",
   textAlign: "center" as const,
+  boxSizing: "border-box",
 };
 
 const styleVariants: Record<string, React.CSSProperties> = {
@@ -168,6 +173,8 @@ export function ValidationToast({
   const infoOverlay = infoToast ? (
     <div
       key={infoToast.nonce}
+      role="status"
+      aria-live="polite"
       style={{ ...infoToastStyle, top: topOffset }}
       onClick={() => setInfoToast(null)}
     >
@@ -190,7 +197,9 @@ export function ValidationToast({
   if (status === "loading") {
     return (
       <>
-        <div style={style}>Verifying with tqec...</div>
+        <div role="status" aria-live="polite" style={style}>
+          Verifying with tqec...
+        </div>
         {infoOverlay}
       </>
     );
@@ -199,7 +208,8 @@ export function ValidationToast({
   if (status === "valid") {
     return (
       <>
-        <div style={style} onClick={dismiss}>
+        <div role="status" aria-live="polite" style={style} onClick={dismiss}>
+          <span aria-hidden="true" style={{ marginRight: 6 }}>✓</span>
           Diagram is valid
         </div>
         {infoOverlay}
@@ -210,7 +220,9 @@ export function ValidationToast({
   if (status === "aborted") {
     return (
       <>
-        <div style={style}>{errors[0]?.message ?? ""}</div>
+        <div role="status" aria-live="polite" style={style}>
+          {errors[0]?.message ?? ""}
+        </div>
         {infoOverlay}
       </>
     );
@@ -225,24 +237,36 @@ export function ValidationToast({
 
   const renderErrorRow = (e: ValidationError, i: number) => {
     const hasPosition = !isNaN(e.position.x);
+    // a11y: when the message acts on click (navigate to error), it's a button.
+    // When it's purely informational (no position), it stays a static span.
+    const messageContent = hasPosition ? (
+      <button
+        type="button"
+        style={{
+          ...errorTextStyle,
+          cursor: "pointer",
+          background: "none",
+          border: "none",
+          padding: 0,
+          font: "inherit",
+          color: "inherit",
+        }}
+        onClick={() => {
+          selectError(posKey(e.position));
+          navigateToError(e, controlsRef);
+        }}
+        onMouseEnter={(ev) => { (ev.currentTarget as HTMLElement).style.textDecoration = "underline"; }}
+        onMouseLeave={(ev) => { (ev.currentTarget as HTMLElement).style.textDecoration = "none"; }}
+        title="Navigate to this error"
+      >
+        {e.message}
+      </button>
+    ) : (
+      <span style={errorTextStyle}>{e.message}</span>
+    );
     return (
       <div key={i} style={errorRowStyle}>
-        <span
-          style={{
-            ...errorTextStyle,
-            cursor: hasPosition ? "pointer" : "default",
-          }}
-          onClick={() => {
-            if (hasPosition) {
-              selectError(posKey(e.position));
-              navigateToError(e, controlsRef);
-            }
-          }}
-          onMouseEnter={(ev) => { if (hasPosition) (ev.currentTarget as HTMLElement).style.textDecoration = "underline"; }}
-          onMouseLeave={(ev) => { (ev.currentTarget as HTMLElement).style.textDecoration = "none"; }}
-        >
-          {e.message}
-        </span>
+        {messageContent}
         <button
           style={rowCloseStyle}
           onClick={(ev) => { ev.stopPropagation(); dismissError(i); }}
@@ -254,11 +278,21 @@ export function ValidationToast({
     );
   };
 
+  // Non-color signal prefix — addresses TODOS.md L77-80 "color-only signal"
+  // a11y concern surfaced in the autoplan 2026-05-12 design phase.
+  const iconChar = status === "error" ? "ⓘ" : "⚠";
+  const iconLabel = status === "error" ? "Server error" : "Validation failure";
   return (
     <>
-      <div style={style}>
+      <div role="status" aria-live="polite" aria-label={iconLabel} style={style}>
         {errors.length > 1 && (
-          <div style={{ marginBottom: "4px" }}>{errors.length} validation errors found</div>
+          <div style={{ marginBottom: "4px" }}>
+            <span aria-hidden="true" style={{ marginRight: 6 }}>{iconChar}</span>
+            {errors.length} validation errors found
+          </div>
+        )}
+        {errors.length === 1 && (
+          <span aria-hidden="true" style={{ marginRight: 6 }}>{iconChar}</span>
         )}
         <div
           ref={scrollRef}
