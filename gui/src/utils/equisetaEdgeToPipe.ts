@@ -54,6 +54,14 @@ export interface EdgeToPipeSuccess {
   ok: true;
   pos: Position3D;
   pipeType: PipeType;
+  /**
+   * When the natively-derived pipe variant wasn't in `PIPE_TYPES` (e.g. two
+   * `XZZ`-fallback cubes producing an `OZZ` seam code), the orchestrator
+   * emits the pipe with this payload so the renderer overrides face materials
+   * from `displayPattern`. Same INVARIANT as `Block.freeBuildOnly` (renderer
+   * face-material branch only).
+   */
+  freeBuildOnly?: { reason: "unsupported-pattern"; displayPattern: string };
 }
 
 export type EdgeToPipeResult = EdgeToPipeSuccess | EdgeToPipeError;
@@ -155,6 +163,43 @@ function resolvePipeType(
     : null;
 }
 
+/**
+ * Permissive variant of {@link resolvePipeType}. Returns the resolved pipe type
+ * with a `fallback: true` flag when the natively-derived variant isn't in
+ * `PIPE_TYPES` (e.g. two `XZZ` cubes from the `ZZZ → XZZ` fallback yield code
+ * `OZZ` which isn't a valid TQEC pipe), in which case the caller emits a
+ * Block with `freeBuildOnly` carrying the original pattern as `displayPattern`.
+ * Returns `null` only when {@link pipeCodeForAxis} fails (real constraint
+ * violation — perpendicular basis mismatch between unrelated cubes).
+ *
+ * Fallback table picks the first `PIPE_TYPES` entry whose `O` matches the
+ * open axis: `O..` → `OZX`, `.O.` → `ZOX`, `..O` → `ZXO`. Hadamard variants
+ * cannot reach the fallback because the same-cube case requires perpendicular
+ * MATCH which contradicts hadamard's required FLIP — so `pipeCodeForAxis`
+ * returns `null` for hadamard-on-fallback inputs.
+ */
+const FALLBACK_PIPE_TYPE_BY_AXIS: ReadonlyMap<Axis, PipeType> = new Map<Axis, PipeType>([
+  ["X", "OZX"],
+  ["Y", "ZOX"],
+  ["Z", "ZXO"],
+]);
+
+function resolvePipeTypeWithFallback(
+  openAxis: Axis,
+  cubeA: CubeType,
+  cubeB: CubeType,
+  isHadamard: boolean,
+): { type: PipeType; fallback: false } | { type: PipeType; fallback: true; pattern: string } | null {
+  const direct = resolvePipeType(openAxis, cubeA, cubeB, isHadamard);
+  if (direct !== null) return { type: direct, fallback: false };
+  const code = pipeCodeForAxis(openAxis, cubeA, cubeB, isHadamard);
+  if (code === null) return null;
+  if (isHadamard) return null; // see comment above
+  const fallbackType = FALLBACK_PIPE_TYPE_BY_AXIS.get(openAxis);
+  if (fallbackType === undefined) return null;
+  return { type: fallbackType, fallback: true, pattern: code };
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -236,8 +281,8 @@ export function edgeToPipe(
     // calls nodeToCube before edgeToPipe, but treat as dangling for safety.
     return { ok: false, reason: "edge-dangling", endpoint: !typeA ? a : b };
   }
-  const pipeType = resolvePipeType(seam.axis, typeA, typeB, isHadamard);
-  if (pipeType === null) {
+  const picked = resolvePipeTypeWithFallback(seam.axis, typeA, typeB, isHadamard);
+  if (picked === null) {
     const code = pipeCodeForAxis(seam.axis, typeA, typeB, isHadamard);
     return {
       ok: false,
@@ -260,7 +305,15 @@ export function edgeToPipe(
   };
   const pos = pipeBetween(posA, posB, seam.axis);
 
-  return { ok: true, pos, pipeType };
+  if (picked.fallback) {
+    return {
+      ok: true,
+      pos,
+      pipeType: picked.type,
+      freeBuildOnly: { reason: "unsupported-pattern", displayPattern: picked.pattern },
+    };
+  }
+  return { ok: true, pos, pipeType: picked.type };
 }
 
 /** Build a Block from an edgeToPipe success result. */
@@ -268,7 +321,10 @@ export function pipeBlockFromResult(
   result: EdgeToPipeSuccess,
   groupId: string,
 ): Block {
-  return { pos: result.pos, type: result.pipeType, groupId };
+  const base: Block = { pos: result.pos, type: result.pipeType, groupId };
+  return result.freeBuildOnly !== undefined
+    ? { ...base, freeBuildOnly: result.freeBuildOnly }
+    : base;
 }
 
 // Re-exports for callers that don't want to depend on equisetaNodeToCube directly.
