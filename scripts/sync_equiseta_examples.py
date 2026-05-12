@@ -44,7 +44,7 @@ from pathlib import Path
 EQUISETA_REPO = "Walrus-Computing/equiseta"
 # Source SHA is the head of peter-janderks/two-qubit-json-examples (commit
 # "Add curated two-cube example FTQCGraph JSONs").
-EQUISETA_REF = "7fe129ce42684cd12340a50fd0721d7a7e0a9d13"
+EQUISETA_REF = "f7a63ea47fd50baf6693fedadaa35859f94b94c9"
 LOCAL_CLONE = Path.home() / "conductor" / "repos" / "equiseta"
 
 SINGLE_CUBE_NAMES = [

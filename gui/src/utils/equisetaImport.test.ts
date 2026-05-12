@@ -359,14 +359,18 @@ describe("equisetaToBlocks — two-cube fixtures (v0.5)", () => {
     expect(r.reason).toBe("edge-no-pipe-type");
   });
 
-  it("hadamard_pipe.json → 2 ZZX cubes + 1 hadamard pipe (OZXH)", () => {
+  it("hadamard_pipe.json → ZZX + XXZ cubes joined by OZXH (bases flip across H)", () => {
+    // A Hadamard pipe swaps X/Z bases along its axis, so the cubes on either
+    // side carry opposite bases on the perpendicular faces. Upstream fixture
+    // (equiseta f7a63ea): cube A is zxx_memory (ZZX), cube B is xzz_memory
+    // (XXZ). Y axis flips Z↔X, Z axis flips X↔Z. Pipe code uses cube A's
+    // bases (smaller-coord convention) → OZXH.
     const r = equisetaToBlocks(loadFixture("hadamard_pipe.json"));
     assertSuccess(r);
     expect(r.cubeCount).toBe(2);
     expect(r.pipeCount).toBe(1);
     expect(r.blocks.get("0,0,0")?.type).toBe("ZZX");
-    expect(r.blocks.get("3,0,0")?.type).toBe("ZZX");
-    // Pipe should be OZXH (X-open hadamard)
+    expect(r.blocks.get("3,0,0")?.type).toBe("XXZ");
     const pipeBlocks = [...r.blocks.values()].filter((b) => b.type === "OZXH");
     expect(pipeBlocks).toHaveLength(1);
   });

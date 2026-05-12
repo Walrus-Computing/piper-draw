@@ -1,5 +1,5 @@
 {
-  "source": "https://github.com/Walrus-Computing/equiseta/tree/7fe129ce42684cd12340a50fd0721d7a7e0a9d13/examples",
+  "source": "https://github.com/Walrus-Computing/equiseta/tree/f7a63ea47fd50baf6693fedadaa35859f94b94c9/examples",
   "regenerate": "Run scripts/sync_equiseta_examples.py to refresh from the equiseta repo. See gui/public/equiseta-examples/README.md.",
   "groups": [
     {

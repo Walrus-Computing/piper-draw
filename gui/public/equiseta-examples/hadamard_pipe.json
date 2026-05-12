@@ -37,11 +37,11 @@
         0
       ],
       "faces": {
-        "BOTTOM": "red",
-        "EAST": "blue",
-        "NORTH": "blue",
-        "SOUTH": "blue",
-        "TOP": "red",
+        "BOTTOM": "blue",
+        "EAST": "red",
+        "NORTH": "red",
+        "SOUTH": "red",
+        "TOP": "blue",
         "WEST": "hadamard"
       },
       "ridges": {

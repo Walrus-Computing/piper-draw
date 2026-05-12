@@ -93,14 +93,23 @@ function faceTowards(from: Coordinate, to: Coordinate): FaceDirection | null {
 
 /**
  * Build the 3-letter pipe code (e.g., "OZX") given the open axis and the two
- * connected cubes' types. The two non-open positions take each cube's basis
- * on those axes; if cube A and cube B disagree on either, the pipe is
- * unrepresentable (`null`).
+ * connected cubes' types.
+ *
+ * - **Open pipe** (`isHadamard=false`): perpendicular bases must MATCH between
+ *   cube A and cube B — the pipe extends the same basis through the seam.
+ * - **Hadamard pipe** (`isHadamard=true`): perpendicular bases must FLIP
+ *   between cubes — a Hadamard swaps X/Z bases along the pipe axis, so the
+ *   four perpendicular faces carry opposite colors on the two cubes. Pipe
+ *   code uses cube A's basis (smaller-coord cube; matches the single-cube
+ *   `hadamardPipeVariant` convention in `equisetaNodeToCube.ts`).
+ *
+ * Returns `null` if the cube types don't satisfy the constraint.
  */
 function pipeCodeForAxis(
   openAxis: Axis,
   cubeA: CubeType,
   cubeB: CubeType,
+  isHadamard: boolean,
 ): string | null {
   const axes: Axis[] = ["X", "Y", "Z"];
   const idx: Record<Axis, number> = { X: 0, Y: 1, Z: 2 };
@@ -111,7 +120,13 @@ function pipeCodeForAxis(
     } else {
       const ca = cubeA[idx[a]];
       const cb = cubeB[idx[a]];
-      if (ca !== cb) return null;
+      if (isHadamard) {
+        // Hadamard pipes: perpendicular bases must be opposite (Z↔X flip).
+        if (ca === cb) return null;
+      } else {
+        // Open pipes: perpendicular bases must match.
+        if (ca !== cb) return null;
+      }
       out[idx[a]] = ca;
     }
   }
@@ -122,7 +137,7 @@ function pipeCodeForAxis(
  * Resolve the final pipe variant for an edge between two cubes.
  *
  * Strategy:
- *   1. Compute the canonical pipe code from the two cube types.
+ *   1. Compute the canonical pipe code from the two cube types + seam kind.
  *   2. Append "H" iff the seam is hadamard.
  *   3. Validate the variant is in PIPE_TYPES.
  */
@@ -132,7 +147,7 @@ function resolvePipeType(
   cubeB: CubeType,
   isHadamard: boolean,
 ): PipeType | null {
-  const code = pipeCodeForAxis(openAxis, cubeA, cubeB);
+  const code = pipeCodeForAxis(openAxis, cubeA, cubeB, isHadamard);
   if (code === null) return null;
   const variant = isHadamard ? `${code}H` : code;
   return (PIPE_TYPES as readonly string[]).includes(variant)
@@ -223,7 +238,7 @@ export function edgeToPipe(
   }
   const pipeType = resolvePipeType(seam.axis, typeA, typeB, isHadamard);
   if (pipeType === null) {
-    const code = pipeCodeForAxis(seam.axis, typeA, typeB);
+    const code = pipeCodeForAxis(seam.axis, typeA, typeB, isHadamard);
     return {
       ok: false,
       reason: "edge-no-pipe-type",
