@@ -230,11 +230,17 @@ function hadamardPipeVariant(
   return (PIPE_TYPES as readonly string[]).includes(flat) ? (flat as PipeType) : null;
 }
 
+export type BasisHints = Partial<Record<Axis, Basis>>;
+
 /**
  * Resolve all three axis bases for a node. Returns the basis triple, or the
  * first axis-pair mismatch as an error.
+ *
+ * `hints` supplies graph-level basis info propagated from neighbor cubes (used
+ * when a cube sandwiched between same-axis pipes has a wildcard on the hidden
+ * axis but a neighbor on a perpendicular axis pins the basis).
  */
-function resolveAllAxes(node: FtqcNode):
+function resolveAllAxes(node: FtqcNode, hints: BasisHints = {}):
   | { ok: true; basis: { X: Basis | null; Y: Basis | null; Z: Basis | null } }
   | (NodeToCubeError & { reason: "axis-pair-mismatch" }) {
   const axes: Axis[] = ["X", "Y", "Z"];
@@ -250,7 +256,7 @@ function resolveAllAxes(node: FtqcNode):
         second: r.second,
       };
     }
-    result[a] = r.basis;
+    result[a] = r.basis ?? hints[a] ?? null;
   }
   return { ok: true, basis: result };
 }
@@ -324,6 +330,7 @@ export function nodeToCube(
   node: FtqcNode,
   groupId: string,
   seamFaces: ReadonlySet<FaceDirection> = new Set(),
+  basisHints: BasisHints = {},
 ): NodeToCubeResult {
   if (!isValidCoordinate(node.coordinate)) {
     return { ok: false, reason: "malformed-coordinate" };
@@ -342,7 +349,7 @@ export function nodeToCube(
     };
   }
 
-  const bases = resolveAllAxes(node);
+  const bases = resolveAllAxes(node, basisHints);
   if (!bases.ok) return bases;
 
   const chars: [string, string, string] = [

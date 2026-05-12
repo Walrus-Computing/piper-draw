@@ -47,6 +47,7 @@ const FALLBACK_FILENAMES = [
   "hadamard_pipe.json",
   "port_io_pair.json",
   "disconnected_pair.json",
+  "koval_q_couch_cnot.json",
 ];
 
 function nameFromFilename(filename: string): string {

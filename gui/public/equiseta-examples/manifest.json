@@ -91,6 +91,16 @@
           "description": "Two ZXX cubes at non-adjacent coordinates \u2014 no edge, no pipe."
         }
       ]
+    },
+    {
+      "label": "Lattice surgery",
+      "examples": [
+        {
+          "filename": "koval_q_couch_cnot.json",
+          "name": "Koval-q couch CNOT",
+          "description": "10 cubes + 10 pipes + 4 ports implementing the Koval-q couch CNOT gate. Colors adjusted from the equiseta original so each cube's opposite faces share a basis (piper-draw can't model Hadamard-junction cubes); topology is identical."
+        }
+      ]
     }
   ]
 }

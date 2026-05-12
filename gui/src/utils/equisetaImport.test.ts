@@ -414,6 +414,32 @@ describe("equisetaToBlocks — two-cube fixtures (v0.5)", () => {
     const groupIds = new Set([...r.blocks.values()].map((b) => b.groupId));
     expect(groupIds.size).toBe(2);
   });
+
+  it("koval_q_couch_cnot.json → 10 cubes + 10 pipes + 4 ports (basis-hint propagation)", () => {
+    // The Koval-q couch CNOT has a Y-axis sandwich at (0,1,1) (both north and
+    // south are open seams), so its Y basis is wildcard from face-color
+    // resolution alone. The neighboring cube (1,1,1) has Y=X fixed by its
+    // north=red face; without basis-hint propagation, (0,1,1) would canonicalize
+    // to XZZ (Y=Z) and the X-axis pipe to (1,1,1) would fail with
+    // edge-no-pipe-type (perpendicular Y bases mismatch). Propagation pulls
+    // (0,1,1).Y = X from the X-axis neighbor, picking XXZ instead.
+    const r = equisetaToBlocks(loadFixture("koval_q_couch_cnot.json"));
+    assertSuccess(r);
+    expect(r.cubeCount).toBe(10);
+    expect(r.pipeCount).toBe(10);
+    expect(r.portCount).toBe(4);
+    // Every block on a valid grid slot.
+    for (const block of r.blocks.values()) {
+      const validSlot = isPipeType(block.type)
+        ? isValidPipePos(block.pos)
+        : isValidBlockPos(block.pos);
+      if (!validSlot) {
+        throw new Error(
+          `koval_q_couch_cnot: block at ${JSON.stringify(block.pos)} (type ${block.type}) is not on a valid grid slot`,
+        );
+      }
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
