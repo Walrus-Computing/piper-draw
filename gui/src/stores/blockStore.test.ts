@@ -2788,3 +2788,71 @@ describe("blockStore", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// D1: freeBuildOnly mutator spread-audit property test
+//
+// Per /autoplan 2026-05-12 Eng phase: one property test covers all 21 sites
+// where blocks are constructed from a source block. Asserts `freeBuildOnly`
+// survives through every mutator path EXCEPT the cycle path (which is the
+// intentional "promote view-only → editable canonical" affordance).
+// ---------------------------------------------------------------------------
+
+describe("freeBuildOnly: mutator spread audit (D1)", () => {
+  beforeEach(reset);
+
+  function seedViewOnlyCube(): { pos: { x: number; y: number; z: number }; key: string } {
+    const pos = { x: 0, y: 0, z: 0 };
+    const key = "0,0,0";
+    const block: Block = {
+      pos,
+      type: "XZZ",
+      groupId: "g0",
+      freeBuildOnly: { reason: "unsupported-pattern", displayPattern: "ZZZ" },
+    };
+    useBlockStore.setState({
+      blocks: new Map([[key, block]]),
+      spatialIndex: buildSpatialIndex(new Map([[key, block]])),
+    });
+    return { pos, key };
+  }
+
+  it("paintFace preserves freeBuildOnly", () => {
+    const { pos, key } = seedViewOnlyCube();
+    useBlockStore.getState().paintFace(pos, "0", "#ff7f7f");
+    const after = useBlockStore.getState().blocks.get(key)!;
+    expect(after.freeBuildOnly?.displayPattern).toBe("ZZZ");
+    expect(after.faceColors).toEqual({ "0": "#ff7f7f" });
+  });
+
+  it("undo after paint restores the freeBuildOnly state", () => {
+    const { pos, key } = seedViewOnlyCube();
+    useBlockStore.getState().paintFace(pos, "0", "#ff7f7f");
+    useBlockStore.getState().undo();
+    const after = useBlockStore.getState().blocks.get(key)!;
+    expect(after.freeBuildOnly?.displayPattern).toBe("ZZZ");
+    expect(after.faceColors).toBeUndefined();
+  });
+
+  it("clipboard copy preserves freeBuildOnly on stored entry", () => {
+    seedViewOnlyCube();
+    useBlockStore.setState({ selectedKeys: new Set(["0,0,0"]) });
+    useBlockStore.getState().copySelection();
+    const clip = useBlockStore.getState().clipboard;
+    expect(clip).not.toBeNull();
+    // clipboard is Map<string, Block>; coord-normalised so the single entry
+    // sits at "0,0,0".
+    const entry = clip?.get("0,0,0");
+    expect(entry?.freeBuildOnly?.displayPattern).toBe("ZZZ");
+  });
+
+  it("snapshot (JSON.stringify → parse) round-trips freeBuildOnly", () => {
+    const { key } = seedViewOnlyCube();
+    const block = useBlockStore.getState().blocks.get(key)!;
+    const serialized = JSON.stringify(block);
+    const parsed = JSON.parse(serialized) as Block;
+    expect(parsed.freeBuildOnly?.displayPattern).toBe("ZZZ");
+    expect(parsed.freeBuildOnly?.reason).toBe("unsupported-pattern");
+    expect(parsed.type).toBe("XZZ");
+  });
+});

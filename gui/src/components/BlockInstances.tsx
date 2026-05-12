@@ -53,6 +53,7 @@ function TypedInstances({
   allBlocks,
   dimmed,
   faceColors,
+  displayPattern,
 }: {
   cubeType: BlockType;
   blocks: Block[];
@@ -61,6 +62,9 @@ function TypedInstances({
   dimmed: boolean;
   /** Face-color overrides shared across every block in this group (group key includes the override hash). */
   faceColors?: Record<string, string>;
+  /** `Block.freeBuildOnly.displayPattern` shared across every block in this group.
+   *  Drives face material colours only — geometry shape comes from `cubeType`. */
+  displayPattern?: string;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const blocksRef = useRef(blocks);
@@ -77,19 +81,23 @@ function TypedInstances({
   const pipe = isPipeType(cubeType);
   // Geometry is freshly built (no cache) when the group has face-color overrides
   // — caching by override hash would unbounded-grow the cache.
+  // Per-group geometry rebuild paths (cache miss):
+  //   - faceColors set → uniqueness cost too high to cache by hash
+  //   - displayPattern set → fallback render group; rare; same reasoning
+  // Common path (neither set) uses the shared cache.
   const geometry = useMemo(
-    () => (faceColors
-      ? createBlockGeometry(cubeType, hiddenFaces, undefined, faceColors)
+    () => (faceColors || displayPattern
+      ? createBlockGeometry(cubeType, hiddenFaces, undefined, faceColors, displayPattern)
       : getCachedGeometry(cubeType, hiddenFaces)),
-    [cubeType, hiddenFaces, faceColors],
+    [cubeType, hiddenFaces, faceColors, displayPattern],
   );
   useEffect(() => {
     // Dispose the per-group geometry on unmount/recreation only if it's not
     // owned by the shared cache.
     return () => {
-      if (faceColors) geometry.dispose();
+      if (faceColors || displayPattern) geometry.dispose();
     };
-  }, [geometry, faceColors]);
+  }, [geometry, faceColors, displayPattern]);
   const fullBoxGeometry = pipe ? getCachedFullBox(cubeType) : null;
   const material = useMemo(
     () => new THREE.MeshLambertMaterial({
@@ -440,6 +448,7 @@ export function BlockInstances() {
       hiddenFaces: FaceMask;
       dimmed: boolean;
       faceColors?: Record<string, string>;
+      displayPattern?: string;
       blocks: Block[];
     };
     const map = new Map<string, Group>();
@@ -449,7 +458,8 @@ export function BlockInstances() {
         flowVizMode ||
         (viewMode.kind === "iso" && !posInActiveSlice(viewMode, block.pos));
       const fcKey = faceColorsKey(block.faceColors);
-      const key = `${block.type}:${hf}:${dimmed ? 1 : 0}:${fcKey}`;
+      const dp = block.freeBuildOnly?.displayPattern ?? "";
+      const key = `${block.type}:${hf}:${dimmed ? 1 : 0}:${fcKey}:${dp}`;
       const existing = map.get(key);
       if (existing) {
         existing.blocks.push(block);
@@ -459,6 +469,7 @@ export function BlockInstances() {
           hiddenFaces: hf,
           dimmed,
           faceColors: block.faceColors,
+          displayPattern: dp || undefined,
           blocks: [block],
         });
       }
@@ -477,6 +488,7 @@ export function BlockInstances() {
           allBlocks={blocks}
           dimmed={group.dimmed}
           faceColors={group.faceColors}
+          displayPattern={group.displayPattern}
         />
       ))}
     </>

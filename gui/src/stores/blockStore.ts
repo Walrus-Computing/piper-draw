@@ -700,7 +700,12 @@ function mergeBlocksWithDelta(
   //           Source groups with fewer than 2 survivors leave their
   //           remaining placement ungrouped (matches the dissolve-<2 rule).
   const mergedBlocks = new Map(state.blocks);
-  const placed: Array<{ key: string; pos: Position3D; type: BlockType; sourceGroupId: string | undefined; faceColors: Record<string, string> | undefined }> = [];
+  // Phase 1 carries the source Block reference so all per-block metadata
+  // (faceColors, freeBuildOnly, future fields) flows through to phase 2 via
+  // spread, instead of being re-listed each time a new optional Block field
+  // is added. See CLAUDE.md "Block mutator spread audit" and autoplan
+  // 2026-05-12 D1 property test.
+  const placed: Array<{ key: string; pos: Position3D; source: Block }> = [];
   for (const b of incoming.values()) {
     const newPos: Position3D = {
       x: b.pos.x + delta.x,
@@ -710,7 +715,7 @@ function mergeBlocksWithDelta(
     if (!isValidPos(newPos, b.type)) continue;
     const newKey = posKey(newPos);
     if (mergedBlocks.has(newKey)) continue;
-    placed.push({ key: newKey, pos: newPos, type: b.type, sourceGroupId: b.groupId, faceColors: b.faceColors });
+    placed.push({ key: newKey, pos: newPos, source: b });
     // Reserve the slot so subsequent incoming entries can't collide on the same key.
     mergedBlocks.set(newKey, { pos: newPos, type: b.type });
   }
@@ -720,8 +725,8 @@ function mergeBlocksWithDelta(
   // that has ≥2 survivors.
   const groupSurvivorCount = new Map<string, number>();
   for (const p of placed) {
-    if (!p.sourceGroupId) continue;
-    groupSurvivorCount.set(p.sourceGroupId, (groupSurvivorCount.get(p.sourceGroupId) ?? 0) + 1);
+    if (!p.source.groupId) continue;
+    groupSurvivorCount.set(p.source.groupId, (groupSurvivorCount.get(p.source.groupId) ?? 0) + 1);
   }
   const sourceGroupToNew = new Map<string, string>();
   for (const [src, count] of groupSurvivorCount) {
@@ -730,10 +735,15 @@ function mergeBlocksWithDelta(
 
   const entries: Array<{ key: string; block: Block }> = [];
   for (const p of placed) {
-    const remappedGid = p.sourceGroupId ? sourceGroupToNew.get(p.sourceGroupId) : undefined;
-    const newBlock: Block = { pos: p.pos, type: p.type };
-    if (remappedGid) newBlock.groupId = remappedGid;
-    if (p.faceColors) newBlock.faceColors = p.faceColors;
+    const remappedGid = p.source.groupId ? sourceGroupToNew.get(p.source.groupId) : undefined;
+    // Spread source first so freeBuildOnly / faceColors / future fields
+    // survive; explicit fields below override pos + group as needed.
+    const newBlock: Block = {
+      ...p.source,
+      pos: p.pos,
+      ...(remappedGid !== undefined ? { groupId: remappedGid } : { groupId: undefined }),
+    };
+    if (newBlock.groupId === undefined) delete newBlock.groupId;
     mergedBlocks.set(p.key, newBlock);
     entries.push({ key: p.key, block: newBlock });
   }

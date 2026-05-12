@@ -20,6 +20,7 @@ import { FpsSampler } from "./components/FpsCounter";
 import { OrientationGizmo } from "./components/OrientationGizmo";
 import { Toolbar } from "./components/Toolbar";
 import { ValidationToast } from "./components/ValidationToast";
+import { StatusPill } from "./components/StatusPill";
 import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { LocatePulseHighlight } from "./components/LocatePulseHighlight";
 import { SelectionHighlights } from "./components/SelectionHighlights";
@@ -1263,6 +1264,7 @@ export default function App() {
         onOpenKeybindEditor={setKeybindEditorMode}
       />
       <ValidationToast toolbarRef={toolbarRef} controlsRef={controlsRef} />
+      <StatusPill />
       {sharedSceneBanner && (
         <SharedSceneBanner
           previousSnapshot={sharedSceneBanner.previousSnapshot}
