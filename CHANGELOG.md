@@ -6,6 +6,28 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.4.0.0] - 2026-05-12
+
+### Added
+- **Equiseta JSON import.** Two new buttons in the `EquisetaJsonPanel`
+  header materialise the loaded JSON onto the 3D grid. **Import** wipes the
+  current scene and drops the imported cube + adjacent port markers +
+  hadamard pipes at the origin; **Insert** appends them at the +X edge of
+  the existing scene (matches the DAE import idiom). Imported blocks
+  arrive as a single group so they move and delete as one unit. Five of
+  the nine bundled fixtures import cleanly (`zxx_memory`, `xzz_memory`,
+  `port_io`, `y_defect_ridges`, `all_open`); the four that have no
+  piper-draw cube-type equivalent (`all_red`, `all_blue`, `hadamard_top`,
+  `two_cubes`) reject loudly with a diagnostic toast naming the reason.
+- **TQEC ↔ Equiseta convention table** documented inline in
+  `gui/src/utils/equisetaImport.ts`. `east/west` → X-axis, `north/south`
+  → Y-axis, `top/bottom` → Z-axis. `red` → X-basis, `blue` → Z-basis
+  (matches piper-draw's `X_COLOR` / `Z_COLOR`). Cube type =
+  `basis(east) + basis(north) + basis(top)`. Resulting cube must be one
+  of `CUBE_TYPES`; `XXX` and `ZZZ` are not representable and produce a
+  rejection. The `all_open` Equiseta node (every face = `open`) emits a
+  single port marker as v1's sidestep of the no-XXX/ZZZ-cube limitation.
+
 ## [0.3.0.0] - 2026-05-08
 
 ### Added
