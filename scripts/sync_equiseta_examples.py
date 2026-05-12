@@ -100,11 +100,13 @@ MANIFEST_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     # Two cubes
     "blue_pair_east_west.json": (
         "Blue pair (east-west)",
-        "Two all-BLUE cubes joined east-west via OPEN. Degenerate (ZZZ) — surfaces an unsupported-pattern toast.",
+        "Two all-BLUE cubes joined east-west via OPEN. Degenerate (ZZZ) — surfaces an "
+        "unsupported-pattern toast.",
     ),
     "red_pair_east_west.json": (
         "Red pair (east-west)",
-        "Two all-RED cubes joined east-west via OPEN. Degenerate (XXX) — surfaces an unsupported-pattern toast.",
+        "Two all-RED cubes joined east-west via OPEN. Degenerate (XXX) — surfaces an "
+        "unsupported-pattern toast.",
     ),
     "zxx_memory_pair.json": (
         "ZXX memory pair",
@@ -112,11 +114,13 @@ MANIFEST_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     ),
     "xzz_memory_pair.json": (
         "XZZ memory pair",
-        "Two XZZ-memory cubes merged east-west via OPEN. Opposite-basis counterpart of zxx_memory_pair.",
+        "Two XZZ-memory cubes merged east-west via OPEN. Opposite-basis counterpart of "
+        "zxx_memory_pair.",
     ),
     "zxx_time_evolution.json": (
         "ZXX time evolution",
-        "Two ZXX cubes stacked along K (time) sharing an OPEN face. piper-draw can't model the ZZO seam pipe — surfaces an unsupported-pipe toast.",
+        "Two ZXX cubes stacked along K (time) sharing an OPEN face. piper-draw can't model "
+        "the ZZO seam pipe — surfaces an unsupported-pipe toast.",
     ),
     "hadamard_pipe.json": (
         "Hadamard pipe",
@@ -124,7 +128,8 @@ MANIFEST_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     ),
     "port_io_pair.json": (
         "Port I/O pair",
-        "Two ZXX cubes stacked along K with PORT on outer faces. Same ZZO seam pipe limitation as zxx_time_evolution — surfaces an unsupported-pipe toast.",
+        "Two ZXX cubes stacked along K with PORT on outer faces. Same ZZO seam pipe "
+        "limitation as zxx_time_evolution — surfaces an unsupported-pipe toast.",
     ),
     "disconnected_pair.json": (
         "Disconnected pair",
