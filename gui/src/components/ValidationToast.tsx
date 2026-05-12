@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { useValidationStore } from "../stores/validationStore";
 import type { ValidationError } from "../stores/validationStore";
+import { useBlockStore } from "../stores/blockStore";
 import { tqecToThree, posKey } from "../types";
 import { animateCamera } from "../utils/cameraAnim";
 import { toastBus } from "../utils/toastBus";
@@ -89,6 +90,22 @@ const dismissAllStyle: React.CSSProperties = {
   fontSize: "11px",
 };
 
+// Solid-fill primary action — distinct from the ghost dismiss button so the
+// "view this anyway" path reads as the recommended action when an
+// auto-imported fixture is invalid.
+const enableFreeBuildStyle: React.CSSProperties = {
+  marginTop: "6px",
+  marginRight: "6px",
+  background: "#721c24",
+  border: "1px solid #721c24",
+  color: "#fff",
+  padding: "3px 10px",
+  borderRadius: "4px",
+  cursor: "pointer",
+  fontSize: "11px",
+  fontWeight: 600,
+};
+
 export function ValidationToast({
   toolbarRef,
   controlsRef,
@@ -102,6 +119,7 @@ export function ValidationToast({
   const dismiss = useValidationStore((s) => s.dismiss);
   const dismissError = useValidationStore((s) => s.dismissError);
   const selectError = useValidationStore((s) => s.selectError);
+  const freeBuild = useBlockStore((s) => s.freeBuild);
   const [topOffset, setTopOffset] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [infoToast, setInfoToast] = useState<{ message: string; nonce: number } | null>(null);
@@ -159,10 +177,12 @@ export function ValidationToast({
 
   if (status === "idle") return infoOverlay;
 
-  const variantKey = status === "invalid" && errors.some((e) => e.message.includes("not available")) ? "error" : status;
+  // Status already carries the transport-vs-semantic discriminator
+  // (validationStore sets status="error" when validateDiagram reports
+  // transportError, "invalid" for semantic TQEC failures).
   const style: React.CSSProperties = {
     ...baseStyle,
-    ...styleVariants[variantKey],
+    ...styleVariants[status],
     position: "fixed",
     top: topOffset,
   };
@@ -255,6 +275,17 @@ export function ValidationToast({
             onClick={() => setExpanded(true)}
           >
             Show all {errors.length} errors
+          </button>
+        )}
+        {status === "invalid" && !freeBuild && (
+          <button
+            style={enableFreeBuildStyle}
+            onClick={() => {
+              useBlockStore.setState({ freeBuild: true });
+              dismiss();
+            }}
+          >
+            Enable Free Build
           </button>
         )}
         {errors.length > 1 && (

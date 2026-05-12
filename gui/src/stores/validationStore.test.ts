@@ -116,6 +116,36 @@ describe("validationStore", () => {
       expect(state.invalidKeys.size).toBe(1);
     });
 
+    it("sets status to 'error' (not 'invalid') when validateDiagram reports transportError", async () => {
+      // Transport-level failure (server unreachable or non-2xx) carries
+      // transportError: true so the UI can render "verifier unavailable"
+      // distinctly from "your scene is broken".
+      mockValidate.mockResolvedValue({
+        valid: false,
+        errors: [{ position: null, message: "Verification server not available. Start with: npm run dev" }],
+        transportError: true,
+      });
+
+      await useValidationStore.getState().validate();
+
+      const state = useValidationStore.getState();
+      expect(state.status).toBe("error");
+      expect(state.errors).toHaveLength(1);
+      expect(state.errors[0].message).toContain("not available");
+    });
+
+    it("sets status to 'invalid' for semantic failures without transportError", async () => {
+      mockValidate.mockResolvedValue({
+        valid: false,
+        errors: [{ position: [0, 0, 0], message: "Color rule violation" }],
+        // transportError omitted (treated as undefined / falsy)
+      });
+
+      await useValidationStore.getState().validate();
+
+      expect(useValidationStore.getState().status).toBe("invalid");
+    });
+
     it("sets loading status while validating", async () => {
       let resolvePromise: (v: { valid: boolean; errors: never[] }) => void;
       mockValidate.mockReturnValue(

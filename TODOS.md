@@ -45,6 +45,56 @@ PR focused.
 
 ---
 
+## Deferred from /autoplan: Auto-import + Free Build toast (2026-05-12)
+
+Source: `~/.claude/plans/system-instruction-you-are-working-twinkling-duckling.md`
+plus the /autoplan dual-voice review. Decided during /autoplan SELECTIVE EXPANSION
+and final approval gate, explicitly held out of the v0.6.1.0 ship.
+
+- **Render single-colour fixtures (`all_blue.json`, `all_red.json`, `hadamard_top.json`,
+  `blue_pair_east_west.json`, `red_pair_east_west.json`)** (P2, M, CC ~1 hr) —
+  these fixtures fail the importer with "unsupported pattern ZZZ/XXX" before
+  `loadBlocks` runs, so the new auto-import + Free Build affordance can't
+  help them. Two paths to consider: (1) extend `CUBE_TYPES` with `ZZZ`/`XXX`
+  variants that render as solid all-blue / all-red cubes, or (2) emit a
+  decorative "free-build-only" block kind from `equisetaToBlocks` for these
+  patterns. Path (1) is purer but couples to the TQEC color invariant
+  elsewhere; path (2) reuses the slab/paint precedent. **Trigger:** user
+  feedback that they actually need to view single-colour fixtures.
+- **Tri-state validation outcome (E1)** (P2, M) — distinguish
+  "intentionally-non-TQEC fixture" from "user-error invalid scene" so the
+  toast can use a third copy variant. v0.6.1.0 ships the
+  semantic-invalid-vs-server-down split (UC2). The third axis needs
+  per-fixture metadata or content heuristics; deferred.
+- **Confirm-before-nuke on unsaved-work (E4)** (P2, XS, CC ~15 min) — auto-import
+  silently replaces the current scene. Both /autoplan CEO reviewers flagged
+  this. Add a confirm prompt when blocks count is non-zero and clicking a new
+  fixture. Trigger: user reports losing work.
+- **Dropdown thumbnails for Equiseta examples (E5)** (P3, L, CC ~3 hr) — Claude
+  CEO reviewer noted the deeper UX gap is "I can't remember what each fixture
+  looks like." Render a small 64px scene preview alongside the manifest entries.
+  Skipped because it requires offline-rendering each fixture at build time.
+- **ValidationToast a11y overhaul** (P2, S, CC ~30 min) — both /autoplan design
+  reviewers flagged the toast as critical-but-broken: no `role="status"`, no
+  `aria-live`, action elements are `<span>` not `<button>`, color-only signal.
+  Out of v0.6.1.0 scope but in the blast radius of any future toast work.
+- **ValidationToast responsive overhaul** (P3, S, CC ~30 min) — fixed
+  `maxWidth: 500px` + centered `transform: translateX(-50%)`. Brittle on
+  narrower viewports / split-pane usage. Same design-review surface as the
+  a11y overhaul.
+- **AbortController on `validate()` fetch** (P3, S, CC ~20 min) — when rapid
+  imports happen, the existing `requestVersion` token discards stale results
+  on arrival but the in-flight fetches keep running and waste server work.
+  Adding an AbortController would cancel them. Correctness is fine today; this
+  is pure perf.
+- **`commitScene()` helper in `blockStore`** (P3, S) — would let `.dae` import,
+  template loads, and undo all auto-validate without duplicating the
+  `runEquisetaImport` wiring. Deferred because it couples `blockStore` to
+  `validationStore` (`blockStore` is a CLAUDE.md hot file); revisit only if
+  `.dae` import grows similar requirements.
+
+---
+
 ## Deferred from CEO + ENG plan: View Equiseta JSON (2026-05-08)
 
 Source: `~/.gstack/projects/peter-janderks-piper-draw-raw/ceo-plans/2026-05-08-view-equiseta-json.md`

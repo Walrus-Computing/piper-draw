@@ -19,6 +19,7 @@ import {
   MAX_BYTES,
 } from "./equisetaJsonLoad";
 import { pickFile } from "./filePicker";
+import { runEquisetaImport } from "./equisetaImportController";
 
 /** Load from arbitrary JSON text (drop, picker). */
 export async function loadEquisetaText(text: string, sourceLabel: string): Promise<void> {
@@ -27,6 +28,12 @@ export async function loadEquisetaText(text: string, sourceLabel: string): Promi
   const r = parseEquisetaText(text);
   if (r.ok) {
     store.finishLoadOk(token, r.value, sourceLabel);
+    // Token re-check: finishLoadOk discards JSON-side state on a stale token, but
+    // runEquisetaImport mutates blockStore separately. Without this check, a late
+    // fetch could clobber a newer scene that already loaded.
+    if (useEquisetaJsonStore.getState().loadToken === token) {
+      runEquisetaImport(r.value, sourceLabel, "replace");
+    }
   } else if (r.reason === "invalid-json") {
     store.finishLoadErr(token, `Invalid JSON: ${r.message}`);
   } else {
@@ -63,6 +70,10 @@ export async function loadEquisetaFixture(filename: string, displayName: string)
   const p = parseEquisetaText(r.text);
   if (p.ok) {
     store.finishLoadOk(token, p.value, displayName);
+    // Token re-check — see loadEquisetaText for rationale.
+    if (useEquisetaJsonStore.getState().loadToken === token) {
+      runEquisetaImport(p.value, displayName, "replace");
+    }
   } else if (p.reason === "invalid-json") {
     store.finishLoadErr(token, `Invalid JSON in ${filename}: ${p.message}`);
   } else {
