@@ -1,5 +1,50 @@
 # TODOs
 
+## Deferred from CEO + ENG plan: Import Equiseta JSON (2026-05-11)
+
+Source: `~/.gstack/projects/peter-janderks-piper-draw-raw/ceo-plans/2026-05-11-import-equiseta-json.md`
+plus the branch's eng-review test plan. Decided during /plan-ceo-review +
+/plan-eng-review and explicitly deferred to keep the v0.4 single-node import
+PR focused.
+
+- **Multi-node import + edge translation** (P2, M, CC ~1 hr) — lift the
+  D6 single-node guard; map `edges[]` to pipes; resolve same-cube
+  ambiguities. Unlocks `two_cubes.json` and any future multi-node
+  Equiseta output. Trigger: v0.5 milestone.
+- **Export (Blocks → FTQCGraph JSON)** (P2, L, CC ~2 hr) — the inverse
+  of the v0.4 translator; needed for full TQEC retirement. Depends on
+  the convention table being authoritative (locked in eng-review).
+  Trigger: v0.6 milestone.
+- **`null` vs `open` face semantics distinction** (P3, XS) — v1 treats
+  both as "no satellite emitted". They may have distinct meanings in
+  Equiseta (e.g. `null` = uncolored placeholder vs `open` = explicit
+  boundary). Revisit if the Equiseta team clarifies the spec.
+- **Revisit `all_open.json` and unsupported-cube semantics in v0.5**
+  (P3, S) — v1 emits a port marker for all-open nodes (a hack to
+  sidestep the no-XXX/ZZZ-cube limitation in piper-draw). Once
+  multi-node import lands, a port adjacent to a connected node has
+  different semantics than a standalone port; the hack may need
+  replacing. Depends on multi-node import.
+- **`ridges` payload preservation on import** (P3, S) — v1 drops
+  the 12-flag `ridges` field per node. `y_defect_ridges.json` currently
+  imports as a plain `ZZX` cube with no defect markers, even though
+  piper-draw has `Y_DEFECT_COLOR` infrastructure that could render
+  them. Honor on import; render Y-defect markers per existing piper-draw
+  machinery. (User noted they don't need this in the short term.)
+- **Camera fit after import** (P3, XS, CC ~10 min) — auto-center on
+  the imported region so the cube doesn't appear off-screen. The
+  D5 success toast (info channel) is a workable v1 substitute.
+- **Approach C bidirectional translator scaffold** (P2, S) — revisit
+  when export work begins; create a single `equisetaTranslator.ts`
+  with both `equisetaToBlocks` and `blocksToEquiseta` for clean
+  serializer ↔ deserializer separation. Trigger: v0.6 export milestone.
+- **EquisetaMenu toolbar shortcut for Import/Insert** (P3, XS) — v1
+  hangs the Import/Insert buttons off the panel header. Toolbar
+  dropdown shortcuts (so the panel doesn't have to be open) are deferred.
+  Trigger: user feedback that the panel-only flow is friction.
+
+---
+
 ## Deferred from CEO + ENG plan: View Equiseta JSON (2026-05-08)
 
 Source: `~/.gstack/projects/peter-janderks-piper-draw-raw/ceo-plans/2026-05-08-view-equiseta-json.md`

@@ -34,8 +34,8 @@ the affected components on the next frame.
 |-----------------------|---------------------------------------------------------------------|
 | `gui/src/stores/`     | Zustand stores. `blockStore` is the universe; `groupSelectors`, `keybindStore`, `locateStore`, `validationStore` are focused. |
 | `gui/src/types/`      | Shared types. `index.ts` is currently mixed types+logic; logic is migrating out into focused utility files. |
-| `gui/src/utils/`      | Pure helpers: geometry, validation, ZX graph derivation, DAE im/export, scene share, templates, drag/snap math, the shared `toastBus` (error + info channels). No React, no Zustand subscriptions. |
-| `gui/src/components/` | React + R3F. `BlockInstances` renders the scene; `Toolbar`/`HelpPanel`/`ZXPanel`/`FlowsPanel`/`EquisetaJsonPanel` are UI panels (the `Equiseta ▾` toolbar dropdown lives in `EquisetaMenu`); the rest are overlays and ghost previews. |
+| `gui/src/utils/`      | Pure helpers: geometry, validation, ZX graph derivation, DAE im/export, Equiseta JSON load+translator (`equisetaJsonLoad.ts`, `equisetaJsonSchema.ts`, `equisetaImport.ts`), Equiseta dispatch controllers (`equisetaJsonController.ts`, `equisetaImportController.ts`), scene share, templates, drag/snap math, the shared `toastBus` (error + info channels). No React, no Zustand subscriptions. |
+| `gui/src/components/` | React + R3F. `BlockInstances` renders the scene; `Toolbar`/`HelpPanel`/`ZXPanel`/`FlowsPanel`/`EquisetaJsonPanel` are UI panels (the `Equiseta ▾` toolbar dropdown lives in `EquisetaMenu`; the in-panel `Import` / `Insert` buttons live in `EquisetaImportRow`); the rest are overlays and ghost previews. |
 | `gui/src/hooks/`      | Reusable hooks (floating panels, pulse animation, viewport fit). |
 | `gui/src/App.tsx`     | Top-level layout, keybind dispatch, pointer routing. |
 

@@ -22,6 +22,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { useBlockStore } from "../stores/blockStore";
 import {
   useEquisetaJsonStore,
+  type LoadedEquiseta,
   type ViewMode,
 } from "../stores/equisetaJsonStore";
 import { useFloatingPanel } from "../hooks/useFloatingPanel";
@@ -35,6 +36,7 @@ import {
   type FtqcNode,
   RIDGE_IDS,
 } from "../utils/equisetaJsonSchema";
+import { EquisetaImportRow } from "./EquisetaImportRow";
 
 // ---------------------------------------------------------------------------
 // Display constants
@@ -339,7 +341,7 @@ function PanelHeader({
   onClose,
   dragHandleProps,
 }: {
-  loaded: { sourceLabel: string } | null;
+  loaded: LoadedEquiseta | null;
   viewMode: ViewMode;
   onChangeViewMode: (m: ViewMode) => void;
   onClose: () => void;
@@ -400,7 +402,7 @@ function PanelBody({
   stats,
   onClearError,
 }: {
-  loaded: { graph: FtqcGraph } | null;
+  loaded: LoadedEquiseta | null;
   loading: boolean;
   loadingLabel: string | null;
   error: string | null;
@@ -418,6 +420,13 @@ function PanelBody({
     >
       {error && <InlineError message={error} onDismiss={onClearError} />}
       {loaded && stats && <StatsHeader stats={stats} />}
+      {loaded && (
+        <EquisetaImportRow
+          graph={loaded.graph}
+          sourceLabel={loaded.sourceLabel}
+          disabled={loading}
+        />
+      )}
       {loading && !loaded && <LoadingState label={loadingLabel} />}
       {loaded && (viewMode === "json" ? <JsonView graph={loaded.graph} /> : <GridView graph={loaded.graph} />)}
       {!loaded && !loading && !error && <EmptyState />}
