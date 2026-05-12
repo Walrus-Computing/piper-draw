@@ -11,7 +11,7 @@ import {
 } from "../types";
 import { isoTopThreeAxis } from "../utils/isoFoldOut";
 import type { ThreeAxis } from "../utils/isoFoldOut";
-import { getCachedGeometry, getCachedEdges, getCachedFullBox } from "./BlockInstances";
+import { getCachedGeometry, getCachedEdges, getCachedFullBox } from "./blockInstancesShared";
 import { FoldOutCubeFaces } from "./FoldOutCube";
 import { GroundShadowAbsolute } from "./GroundShadowAbsolute";
 

@@ -7,35 +7,37 @@ import {
   tqecToThree,
   yBlockZOffset,
   createBlockGeometry,
-  createBlockEdges,
   blockThreeSize,
   hasBlockOverlap,
   hasCubeColorConflict,
   hasYCubePipeAxisConflict,
   validatePipePlacement,
-  isValidPipePos,
   isValidPos,
   isPipeType,
+  isSlabType,
   resolvePipeType,
   getAdjacentPos,
   posKey,
-  VARIANT_AXIS_MAP,
+  faceIndexFromNormal,
+  TQEC_TO_THREE_AXIS,
+  H_BAND_HALF_HEIGHT,
+  PIPE_PAINT_BAND_HALF,
 } from "../types";
-import type { BlockType, CubeType, Block, FaceMask, Position3D, PipeVariant } from "../types";
+import type { BlockType, CubeType, Block, FaceMask } from "../types";
 import { posInActiveSlice } from "../utils/isoView";
+import {
+  faceColorsKey,
+  getCachedEdges,
+  getCachedFullBox,
+  getCachedGeometry,
+  resolvePipeTypeFromFace,
+} from "./blockInstancesShared";
 
 const DIMMED_OPACITY = 0.18;
 const DIMMED_EDGE_OPACITY = 0.25;
 
 const MIN_CAPACITY = 64;
 
-/**
- * Module-level geometry caches — each (block type, hidden-face mask) pair's
- * geometry never changes. Bounded at ~19 types × 64 masks = ~1216 entries max.
- */
-const geometryCache = new Map<string, THREE.BufferGeometry>();
-const fullBoxCache = new Map<BlockType, THREE.BoxGeometry>();
-const edgesCache = new Map<string, THREE.BufferGeometry>();
 const edgeLineMaterial = new THREE.LineBasicMaterial({ color: "#000000" });
 const dimmedEdgeLineMaterial = new THREE.LineBasicMaterial({
   color: "#000000",
@@ -44,66 +46,21 @@ const dimmedEdgeLineMaterial = new THREE.LineBasicMaterial({
   depthWrite: false,
 });
 
-// eslint-disable-next-line react-refresh/only-export-components
-export function resolvePipeTypeFromFace(
-  srcPos: Position3D,
-  srcType: BlockType,
-  normal: THREE.Vector3,
-  variant: PipeVariant,
-): BlockType | null {
-  for (const candidateType of VARIANT_AXIS_MAP[variant]) {
-    const probe = getAdjacentPos(srcPos, srcType, normal, candidateType);
-    if (!isValidPipePos(probe)) continue;
-    const resolved = resolvePipeType(variant, probe);
-    if (resolved) return resolved;
-  }
-  return null;
-}
-
-// eslint-disable-next-line react-refresh/only-export-components
-export function getCachedGeometry(blockType: BlockType, hiddenFaces: FaceMask): THREE.BufferGeometry {
-  const key = `${blockType}:${hiddenFaces}`;
-  let geo = geometryCache.get(key);
-  if (!geo) {
-    geo = createBlockGeometry(blockType, hiddenFaces);
-    geometryCache.set(key, geo);
-  }
-  return geo;
-}
-
-// eslint-disable-next-line react-refresh/only-export-components
-export function getCachedEdges(blockType: BlockType, hiddenFaces: FaceMask): THREE.BufferGeometry {
-  const key = `${blockType}:${hiddenFaces}`;
-  let geo = edgesCache.get(key);
-  if (!geo) {
-    geo = createBlockEdges(blockType, hiddenFaces);
-    edgesCache.set(key, geo);
-  }
-  return geo;
-}
-
-// eslint-disable-next-line react-refresh/only-export-components
-export function getCachedFullBox(blockType: BlockType): THREE.BoxGeometry {
-  let geo = fullBoxCache.get(blockType);
-  if (!geo) {
-    geo = new THREE.BoxGeometry(...blockThreeSize(blockType));
-    fullBoxCache.set(blockType, geo);
-  }
-  return geo;
-}
-
 function TypedInstances({
   cubeType,
   blocks,
   hiddenFaces,
   allBlocks,
   dimmed,
+  faceColors,
 }: {
   cubeType: BlockType;
   blocks: Block[];
   hiddenFaces: FaceMask;
   allBlocks: Map<string, Block>;
   dimmed: boolean;
+  /** Face-color overrides shared across every block in this group (group key includes the override hash). */
+  faceColors?: Record<string, string>;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const blocksRef = useRef(blocks);
@@ -118,7 +75,21 @@ function TypedInstances({
   if (maxCount !== capacity) setCapacity(maxCount);
 
   const pipe = isPipeType(cubeType);
-  const geometry = getCachedGeometry(cubeType, hiddenFaces);
+  // Geometry is freshly built (no cache) when the group has face-color overrides
+  // — caching by override hash would unbounded-grow the cache.
+  const geometry = useMemo(
+    () => (faceColors
+      ? createBlockGeometry(cubeType, hiddenFaces, undefined, faceColors)
+      : getCachedGeometry(cubeType, hiddenFaces)),
+    [cubeType, hiddenFaces, faceColors],
+  );
+  useEffect(() => {
+    // Dispose the per-group geometry on unmount/recreation only if it's not
+    // owned by the shared cache.
+    return () => {
+      if (faceColors) geometry.dispose();
+    };
+  }, [geometry, faceColors]);
   const fullBoxGeometry = pipe ? getCachedFullBox(cubeType) : null;
   const material = useMemo(
     () => new THREE.MeshLambertMaterial({
@@ -240,6 +211,14 @@ function TypedInstances({
       // Port-conversion tool: no ghost preview on existing blocks — the click
       // either removes the cube or does nothing (and sets a warning).
       store.setHoveredGridPos(null);
+    } else if (store.mode === "edit" && armed === "slab") {
+      // Slab tool: never face-adjacent — the placement target is the gap
+      // between pipes on the ground plane, handled by GridPlane.
+      store.setHoveredGridPos(null);
+    } else if (store.mode === "edit" && armed === "paint") {
+      // Paint tool: hover does nothing yet (face-level hover preview is
+      // out of scope for v1). Clicks paint the face under the cursor.
+      store.setHoveredGridPos(null);
     } else {
       // Place mode: check if we can replace the hovered block itself
       const hovered = b[e.instanceId];
@@ -351,6 +330,58 @@ function TypedInstances({
         store.convertBlockToPort(b[e.instanceId].pos);
         return;
       }
+      // Slab faces are only useful as paint targets — cube/pipe/slab tools
+      // all silently no-op on a slab. Surface a toast so the click doesn't
+      // disappear into the void; user almost certainly meant Paint.
+      if (isSlabType(b[e.instanceId].type) && armed !== "paint") {
+        useBlockStore.setState({ portWarning: "Switch to the Paint tool to recolor an existing slab" });
+        return;
+      }
+      // Slab tool clicking any other existing block is also a no-op — slabs
+      // only go in the gap between 4 pipes on the ground plane.
+      if (armed === "slab") {
+        useBlockStore.setState({ portWarning: "Slab tool: click an empty 2×2 gap between 4 pipes on the ground" });
+        return;
+      }
+      if (armed === "paint") {
+        if (!e.face) return;
+        const block = b[e.instanceId];
+        const faceIdx = faceIndexFromNormal(e.face.normal);
+        let key = String(faceIdx);
+        if (isSlabType(block.type) && (faceIdx === 2 || faceIdx === 3)) {
+          const [cx, , cz] = tqecToThree(block.pos, block.type);
+          const localX = e.point.x - cx;
+          const localZ = e.point.z - cz;
+          const ix = localX < -1 / 3 ? 0 : localX > 1 / 3 ? 2 : 1;
+          const iz = localZ < -1 / 3 ? 0 : localZ > 1 / 3 ? 2 : 1;
+          const q = ix + iz * 3;
+          key = `${faceIdx}:${q}`;
+        } else if (isPipeType(block.type)) {
+          // Strip both possible band-style suffixes ("H" for Hadamard, "Y" for Y-twist)
+          // before reading the open-axis position.
+          const base = block.type.length > 3 ? block.type.slice(0, 3) : block.type;
+          const tqecOpen = base.indexOf("O") as 0 | 1 | 2;
+          const threeOpen = TQEC_TO_THREE_AXIS[tqecOpen];
+          // Open-axis faces have no rendered geometry — ignore the click.
+          if ((faceIdx >> 1) === threeOpen) return;
+          // All pipes (plain, Hadamard, Y-twist) have three paintable strips
+          // per closed-axis face, split along the open axis. Hadamard's band
+          // matches its thin visual yellow stripe; plain and Y-twist split
+          // into equal thirds (geometry and hit-test stay aligned).
+          const [cx, cy, cz] = tqecToThree(block.pos, block.type);
+          const local: [number, number, number] = [
+            e.point.x - cx,
+            e.point.y - cy,
+            e.point.z - cz,
+          ];
+          const t = local[threeOpen];
+          const bh = block.type.endsWith("H") ? H_BAND_HALF_HEIGHT : PIPE_PAINT_BAND_HALF;
+          const strip = t < -bh ? "below" : t > bh ? "above" : "band";
+          key = `${faceIdx}:${strip}`;
+        }
+        store.paintFace(block.pos, key, store.paintColor);
+        return;
+      }
       // Place mode: try replacing the clicked block if the selected type
       // is valid at the clicked block's position
       const clicked = b[e.instanceId];
@@ -408,6 +439,7 @@ export function BlockInstances() {
       type: BlockType;
       hiddenFaces: FaceMask;
       dimmed: boolean;
+      faceColors?: Record<string, string>;
       blocks: Block[];
     };
     const map = new Map<string, Group>();
@@ -416,7 +448,8 @@ export function BlockInstances() {
       const dimmed =
         flowVizMode ||
         (viewMode.kind === "iso" && !posInActiveSlice(viewMode, block.pos));
-      const key = `${block.type}:${hf}:${dimmed ? 1 : 0}`;
+      const fcKey = faceColorsKey(block.faceColors);
+      const key = `${block.type}:${hf}:${dimmed ? 1 : 0}:${fcKey}`;
       const existing = map.get(key);
       if (existing) {
         existing.blocks.push(block);
@@ -425,6 +458,7 @@ export function BlockInstances() {
           type: block.type,
           hiddenFaces: hf,
           dimmed,
+          faceColors: block.faceColors,
           blocks: [block],
         });
       }
@@ -442,6 +476,7 @@ export function BlockInstances() {
           blocks={group.blocks}
           allBlocks={blocks}
           dimmed={group.dimmed}
+          faceColors={group.faceColors}
         />
       ))}
     </>

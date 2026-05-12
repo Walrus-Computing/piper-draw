@@ -59,6 +59,7 @@ Select two or more blocks and press `G` to bundle them into a group. Grouped blo
 
 ### Files
 - **Import** / **Export** round-trip through Collada (`.dae`) files.
+- **Share link** — copy a self-contained URL with the scene compressed into the hash fragment; opening the link restores the exact diagram. Capped at 6 KB; for larger scenes, use Export instead.
 - **Templates** — load a bundled example diagram (CNOT, CZ, move + rotation, three CNOTs, Steane encoding) as a starting point, or insert one into the current scene.
 - **Equiseta JSON viewer + import** — the **Equiseta ▾** toolbar dropdown opens a floating panel that displays JSON files produced by [Equiseta](https://github.com/Walrus-Computing/equiseta)'s `FTQCGraph.to_json()` serializer. Pick a bundled fixture, drop a `.json` file onto the panel, or use **Open JSON…**. Switch between a raw JSON tree and a per-node faces grid showing the 6 face colors. **Import** materialises a single-node Equiseta graph into a piper cube + adjacent port markers + hadamard pipes (replaces the current scene); **Insert** appends them at the +X edge of the existing scene. Five of the nine bundled fixtures import cleanly; the four that have no piper-draw cube-type equivalent reject with a diagnostic toast. Multi-node graphs and edges are deferred to a follow-up PR.
 
