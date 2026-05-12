@@ -1019,7 +1019,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     const key = posKey(pos);
     const oldBlock = state.blocks.get(key);
     if (!oldBlock) return state;
-    let nextOverrides: Record<string, string> = { ...(oldBlock.faceColors ?? {}) };
+    const nextOverrides: Record<string, string> = { ...(oldBlock.faceColors ?? {}) };
     nextOverrides[faceKey] = color;
 
     // Auto-promote: a Hadamard pipe whose yellow band is painted away from H_HEX
