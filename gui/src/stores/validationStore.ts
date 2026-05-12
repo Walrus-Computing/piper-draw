@@ -93,7 +93,10 @@ export const useValidationStore = create<ValidationStore>((set, get) => ({
       errors.sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y || a.position.z - b.position.z);
       const allErrors = [...errors, ...globalErrors];
       const keys = new Set(errors.map((e) => posKey(e.position)));
-      set({ status: "invalid", errors: allErrors, invalidKeys: keys });
+      // Transport-level failure (server down / non-2xx) becomes status="error"
+      // so the UI renders "verifier not running" instead of "your fixture is broken".
+      const nextStatus: ValidationStatus = result.transportError ? "error" : "invalid";
+      set({ status: nextStatus, errors: allErrors, invalidKeys: keys });
     }
   },
 

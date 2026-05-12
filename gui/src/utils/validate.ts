@@ -8,6 +8,12 @@ export interface ValidationErrorItem {
 export interface ValidationResult {
   valid: boolean;
   errors: ValidationErrorItem[];
+  /**
+   * Set when the failure was transport-level (server unreachable or non-2xx),
+   * not a semantic TQEC violation. Lets callers render distinct UI for
+   * "your fixture is broken" vs "the verifier isn't running".
+   */
+  transportError?: boolean;
 }
 
 export async function validateDiagram(
@@ -28,6 +34,7 @@ export async function validateDiagram(
       return {
         valid: false,
         errors: [{ position: null, message: `Server error: ${res.status}` }],
+        transportError: true,
       };
     }
     return (await res.json()) as ValidationResult;
@@ -40,6 +47,7 @@ export async function validateDiagram(
           message: "Verification server not available. Start with: npm run dev",
         },
       ],
+      transportError: true,
     };
   }
 }
