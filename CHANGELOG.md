@@ -6,6 +6,22 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.5.0.0] - 2026-05-12
+
+### Added
+- **Equiseta multi-cube import.** The translator now accepts graphs with 2+ nodes and edges. Each edge → one pipe; pipe type derives from the seam axis + connected cubes' basis triples (`OZX`, `OXZ`, `ZOX`, `XOZ`, `ZXO`, `XZO` and their hadamard variants). Eight new bundled fixtures cover the canonical lattice-surgery building blocks from equiseta's `examples/two_cubes/`: `blue_pair_east_west`, `red_pair_east_west`, `zxx_memory_pair`, `xzz_memory_pair`, `zxx_time_evolution`, `hadamard_pipe`, `port_io_pair`, `disconnected_pair`. Four are representable in piper-draw (`zxx_memory_pair`, `xzz_memory_pair`, `hadamard_pipe`, `disconnected_pair`); the other four are pedagogical equiseta fixtures whose cube types (`ZZZ`/`XXX`) or pipe types (`ZZO`) aren't part of piper-draw's surface-code model — they surface diagnostic toasts naming the unsupported pattern, same precedent as the existing single-cube `all_red`/`all_blue`.
+- **Grouped Equiseta examples dropdown.** The `EquisetaMenu` dropdown now renders `Single cube` and `Two cubes` sections with subheaders. Manifest shape grew from `examples: []` to `groups: [{label, examples}]`; the loader still accepts the legacy flat shape (wraps into a single unlabeled group) so external manifests don't break.
+- **Runtime JSON normalization.** `parseFtqcGraph` silently drops upstream's `"version"` field and lowercases face direction keys (`"BOTTOM"` → `"bottom"`, ...). Lets fresh equiseta JSONs (file-picker drops, drag-and-drop) parse without hand-stripping. Strict mode preserved for every other field — unknown FaceColors, extra node keys, and unknown ridge IDs all still reject loudly.
+- **Five new edge-validation errors.** `edge-dangling`, `edge-non-adjacent`, `edge-self-loop`, `edge-duplicate`, `edge-seam-incompatible`, plus a sixth `edge-no-pipe-type` for the four equiseta-valid-but-piper-draw-unrepresentable seam-pipe cases. All surface inline coordinates in the toast for fast diagnosis.
+
+### Changed
+- **Internal split of the Equiseta importer.** `equisetaImport.ts` was 432 LOC and growing — past the CLAUDE.md 500 LOC yellow line. Now factored into three files: `equisetaImport.ts` (orchestrator, ~220 LOC), `equisetaNodeToCube.ts` (per-node translation + shared axis utilities, ~370 LOC), `equisetaEdgeToPipe.ts` (edge validation + pipe synthesis, ~260 LOC). No public API changes for the controller (`equisetaImportController.ts`) or panel.
+- **Sync script now pins** equiseta SHA `7fe129ce` (head of `peter-janderks/two-qubit-json-examples`). Fetches single-cube and two-cube directories; writes upstream JSON verbatim (canonicalization runs at runtime).
+- **Multi-node guard removed.** The `multi-node` rejection error variant is gone; `equisetaToBlocks` returns a populated multi-cube/multi-pipe result.
+
+### Removed
+- **Legacy `two_cubes.json`** bundled fixture (the hand-stripped lowercase-faces version). Superseded by `blue_pair_east_west.json` which is the upstream-faithful equivalent.
+
 ## [0.4.0.0] - 2026-05-12
 
 ### Added
