@@ -52,6 +52,39 @@ export const FACE_OFFSET: Record<FaceDirection, Position3D> = {
   bottom: { x: 0, y: 0, z: -1 },
 };
 
+/**
+ * Offset from cube center to the adjacent pipe slot for a satellite pipe.
+ * Pipes live on the alternating grid at positions where exactly one coord
+ * is ≡ 1 (mod 3) (see `isValidPipePos`). For a cube at (0,0,0):
+ *   - positive direction (+1) lands at mod-3 == 1 directly
+ *   - negative direction must skip to (-2) so mod(-2, 3) == 1
+ * Using FACE_OFFSET (±1) for both directions silently places negative-axis
+ * pipes at invalid positions.
+ */
+export const PIPE_SATELLITE_OFFSET: Record<FaceDirection, Position3D> = {
+  east: { x: +1, y: 0, z: 0 },
+  west: { x: -2, y: 0, z: 0 },
+  north: { x: 0, y: +1, z: 0 },
+  south: { x: 0, y: -2, z: 0 },
+  top: { x: 0, y: 0, z: +1 },
+  bottom: { x: 0, y: 0, z: -2 },
+};
+
+/**
+ * Offset from cube center to the cube-grid endpoint of a satellite pipe —
+ * where a port marker conceptually sits (one cube-slot beyond the pipe).
+ * Matches `getAllPortPositions`'s pipe-endpoint convention (offsets −1, +2
+ * from the pipe pos), which yields ±3 from the cube center.
+ */
+export const PORT_SATELLITE_OFFSET: Record<FaceDirection, Position3D> = {
+  east: { x: +3, y: 0, z: 0 },
+  west: { x: -3, y: 0, z: 0 },
+  north: { x: 0, y: +3, z: 0 },
+  south: { x: 0, y: -3, z: 0 },
+  top: { x: 0, y: 0, z: +3 },
+  bottom: { x: 0, y: 0, z: -3 },
+};
+
 export const PRIMARY_FACE: Record<Axis, FaceDirection> = {
   X: "east",
   Y: "north",
@@ -160,7 +193,7 @@ export interface NodeToCubeSuccess {
   ok: true;
   /** Cube position (or, for all-open: where the port marker lands). */
   pos: Position3D;
-  /** Block map containing the cube + any hadamard satellites. Empty for all-open. */
+  /** Block map containing the cube + any hadamard/port-pipe satellites. Empty for all-open. */
   blocks: Map<string, Block>;
   /** Port markers from `face === "port"` (and the all-open special case). */
   portPositions: Set<string>;
@@ -170,6 +203,8 @@ export interface NodeToCubeSuccess {
   portCount: number;
   /** Number of hadamard pipe satellites emitted into `blocks`. */
   hadamardCount: number;
+  /** Number of port-pipe satellites emitted into `blocks` (one per `port` face). */
+  portPipeCount: number;
 }
 
 export type NodeToCubeResult = NodeToCubeSuccess | NodeToCubeError;
@@ -251,20 +286,47 @@ export function pickCubeTypeWithFallback(
   return { type: fallbackType, fallback: true, pattern: flat };
 }
 
-function hadamardPipeVariant(
+/**
+ * Build the 3-letter pipe code for an open pipe along `axis` attached to a
+ * cube with `cubeBasis`. Returns e.g. "XZO" for Z-axis pipe on an XZZ cube.
+ * Caller appends "H" for hadamard variants.
+ */
+export function pipeCodeForFace(
   axis: Axis,
   cubeBasis: Readonly<Record<Axis, Basis>>,
-): PipeType | null {
+): string {
   const codes: Record<Axis, string> = {
     X: axis === "X" ? "O" : cubeBasis.X,
     Y: axis === "Y" ? "O" : cubeBasis.Y,
     Z: axis === "Z" ? "O" : cubeBasis.Z,
   };
-  const flat = `${codes.X}${codes.Y}${codes.Z}H`;
+  return `${codes.X}${codes.Y}${codes.Z}`;
+}
+
+function hadamardPipeVariant(
+  axis: Axis,
+  cubeBasis: Readonly<Record<Axis, Basis>>,
+): PipeType | null {
+  const flat = `${pipeCodeForFace(axis, cubeBasis)}H`;
   return (PIPE_TYPES as readonly string[]).includes(flat) ? (flat as PipeType) : null;
 }
 
 export type BasisHints = Partial<Record<Axis, Basis>>;
+
+/**
+ * Fallback pipe type per open axis, used when the natural code from
+ * pipeCodeForFace (or the edge-translator's pipeCodeForAxis) isn't in
+ * PIPE_TYPES. Pipe is emitted with `freeBuildOnly.displayPattern` carrying
+ * the original code so the renderer can override face materials.
+ *
+ * Lives here (not in equisetaEdgeToPipe.ts) so equisetaNodeToCube can use it
+ * for satellite port-pipes without forming a circular import.
+ */
+export const FALLBACK_PIPE_TYPE_BY_AXIS: ReadonlyMap<Axis, PipeType> = new Map<Axis, PipeType>([
+  ["X", "OZX"],
+  ["Y", "ZOX"],
+  ["Z", "ZXO"],
+]);
 
 /**
  * Resolve all three axis bases for a node. Returns the basis triple, or the
@@ -311,32 +373,55 @@ function emitSatellites(
   seamFaces: ReadonlySet<FaceDirection>,
   blocks: Map<string, Block>,
   portPositions: Set<string>,
-): { portCount: number; hadamardCount: number } {
+): { portCount: number; hadamardCount: number; portPipeCount: number } {
   let portCount = 0;
   let hadamardCount = 0;
+  let portPipeCount = 0;
   for (const dir of FACE_DIRS) {
     if (seamFaces.has(dir)) continue;
     const color = node.faces[dir];
     if (color !== "port" && color !== "hadamard") continue;
-    const offset = FACE_OFFSET[dir];
-    const satPos: Position3D = {
-      x: pos.x + offset.x,
-      y: pos.y + offset.y,
-      z: pos.z + offset.z,
+    const axis = FACE_AXIS[dir];
+    const pipeOffset = PIPE_SATELLITE_OFFSET[dir];
+    const pipePos: Position3D = {
+      x: pos.x + pipeOffset.x,
+      y: pos.y + pipeOffset.y,
+      z: pos.z + pipeOffset.z,
     };
     if (color === "port") {
-      portPositions.add(posKey(satPos));
+      const code = pipeCodeForFace(axis, finalBasis);
+      const pipeType: PipeType = (PIPE_TYPES as readonly string[]).includes(code)
+        ? (code as PipeType)
+        : (FALLBACK_PIPE_TYPE_BY_AXIS.get(axis) as PipeType);
+      const pipeBlock: Block =
+        pipeType === code
+          ? { pos: pipePos, type: pipeType, groupId }
+          : {
+              pos: pipePos,
+              type: pipeType,
+              groupId,
+              freeBuildOnly: { reason: "unsupported-pattern", displayPattern: code },
+            };
+      blocks.set(posKey(pipePos), pipeBlock);
+      const portOffset = PORT_SATELLITE_OFFSET[dir];
+      const portPos: Position3D = {
+        x: pos.x + portOffset.x,
+        y: pos.y + portOffset.y,
+        z: pos.z + portOffset.z,
+      };
+      portPositions.add(posKey(portPos));
       portCount++;
+      portPipeCount++;
     } else {
       // hadamard
-      const variant = hadamardPipeVariant(FACE_AXIS[dir], finalBasis);
+      const variant = hadamardPipeVariant(axis, finalBasis);
       if (variant !== null) {
-        blocks.set(posKey(satPos), { pos: satPos, type: variant, groupId });
+        blocks.set(posKey(pipePos), { pos: pipePos, type: variant, groupId });
         hadamardCount++;
       }
     }
   }
-  return { portCount, hadamardCount };
+  return { portCount, hadamardCount, portPipeCount };
 }
 
 export function isValidCoordinate(c: readonly number[]): boolean {
@@ -380,6 +465,7 @@ export function nodeToCube(
       cubeType: null,
       portCount: 1,
       hadamardCount: 0,
+      portPipeCount: 0,
     };
   }
 
@@ -434,5 +520,6 @@ export function nodeToCube(
     cubeType,
     portCount: counts.portCount,
     hadamardCount: counts.hadamardCount,
+    portPipeCount: counts.portPipeCount,
   };
 }

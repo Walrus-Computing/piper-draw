@@ -6,6 +6,17 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.7.1.0] - 2026-05-13
+
+### Fixed
+- **Equiseta `port` faces now render as pipe + port instead of an orphan port marker at a pipe-grid coordinate.** Previously a `port` face emitted only a port marker at offset ±1 from the cube — a pipe-slot position, not a valid port-end. With the fix, every `port` face emits a satellite pipe at the adjacent pipe slot (`±1` for positive directions, `−2` for negative) and a port marker at the pipe's cube-grid endpoint (`±3`). `port_io.json` now imports as 1 cube + 2 pipes + 2 ports; `port_io_pair.json` as 2 cubes + 3 pipes + 2 ports; `koval_q_couch_cnot.json` as 10 cubes + 14 pipes + 4 ports + 1 slab.
+- **Hadamard pipe satellites on negative-direction faces no longer land at invalid `isValidPipePos` coordinates.** `emitSatellites` previously used `FACE_OFFSET` (±1) for both port markers and hadamard pipes; this silently placed BOTTOM/SOUTH/WEST hadamard pipes at `mod 3 == 2` positions that fail the pipe-grid validator. No existing fixture exercised the bug, but it would have surfaced the first time a hadamard appeared on a negative-axis face.
+
+### Changed
+- **`equisetaNodeToCube.ts` introduces `PIPE_SATELLITE_OFFSET` and `PORT_SATELLITE_OFFSET` maps.** These replace `FACE_OFFSET`'s misuse for satellite-block placement. `PIPE_SATELLITE_OFFSET` matches the convention from `pipeBetween` (cube → adjacent pipe slot, accounting for direction); `PORT_SATELLITE_OFFSET` matches `getAllPortPositions`'s pipe-endpoint offsets (`−1`, `+2` from pipe, which equals `±3` from cube).
+- **`pipeCodeForFace(axis, basis)` factored out of `hadamardPipeVariant`.** Returns the 3-letter pipe code (e.g. `XZO`); hadamard appends `H`, port-pipe uses the raw code or falls back via `FALLBACK_PIPE_TYPE_BY_AXIS`. `FALLBACK_PIPE_TYPE_BY_AXIS` moved from `equisetaEdgeToPipe.ts` to `equisetaNodeToCube.ts` to avoid a circular import; the edge translator now imports it.
+- **`ImportSuccess.pipeCount` now includes port-pipes** alongside edge-pipes. The `summarizeSuccess` toast reflects the combined count (e.g. `"Imported XXZ cube + 2 pipes + 2 ports from port_io.json"`).
+
 ## [0.7.0.0] - 2026-05-12
 
 ### Added

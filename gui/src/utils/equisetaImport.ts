@@ -153,6 +153,7 @@ interface NodePassAccumulator {
   cubeCount: number;
   portCount: number;
   hadamardCount: number;
+  portPipeCount: number;
   firstCubeType: CubeType | null;
   firstGroupId: string | null;
 }
@@ -264,6 +265,7 @@ function runNodePass(
     cubeCount: 0,
     portCount: 0,
     hadamardCount: 0,
+    portPipeCount: 0,
     firstCubeType: null,
     firstGroupId: null,
   };
@@ -284,6 +286,7 @@ function runNodePass(
     }
     acc.portCount += r.portCount;
     acc.hadamardCount += r.hadamardCount;
+    acc.portPipeCount += r.portPipeCount;
   }
   return acc;
 }
@@ -310,7 +313,7 @@ export function equisetaToBlocks(graph: FtqcGraph): ImportResult {
   const acc = nodePass as NodePassAccumulator;
 
   const seenEdgeKeys = new Set<string>();
-  let pipeCount = 0;
+  let edgePipeCount = 0;
   for (const edge of graph.edges) {
     const ka = coordKey(edge[0]);
     const gid = groupIdFor(nodeIndex.has(ka) ? ka : coordKey(edge[1]));
@@ -318,7 +321,7 @@ export function equisetaToBlocks(graph: FtqcGraph): ImportResult {
     if (!r.ok) return r;
     const posK = `${r.pos.x},${r.pos.y},${r.pos.z}`;
     acc.blocks.set(posK, pipeBlockFromResult(r, gid));
-    pipeCount++;
+    edgePipeCount++;
   }
 
   // JSON coords are on a 1-unit cube grid; piper-draw scales by 3. A 2×2 XY
@@ -353,7 +356,7 @@ export function equisetaToBlocks(graph: FtqcGraph): ImportResult {
     portPositions: acc.ports,
     cubeType: acc.cubeCount === 1 ? acc.firstCubeType : null,
     cubeCount: acc.cubeCount,
-    pipeCount,
+    pipeCount: edgePipeCount + acc.portPipeCount,
     portCount: acc.portCount,
     hadamardCount: acc.hadamardCount,
     slabCount,

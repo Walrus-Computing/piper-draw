@@ -23,6 +23,7 @@ import {
   diffAxis,
   FACE_AXIS,
   FACE_OFFSET,
+  FALLBACK_PIPE_TYPE_BY_AXIS,
   pipeBetween,
   type Axis,
 } from "./equisetaNodeToCube";
@@ -178,12 +179,6 @@ function resolvePipeType(
  * MATCH which contradicts hadamard's required FLIP — so `pipeCodeForAxis`
  * returns `null` for hadamard-on-fallback inputs.
  */
-const FALLBACK_PIPE_TYPE_BY_AXIS: ReadonlyMap<Axis, PipeType> = new Map<Axis, PipeType>([
-  ["X", "OZX"],
-  ["Y", "ZOX"],
-  ["Z", "ZXO"],
-]);
-
 function resolvePipeTypeWithFallback(
   openAxis: Axis,
   cubeA: CubeType,

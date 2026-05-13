@@ -91,15 +91,37 @@ describe("equisetaToBlocks — bundled fixture coverage (D7')", () => {
     expect(r.portCount).toBe(0);
   });
 
-  it("port_io.json → XXZ cube + 2 port markers on Z-axis", () => {
+  it("port_io.json → XXZ cube + 2 freeBuildOnly pipes + 2 ports on Z-axis", () => {
+    // Each `port` face emits a pipe (one cube-slot adjacent) and a port at
+    // the pipe's far cube-grid endpoint. XXZ + Z-axis open has no valid
+    // TQEC pipe variant (XXO ∉ PIPE_TYPES) so both pipes fall back to ZXO
+    // with displayPattern "XXO" via the same freeBuildOnly path that
+    // edgeToPipe uses for unsupported edge patterns.
     const r = equisetaToBlocks(loadFixture("port_io.json"));
     assertSuccess(r);
     expect(r.cubeType).toBe("XXZ");
-    expect(r.blocks.size).toBe(1);
+    expect(r.cubeCount).toBe(1);
+    expect(r.pipeCount).toBe(2);
     expect(r.portCount).toBe(2);
     expect(r.hadamardCount).toBe(0);
-    expect(r.portPositions.has("0,0,1")).toBe(true);
-    expect(r.portPositions.has("0,0,-1")).toBe(true);
+    expect(r.blocks.size).toBe(3);
+    // Ports land at the pipe's cube-grid endpoint (±3), not at the pipe
+    // slot (±1) the old code wrote.
+    expect(r.portPositions.has("0,0,3")).toBe(true);
+    expect(r.portPositions.has("0,0,-3")).toBe(true);
+    // Top pipe at z=+1 (pipe-slot), bottom pipe at z=-2 (also a pipe-slot
+    // — mod(-2, 3) == 1). Both validate against isValidPipePos.
+    const topPipe = r.blocks.get("0,0,1");
+    expect(topPipe?.type).toBe("ZXO");
+    expect(isValidPipePos(topPipe!.pos)).toBe(true);
+    expect(topPipe?.freeBuildOnly).toEqual({
+      reason: "unsupported-pattern",
+      displayPattern: "XXO",
+    });
+    const bottomPipe = r.blocks.get("0,0,-2");
+    expect(bottomPipe?.type).toBe("ZXO");
+    expect(isValidPipePos(bottomPipe!.pos)).toBe(true);
+    expect(bottomPipe?.freeBuildOnly?.displayPattern).toBe("XXO");
   });
 
   it("y_defect_ridges.json → ZZX cube (ridges v1-ignored)", () => {
@@ -118,6 +140,7 @@ describe("equisetaToBlocks — bundled fixture coverage (D7')", () => {
     expect(r.portCount).toBe(1);
     expect(r.portPositions.has("0,0,0")).toBe(true);
   });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -188,6 +211,124 @@ describe("equisetaToBlocks — view-only fallback for unsupported patterns", () 
     const pipe = Array.from(r.blocks.values()).find((b) => isPipeType(b.type));
     expect(pipe).toBeDefined();
     expect(pipe!.freeBuildOnly?.displayPattern).toBe("OXX");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite 2b: Port-pipe satellite placement (port face → pipe + port at cube-grid)
+// ---------------------------------------------------------------------------
+
+describe("equisetaToBlocks — port-pipe satellite emission", () => {
+  it("non-Z axis port: ZXZ cube with EAST=port → OXZ pipe at +x=1, port at +x=3", () => {
+    const graph: FtqcGraph = {
+      nodes: [
+        buildNode({
+          east: "port",
+          west: "blue",
+          north: "red",
+          south: "red",
+          top: "blue",
+          bottom: "blue",
+        }),
+      ],
+      edges: [],
+    };
+    const r = equisetaToBlocks(graph);
+    assertSuccess(r);
+    expect(r.cubeType).toBe("ZXZ");
+    expect(r.pipeCount).toBe(1);
+    expect(r.portCount).toBe(1);
+    const pipe = r.blocks.get("1,0,0");
+    expect(pipe?.type).toBe("OXZ");
+    expect(isValidPipePos(pipe!.pos)).toBe(true);
+    // ZXZ + X-axis open yields a valid TQEC pipe code — no freeBuildOnly.
+    expect(pipe?.freeBuildOnly).toBeUndefined();
+    expect(r.portPositions.has("3,0,0")).toBe(true);
+    expect(isValidBlockPos({ x: 3, y: 0, z: 0 })).toBe(true);
+  });
+
+  it("negative-direction port: ZXZ cube with WEST=port → pipe at x=-2, port at x=-3", () => {
+    const graph: FtqcGraph = {
+      nodes: [
+        buildNode({
+          east: "blue",
+          west: "port",
+          north: "red",
+          south: "red",
+          top: "blue",
+          bottom: "blue",
+        }),
+      ],
+      edges: [],
+    };
+    const r = equisetaToBlocks(graph);
+    assertSuccess(r);
+    expect(r.cubeType).toBe("ZXZ");
+    const pipe = r.blocks.get("-2,0,0");
+    expect(pipe).toBeDefined();
+    expect(isValidPipePos(pipe!.pos)).toBe(true);
+    expect(pipe?.type).toBe("OXZ");
+    expect(r.portPositions.has("-3,0,0")).toBe(true);
+  });
+
+  it("non-fallback Z-axis port: XZZ cube with TOP=port → XZO pipe, no freeBuildOnly", () => {
+    // XZZ cube + Z-axis open yields code "XZO" which IS in PIPE_TYPES.
+    const graph: FtqcGraph = {
+      nodes: [
+        buildNode({
+          east: "red",
+          west: "red",
+          north: "blue",
+          south: "blue",
+          top: "port",
+          bottom: "blue",
+        }),
+      ],
+      edges: [],
+    };
+    const r = equisetaToBlocks(graph);
+    assertSuccess(r);
+    expect(r.cubeType).toBe("XZZ");
+    const pipe = r.blocks.get("0,0,1");
+    expect(pipe?.type).toBe("XZO");
+    expect(pipe?.freeBuildOnly).toBeUndefined();
+    expect(r.portPositions.has("0,0,3")).toBe(true);
+  });
+
+  it("bottom hadamard: ZXX cube with BOTTOM=hadamard → ZXOH pipe at z=-2", () => {
+    // Regression test for the dormant FACE_OFFSET bug: negative-direction
+    // hadamard satellite must land at the valid pipe-slot (mod -2, 3 == 1),
+    // not at z=-1 (mod == 2, invalid).
+    const graph: FtqcGraph = {
+      nodes: [
+        buildNode({
+          east: "blue",
+          west: "blue",
+          north: "red",
+          south: "red",
+          top: "red",
+          bottom: "hadamard",
+        }),
+      ],
+      edges: [],
+    };
+    const r = equisetaToBlocks(graph);
+    assertSuccess(r);
+    expect(r.cubeType).toBe("ZXX");
+    expect(r.hadamardCount).toBe(1);
+    const pipe = r.blocks.get("0,0,-2");
+    expect(pipe?.type).toBe("ZXOH");
+    expect(isValidPipePos(pipe!.pos)).toBe(true);
+  });
+
+  it("hadamard_top.json regression: TOP hadamard pipe still at z=+1", () => {
+    const r = equisetaToBlocks(loadFixture("hadamard_top.json"));
+    assertSuccess(r);
+    expect(r.hadamardCount).toBe(1);
+    const pipe = r.blocks.get("0,0,1");
+    expect(pipe).toBeDefined();
+    expect(isPipeType(pipe!.type)).toBe(true);
+    expect((pipe!.type as string).endsWith("H")).toBe(true);
   });
 });
 
@@ -271,7 +412,7 @@ describe("equisetaToBlocks — synthetic edge cases", () => {
     expect(block.pos).toEqual({ x: 3, y: -6, z: 9 });
   });
 
-  it("port on east face → port marker at +X offset from cube", () => {
+  it("port on east face → port-pipe at +x=1 + port at cube-grid +x=3", () => {
     const graph: FtqcGraph = {
       nodes: [
         buildNode({ east: "port", west: "red", north: "red", south: "red", top: "blue", bottom: "blue" }),
@@ -284,7 +425,14 @@ describe("equisetaToBlocks — synthetic edge cases", () => {
     // Y-axis = X-basis (red/red), Z-axis = Z-basis (blue/blue) → XXZ
     expect(r.cubeType).toBe("XXZ");
     expect(r.portCount).toBe(1);
-    expect(r.portPositions.has("1,0,0")).toBe(true);
+    expect(r.pipeCount).toBe(1);
+    // XXZ + X-axis open yields code "OXZ" which IS in PIPE_TYPES, so the
+    // pipe is a regular open pipe (no freeBuildOnly fallback). Port lands
+    // at the pipe's cube-grid endpoint (+3).
+    const pipe = r.blocks.get("1,0,0");
+    expect(pipe?.type).toBe("OXZ");
+    expect(pipe?.freeBuildOnly).toBeUndefined();
+    expect(r.portPositions.has("3,0,0")).toBe(true);
   });
 
   it("all-port faces with no basis info → no-basis-info", () => {
@@ -390,17 +538,31 @@ describe("equisetaToBlocks — two-cube fixtures (v0.5)", () => {
     expect(pipe?.freeBuildOnly?.displayPattern).toBe("ZZO");
   });
 
-  it("port_io_pair.json → 2 ZZX cubes + ports + 1 view-only ZXO pipe", () => {
-    // Same shape as zxx_time_evolution with PORT markers on outer Z faces.
-    // Now succeeds via the pipe fallback path; cubes & ports unchanged.
+  it("port_io_pair.json → 2 ZZX cubes + 3 fallback ZXO pipes + 2 ports", () => {
+    // Same shape as zxx_time_evolution with PORT markers on the outer
+    // Z-faces (cube A: BOTTOM, cube B: TOP). The seam edge is between
+    // [0,0,0] and [0,0,1]. Each port face emits a pipe + port; combined
+    // with the edge-pipe, the scene now contains 3 pipes — all freeBuildOnly
+    // fallbacks because ZZX + Z-axis open yields code "ZZO" ∉ PIPE_TYPES.
     const r = equisetaToBlocks(loadFixture("port_io_pair.json"));
     assertSuccess(r);
     expect(r.cubeCount).toBe(2);
-    expect(r.pipeCount).toBe(1);
+    expect(r.pipeCount).toBe(3);
     expect(r.portCount).toBe(2);
-    const pipe = Array.from(r.blocks.values()).find((b) => isPipeType(b.type));
-    expect(pipe?.type).toBe("ZXO");
-    expect(pipe?.freeBuildOnly?.displayPattern).toBe("ZZO");
+    // Edge pipe at the seam between cube A and cube B.
+    expect(r.blocks.get("0,0,1")?.type).toBe("ZXO");
+    // Port-pipe satellites: cube A bottom (z=-2), cube B top (z=4).
+    expect(r.blocks.get("0,0,-2")?.type).toBe("ZXO");
+    expect(r.blocks.get("0,0,4")?.type).toBe("ZXO");
+    // Ports at the pipes' far cube-grid endpoints.
+    expect(r.portPositions.has("0,0,-3")).toBe(true);
+    expect(r.portPositions.has("0,0,6")).toBe(true);
+    // All three pipes carry the same fallback displayPattern.
+    for (const b of r.blocks.values()) {
+      if (isPipeType(b.type)) {
+        expect(b.freeBuildOnly?.displayPattern).toBe("ZZO");
+      }
+    }
   });
 
   it("hadamard_pipe.json → ZZX + XXZ cubes joined by OZXH (bases flip across H)", () => {
@@ -459,7 +621,7 @@ describe("equisetaToBlocks — two-cube fixtures (v0.5)", () => {
     expect(groupIds.size).toBe(2);
   });
 
-  it("koval_q_couch_cnot.json → 10 cubes + 10 pipes + 4 ports + 1 slab (basis-hint propagation + 2×2 cluster)", () => {
+  it("koval_q_couch_cnot.json → 10 cubes + 14 pipes + 4 ports + 1 slab (basis-hint propagation + 2×2 cluster)", () => {
     // The Koval-q couch CNOT has a Y-axis sandwich at (0,1,1) (both north and
     // south are open seams), so its Y basis is wildcard from face-color
     // resolution alone. The neighboring cube (1,1,1) has Y=X fixed by its
@@ -471,13 +633,16 @@ describe("equisetaToBlocks — two-cube fixtures (v0.5)", () => {
     // The couch's bottom layer (JSON z=1) has cubes at (0,0,1), (1,0,1),
     // (0,1,1), (1,1,1) — a 2×2 XY cluster. The auto-slab rule fills the gap
     // with a slab at piper-draw (1, 1, 3) (toolbar shows 0.333, 0.333, 1).
+    //
+    // Pipe count breakdown: 10 edge-pipes + 4 port-pipes (one per port face,
+    // emitted by the satellite-port→pipe-and-port rule in emitSatellites).
     const r = equisetaToBlocks(loadFixture("koval_q_couch_cnot.json"));
     assertSuccess(r);
     expect(r.cubeCount).toBe(10);
-    expect(r.pipeCount).toBe(10);
+    expect(r.pipeCount).toBe(14);
     expect(r.portCount).toBe(4);
     expect(r.slabCount).toBe(1);
-    expect(r.blocks.size).toBe(21);
+    expect(r.blocks.size).toBe(25);
     const slab = r.blocks.get("1,1,3");
     expect(slab?.type).toBe("slab");
     expect(slab?.pos).toEqual({ x: 1, y: 1, z: 3 });
@@ -751,11 +916,11 @@ describe("equisetaToBlocks — axis-permutation table", () => {
 });
 
 describe("summarizeSuccess / summarizeError", () => {
-  it("success toast: cube + 2 ports + filename", () => {
+  it("success toast: cube + port-pipes + ports + filename", () => {
     const r = equisetaToBlocks(loadFixture("port_io.json"));
     assertSuccess(r);
     expect(summarizeSuccess(r, "port_io.json")).toBe(
-      "Imported XXZ cube + 2 ports from port_io.json",
+      "Imported XXZ cube + 2 pipes + 2 ports from port_io.json",
     );
   });
 
@@ -777,7 +942,7 @@ describe("summarizeSuccess / summarizeError", () => {
     const r = equisetaToBlocks(loadFixture("koval_q_couch_cnot.json"));
     assertSuccess(r);
     expect(summarizeSuccess(r, "koval_q_couch_cnot.json")).toBe(
-      "Imported 10 cubes + 10 pipes + 4 ports + 1 slab from koval_q_couch_cnot.json",
+      "Imported 10 cubes + 14 pipes + 4 ports + 1 slab from koval_q_couch_cnot.json",
     );
   });
 
