@@ -16,15 +16,19 @@
  * are documented in `equisetaEdgeToPipe.ts`.
  */
 
-import type { Block, CubeType } from "../types";
+import { posKey, SLAB_TYPE, type Block, type CubeType, type Position3D } from "../types";
 import { type FaceColor, type FaceDirection, type FtqcGraph, type FtqcNode } from "./equisetaJsonSchema";
 import {
+  diffAxis,
   newGroupId,
   nodeToCube,
   type Axis,
+  type BasisHints,
   type NodeToCubeError,
 } from "./equisetaNodeToCube";
 import { edgeToPipe, pipeBlockFromResult, seamFacesForEdge, type EdgeToPipeError } from "./equisetaEdgeToPipe";
+
+type Basis = "X" | "Z";
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -45,6 +49,8 @@ export interface ImportSuccess {
   portCount: number;
   /** Hadamard pipe satellites emitted from face=hadamard markers (non-seam faces). */
   hadamardCount: number;
+  /** Slabs auto-emitted for XY 2×2 cube clusters. */
+  slabCount: number;
   /**
    * Primary groupId — for single-component imports, the shared id of every
    * block. For multi-component (e.g., disconnected_pair) imports, the first
@@ -151,10 +157,105 @@ interface NodePassAccumulator {
   firstGroupId: string | null;
 }
 
+const FACE_AXIS_LOCAL: Record<FaceDirection, Axis> = {
+  east: "X", west: "X", north: "Y", south: "Y", top: "Z", bottom: "Z",
+};
+
+function basisFromColor(c: FaceColor): Basis | null {
+  if (c === "red") return "X";
+  if (c === "blue") return "Z";
+  return null;
+}
+
+function pickKnownBasis(node: FtqcNode, axis: Axis): Basis | null {
+  const dirs = (Object.keys(FACE_AXIS_LOCAL) as FaceDirection[]).filter(
+    (d) => FACE_AXIS_LOCAL[d] === axis,
+  );
+  for (const d of dirs) {
+    const b = basisFromColor(node.faces[d]);
+    if (b !== null) return b;
+  }
+  return null;
+}
+
+function faceTowards(from: readonly [number, number, number], to: readonly [number, number, number]): FaceDirection | null {
+  const d = diffAxis(from, to);
+  if (d === null || Math.abs(d.step) !== 1) return null;
+  if (d.axis === "X") return d.step > 0 ? "east" : "west";
+  if (d.axis === "Y") return d.step > 0 ? "north" : "south";
+  return d.step > 0 ? "top" : "bottom";
+}
+
+/**
+ * Walk edges, propagate per-axis basis info between connected cubes.
+ *
+ * Motivates the existence of this pass: a cube sandwiched between two pipes
+ * on the same axis (e.g. (0,1,1) in koval_q_couch_cnot, with both north and
+ * south as open seams) has a wildcard basis on the sandwich axis, but a
+ * pipe on a different axis to a neighbor with a fixed basis pins it. Without
+ * propagation, the per-node canonical pick chooses the lexicographically
+ * first cube type, which may disagree with the neighbor and cause the pipe
+ * to fail with edge-no-pipe-type.
+ *
+ * Propagation runs until fixpoint. For an OPEN seam, perpendicular axes
+ * must MATCH between endpoints; for a HADAMARD seam they FLIP. The pass is
+ * monotonic — it only adds hints, never removes them — so it terminates.
+ */
+function propagateBasisHints(
+  graph: FtqcGraph,
+  nodeIndex: ReadonlyMap<string, FtqcNode>,
+): Map<string, BasisHints> {
+  const hints = new Map<string, BasisHints>();
+  for (const node of graph.nodes) {
+    const k = coordKey(node.coordinate);
+    const h: BasisHints = {};
+    for (const a of ["X", "Y", "Z"] as Axis[]) {
+      const b = pickKnownBasis(node, a);
+      if (b !== null) h[a] = b;
+    }
+    hints.set(k, h);
+  }
+  const flip = (b: Basis): Basis => (b === "X" ? "Z" : "X");
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const edge of graph.edges) {
+      const ka = coordKey(edge[0]);
+      const kb = coordKey(edge[1]);
+      const na = nodeIndex.get(ka);
+      const nb = nodeIndex.get(kb);
+      if (!na || !nb) continue;
+      const fA = faceTowards(edge[0], edge[1]);
+      const fB = faceTowards(edge[1], edge[0]);
+      if (fA === null || fB === null) continue;
+      const cA = na.faces[fA];
+      const cB = nb.faces[fB];
+      const isOpen = cA === "open" && cB === "open";
+      const isHadamard = cA === "hadamard" && cB === "hadamard";
+      if (!isOpen && !isHadamard) continue;
+      const openAxis = FACE_AXIS_LOCAL[fA];
+      const hA = hints.get(ka)!;
+      const hB = hints.get(kb)!;
+      for (const axis of ["X", "Y", "Z"] as Axis[]) {
+        if (axis === openAxis) continue;
+        if (hA[axis] !== undefined && hB[axis] === undefined) {
+          hB[axis] = isHadamard ? flip(hA[axis]!) : hA[axis]!;
+          changed = true;
+        } else if (hB[axis] !== undefined && hA[axis] === undefined) {
+          hA[axis] = isHadamard ? flip(hB[axis]!) : hB[axis]!;
+          changed = true;
+        }
+      }
+    }
+  }
+  return hints;
+}
+
 function runNodePass(
   graph: FtqcGraph,
   seamsByNode: ReadonlyMap<string, Set<FaceDirection>>,
   groupIdFor: (key: string) => string,
+  basisHints: ReadonlyMap<string, BasisHints>,
 ): NodePassAccumulator | NodeToCubeError {
   const acc: NodePassAccumulator = {
     blocks: new Map(),
@@ -171,7 +272,8 @@ function runNodePass(
     const gid = groupIdFor(key);
     if (acc.firstGroupId === null) acc.firstGroupId = gid;
     const seamFaces = seamsByNode.get(key) ?? new Set<FaceDirection>();
-    const r = nodeToCube(node, gid, seamFaces);
+    const hints = basisHints.get(key) ?? {};
+    const r = nodeToCube(node, gid, seamFaces, hints);
     if (!r.ok) return r;
     for (const [k, v] of r.blocks) acc.blocks.set(k, v);
     for (const p of r.portPositions) acc.ports.add(p);
@@ -201,8 +303,9 @@ export function equisetaToBlocks(graph: FtqcGraph): ImportResult {
   const seamsByNode = buildSeamsByNode(graph);
   const nodeIndex = buildNodeIndex(graph);
   const groupIdFor = buildGroupAssigner(graph, nodeIndex);
+  const basisHints = propagateBasisHints(graph, nodeIndex);
 
-  const nodePass = runNodePass(graph, seamsByNode, groupIdFor);
+  const nodePass = runNodePass(graph, seamsByNode, groupIdFor, basisHints);
   if ("ok" in nodePass && nodePass.ok === false) return nodePass;
   const acc = nodePass as NodePassAccumulator;
 
@@ -218,6 +321,31 @@ export function equisetaToBlocks(graph: FtqcGraph): ImportResult {
     pipeCount++;
   }
 
+  // JSON coords are on a 1-unit cube grid; piper-draw scales by 3. A 2×2 XY
+  // cluster anchored at (i,j,k) yields a slab at piper-draw (3i+1, 3j+1, 3k)
+  // — the pipe-slot gap between the four cubes. Lower-left-anchor check
+  // emits each cluster exactly once.
+  let slabCount = 0;
+  for (const node of graph.nodes) {
+    const [i, j, k] = node.coordinate;
+    if (
+      !nodeIndex.has(coordKey([i + 1, j, k])) ||
+      !nodeIndex.has(coordKey([i, j + 1, k])) ||
+      !nodeIndex.has(coordKey([i + 1, j + 1, k]))
+    ) {
+      continue;
+    }
+    const slabPos: Position3D = { x: 3 * i + 1, y: 3 * j + 1, z: 3 * k };
+    const slabK = posKey(slabPos);
+    if (acc.blocks.has(slabK)) continue;
+    acc.blocks.set(slabK, {
+      pos: slabPos,
+      type: SLAB_TYPE,
+      groupId: groupIdFor(coordKey(node.coordinate)),
+    });
+    slabCount++;
+  }
+
   return {
     ok: true,
     empty: false,
@@ -228,6 +356,7 @@ export function equisetaToBlocks(graph: FtqcGraph): ImportResult {
     pipeCount,
     portCount: acc.portCount,
     hadamardCount: acc.hadamardCount,
+    slabCount,
     groupId: acc.firstGroupId ?? newGroupId(),
   };
 }
@@ -266,6 +395,9 @@ export function summarizeSuccess(
     parts.push(
       `${result.hadamardCount} hadamard ${result.hadamardCount === 1 ? "pipe" : "pipes"}`,
     );
+  }
+  if (result.slabCount > 0) {
+    parts.push(`${result.slabCount} ${result.slabCount === 1 ? "slab" : "slabs"}`);
   }
   const body = parts.join(" + ");
   return filename ? `${verb} ${body} from ${filename}` : `${verb} ${body}`;

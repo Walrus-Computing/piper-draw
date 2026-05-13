@@ -27,7 +27,11 @@ const TWO_CUBE_FIXTURES = [
   "disconnected_pair.json",
 ];
 
-const FIXTURE_NAMES = [...SINGLE_CUBE_FIXTURES, ...TWO_CUBE_FIXTURES];
+const LATTICE_SURGERY_FIXTURES = [
+  "koval_q_couch_cnot.json",
+];
+
+const FIXTURE_NAMES = [...SINGLE_CUBE_FIXTURES, ...TWO_CUBE_FIXTURES, ...LATTICE_SURGERY_FIXTURES];
 
 describe("parseFtqcGraph (happy path: bundled fixtures)", () => {
   for (const name of FIXTURE_NAMES) {

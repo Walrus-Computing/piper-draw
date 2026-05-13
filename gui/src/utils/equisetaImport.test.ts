@@ -9,7 +9,7 @@ import {
   type ImportSuccess,
 } from "./equisetaImport";
 import { parseFtqcGraph, type FaceColor, type FtqcGraph, type RidgeId } from "./equisetaJsonSchema";
-import { isValidBlockPos, isValidPipePos, isPipeType } from "../types";
+import { isValidBlockPos, isValidPipePos, isPipeType, isSlabType, isValidSlabPos } from "../types";
 
 const FIXTURES_DIR = join(process.cwd(), "public", "equiseta-examples");
 
@@ -458,6 +458,121 @@ describe("equisetaToBlocks — two-cube fixtures (v0.5)", () => {
     const groupIds = new Set([...r.blocks.values()].map((b) => b.groupId));
     expect(groupIds.size).toBe(2);
   });
+
+  it("koval_q_couch_cnot.json → 10 cubes + 10 pipes + 4 ports + 1 slab (basis-hint propagation + 2×2 cluster)", () => {
+    // The Koval-q couch CNOT has a Y-axis sandwich at (0,1,1) (both north and
+    // south are open seams), so its Y basis is wildcard from face-color
+    // resolution alone. The neighboring cube (1,1,1) has Y=X fixed by its
+    // north=red face; without basis-hint propagation, (0,1,1) would canonicalize
+    // to XZZ (Y=Z) and the X-axis pipe to (1,1,1) would fail with
+    // edge-no-pipe-type (perpendicular Y bases mismatch). Propagation pulls
+    // (0,1,1).Y = X from the X-axis neighbor, picking XXZ instead.
+    //
+    // The couch's bottom layer (JSON z=1) has cubes at (0,0,1), (1,0,1),
+    // (0,1,1), (1,1,1) — a 2×2 XY cluster. The auto-slab rule fills the gap
+    // with a slab at piper-draw (1, 1, 3) (toolbar shows 0.333, 0.333, 1).
+    const r = equisetaToBlocks(loadFixture("koval_q_couch_cnot.json"));
+    assertSuccess(r);
+    expect(r.cubeCount).toBe(10);
+    expect(r.pipeCount).toBe(10);
+    expect(r.portCount).toBe(4);
+    expect(r.slabCount).toBe(1);
+    expect(r.blocks.size).toBe(21);
+    const slab = r.blocks.get("1,1,3");
+    expect(slab?.type).toBe("slab");
+    expect(slab?.pos).toEqual({ x: 1, y: 1, z: 3 });
+    // Slab joins the same connected component as the cubes it bridges.
+    expect(slab?.groupId).toBe(r.groupId);
+    // Every block on a valid grid slot.
+    for (const block of r.blocks.values()) {
+      const validSlot = isPipeType(block.type)
+        ? isValidPipePos(block.pos)
+        : isSlabType(block.type)
+          ? isValidSlabPos(block.pos)
+          : isValidBlockPos(block.pos);
+      if (!validSlot) {
+        throw new Error(
+          `koval_q_couch_cnot: block at ${JSON.stringify(block.pos)} (type ${block.type}) is not on a valid grid slot`,
+        );
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite 6.5: Auto-slab rule for XY 2×2 cube clusters
+// ---------------------------------------------------------------------------
+
+function openCubeNode(coord: [number, number, number]) {
+  // Minimal valid cube: red x/z faces, open y faces. Sufficient for cluster
+  // tests since we only care about block positions, not basis resolution.
+  return buildNode(
+    {
+      east: "red",
+      west: "red",
+      north: "open",
+      south: "open",
+      top: "red",
+      bottom: "red",
+    },
+    coord,
+  );
+}
+
+describe("equisetaToBlocks — auto-slab rule for XY 2×2 cube clusters", () => {
+  it("emits one slab at piper-draw (3i+1, 3j+1, 3k) for a single cluster at JSON (i,j,k)", () => {
+    const graph: FtqcGraph = {
+      nodes: [
+        openCubeNode([5, 7, 2]),
+        openCubeNode([6, 7, 2]),
+        openCubeNode([5, 8, 2]),
+        openCubeNode([6, 8, 2]),
+      ],
+      edges: [],
+    };
+    const r = equisetaToBlocks(graph);
+    assertSuccess(r);
+    expect(r.cubeCount).toBe(4);
+    expect(r.slabCount).toBe(1);
+    const slab = r.blocks.get("16,22,6");
+    expect(slab?.type).toBe("slab");
+    expect(slab?.pos).toEqual({ x: 16, y: 22, z: 6 });
+    expect(isValidSlabPos(slab!.pos)).toBe(true);
+    // Slab inherits the anchor node's groupId.
+    const anchorCube = r.blocks.get("15,21,6");
+    expect(slab?.groupId).toBe(anchorCube?.groupId);
+  });
+
+  it("emits no slab when no 2×2 cluster is present (disconnected_pair fixture)", () => {
+    const r = equisetaToBlocks(loadFixture("disconnected_pair.json"));
+    assertSuccess(r);
+    expect(r.slabCount).toBe(0);
+    for (const block of r.blocks.values()) {
+      expect(isSlabType(block.type)).toBe(false);
+    }
+  });
+
+  it("emits two slabs for overlapping clusters in a 2×3 XY block of cubes", () => {
+    // Cubes at JSON (0..1, 0..2, 0) — six nodes, two 2×2 clusters sharing
+    // the middle row (anchored at j=0 and j=1).
+    const graph: FtqcGraph = {
+      nodes: [
+        openCubeNode([0, 0, 0]),
+        openCubeNode([1, 0, 0]),
+        openCubeNode([0, 1, 0]),
+        openCubeNode([1, 1, 0]),
+        openCubeNode([0, 2, 0]),
+        openCubeNode([1, 2, 0]),
+      ],
+      edges: [],
+    };
+    const r = equisetaToBlocks(graph);
+    assertSuccess(r);
+    expect(r.cubeCount).toBe(6);
+    expect(r.slabCount).toBe(2);
+    expect(r.blocks.get("1,1,0")?.type).toBe("slab");
+    expect(r.blocks.get("1,4,0")?.type).toBe("slab");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -655,6 +770,14 @@ describe("summarizeSuccess / summarizeError", () => {
     assertSuccess(r);
     expect(summarizeSuccess(r, "all_open.json")).toBe(
       "Imported 1 port marker (all-open) from all_open.json",
+    );
+  });
+
+  it("success toast: Koval-q couch mentions the auto-slab", () => {
+    const r = equisetaToBlocks(loadFixture("koval_q_couch_cnot.json"));
+    assertSuccess(r);
+    expect(summarizeSuccess(r, "koval_q_couch_cnot.json")).toBe(
+      "Imported 10 cubes + 10 pipes + 4 ports + 1 slab from koval_q_couch_cnot.json",
     );
   });
 
