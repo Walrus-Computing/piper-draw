@@ -24,7 +24,7 @@ import {
   type Axis,
   type NodeToCubeError,
 } from "./equisetaNodeToCube";
-import { edgeToPipe, seamFacesForEdge, type EdgeToPipeError } from "./equisetaEdgeToPipe";
+import { edgeToPipe, pipeBlockFromResult, seamFacesForEdge, type EdgeToPipeError } from "./equisetaEdgeToPipe";
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -214,7 +214,7 @@ export function equisetaToBlocks(graph: FtqcGraph): ImportResult {
     const r = edgeToPipe(edge, nodeIndex, acc.cubeTypes, seenEdgeKeys);
     if (!r.ok) return r;
     const posK = `${r.pos.x},${r.pos.y},${r.pos.z}`;
-    acc.blocks.set(posK, { pos: r.pos, type: r.pipeType, groupId: gid });
+    acc.blocks.set(posK, pipeBlockFromResult(r, gid));
     pipeCount++;
   }
 

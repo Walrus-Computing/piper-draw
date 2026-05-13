@@ -6,6 +6,21 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.7.0.0] - 2026-05-12
+
+### Added
+- **View any FTQCGraph JSON, even when the pattern isn't a valid TQEC cube/pipe.** The translator now produces a fallback canonical `Block.type` plus a `freeBuildOnly` payload carrying the original face pattern for any `ZZZ`/`XXX` cube or unsupported pipe (`OZZ`/`OXX`/`ZZO`/`XXO`/etc.) seam. The 5 deliberately-invalid pedagogical fixtures (`all_blue.json`, `all_red.json`, `hadamard_top.json`, `blue_pair_east_west.json`, `red_pair_east_west.json`) plus the two-cube `zxx_time_evolution.json` and `port_io_pair.json` now load and render with their input face colours instead of failing at import.
+- **Status pill: "N view-only block(s)".** New top-right pill in `StatusPill.tsx` that stays visible whenever any block in the scene carries `freeBuildOnly`. Decouples the "scene contains non-TQEC content" signal from the `ValidationToast` lifecycle so the affordance survives toast dismissal and snapshot URL return-visits.
+
+### Changed
+- **`equisetaNodeToCube.ts` is now permissive on cube patterns.** `pickCubeTypeWithFallback` is a 2-entry literal lookup (`ZZZ → XZZ`, `XXX → ZXX`); only these two inputs hit the fallback path because wildcards are already handled upstream. The cube emits with `freeBuildOnly: { reason: "unsupported-pattern", displayPattern }` so the renderer overrides face materials to match the input pattern. Same shape extended to `equisetaEdgeToPipe.ts` for pipe-pattern fallback.
+- **Renderer face-material override.** `createBlockGeometry` accepts an optional `displayPattern` parameter; when set, face colours come from the pattern instead of the canonical `blockType`. Geometry shape, hidden faces, and band style still come from `blockType` (Eng-phase invariant: face material only).
+- **`ValidationToast` accessibility.** Toast container now has `role="status"` + `aria-live="polite"` so screen readers announce validation results. The clickable error message converted from `<span onClick>` to `<button>` so keyboard `Enter`/`Space` activates it. Added non-colour icon prefix (⚠/ⓘ/✓) so color-blind users see a distinct signal. Addresses the deferred a11y items previously tracked in TODOS.md.
+- **`ValidationToast` responsive layout.** Replaced fixed `maxWidth: 500px` + centred transform with `width: min(500px, 100vw - 32px)` so the toast no longer clips on narrow viewports or split-pane usage.
+
+### Removed
+- **`unsupported-pattern` rejection toast for fixture imports.** Fixtures previously listed under "Known limitations" in v0.6.1.0 now load via the view-only fallback. The error reason still exists in the `NodeToCubeError` union for synthetic malformed inputs the fallback table can't handle.
+
 ## [0.6.1.0] - 2026-05-12
 
 ### Added

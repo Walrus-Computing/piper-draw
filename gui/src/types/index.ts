@@ -147,6 +147,34 @@ export interface Block {
    * Auto-promoted blocks intentionally start ungrouped (`undefined`).
    */
   groupId?: string;
+  /**
+   * View-only marker for blocks the Equiseta translator couldn't render
+   * natively (cube patterns `ZZZ`/`XXX`, pipe seam patterns `OZZ`/`OXX`).
+   * When set, `type` carries the deterministic canonical fallback
+   * (`ZZZ → XZZ`, `XXX → ZXX`) for downstream code paths, while the renderer
+   * overrides face materials from `displayPattern` so the user sees the input
+   * colours honestly.
+   *
+   * INVARIANT (Eng phase, autoplan 2026-05-12): only the face-material
+   * override branch in the renderer (`BlockInstances` / equivalent) may read
+   * `displayPattern`. Validation, hit-testing, .dae export, snapshot encode,
+   * paint/cycle/group, undo, and clipboard treat the block via its canonical
+   * `type` and IGNORE `displayPattern`. Mutation paths preserve the whole
+   * `freeBuildOnly` payload (spread `{...b, ...changes}` per CLAUDE.md
+   * "Block mutator spread audit"), EXCEPT the explicit `cycleType` path which
+   * clears it (cycling to a new canonical type is a user-initiated promotion
+   * away from view-only). `.dae` export drops the field intentionally,
+   * matching the slab precedent.
+   */
+  freeBuildOnly?: {
+    reason: "unsupported-pattern";
+    /** The original Equiseta pattern that couldn't be rendered natively.
+     * Cube cubes: 3 chars from `{Z,X}` (e.g. `"ZZZ"`, `"XXX"`).
+     * Pipes: 3 chars with one `O` for the open axis (e.g. `"OZZ"`, `"OXX"`).
+     * Must pass strict charset/length validation at the translator boundary
+     * before reaching renderer — renderer assumes well-formed input. */
+    displayPattern: string;
+  };
 }
 
 export type PortIO = "in" | "out";
@@ -644,6 +672,15 @@ export function createBlockGeometry(
   hiddenFaces: FaceMask = 0,
   hBandHalfHeight?: number,
   overrides?: Record<string, string>,
+  /**
+   * `Block.freeBuildOnly.displayPattern` (3 chars from `{X,Z,O}`). When set,
+   * the renderer derives face-material colours from this pattern instead of
+   * `blockType`. Geometry shape, hidden faces, and band style still come from
+   * `blockType` (Eng-phase invariant: face material only). Cube callers pass
+   * the 3-char cube pattern (`ZZZ`/`XXX`); pipe callers pass the 3-char seam
+   * code with `O` in the open-axis position (`OZZ`/`OXX`/etc.).
+   */
+  displayPattern?: string,
 ): THREE.BufferGeometry {
   if (isSlabType(blockType)) return createSlabGeometry(overrides);
   if (isPipeType(blockType)) {
@@ -654,7 +691,10 @@ export function createBlockGeometry(
     const tqecOpenAxis = base.indexOf("O") as 0 | 1 | 2;
     const threeOpenAxis = TQEC_TO_THREE_AXIS[tqecOpenAxis];
     const closedAxes = [0, 1, 2].filter(a => a !== threeOpenAxis) as [number, number];
-    let wallColors = closedAxes.map(ta => basisColor(base[THREE_TO_TQEC_AXIS[ta]])) as [THREE.Color, THREE.Color];
+    // displayPattern (if any) overrides the basis source for the two closed
+    // axes. Open-axis index is unchanged (band style comes from blockType).
+    const colorBase = displayPattern && displayPattern.length === 3 ? displayPattern : base;
+    let wallColors = closedAxes.map(ta => basisColor(colorBase[THREE_TO_TQEC_AXIS[ta]])) as [THREE.Color, THREE.Color];
     // For Y-open colour-flip pipes (Hadamard or Y-twist), the geometry "below
     // band" end (negative Three.js Z) corresponds to the tail (higher TQEC Y).
     // Pre-swap so below-band shows tail (flipped) colors and above-band shows
@@ -694,8 +734,15 @@ export function createBlockGeometry(
     return geo;
   }
 
-  // Cube type: parse face colors from the type name
-  const tqecColors = [basisColor(blockType[0]), basisColor(blockType[1]), basisColor(blockType[2])];
+  // Cube type: parse face colors from the type name (or displayPattern when set
+  // — see freeBuildOnly invariant: face material only, geometry unchanged).
+  const colorSource =
+    displayPattern && displayPattern.length === 3 ? displayPattern : blockType;
+  const tqecColors = [
+    basisColor(colorSource[0]),
+    basisColor(colorSource[1]),
+    basisColor(colorSource[2]),
+  ];
   // Map to Three.js face order: +X, -X, +Y, -Y, +Z, -Z
   const faceColors = [
     tqecColors[0], tqecColors[0], // Three.js +X, -X = TQEC X-axis

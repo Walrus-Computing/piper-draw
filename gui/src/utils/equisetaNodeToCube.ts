@@ -217,6 +217,40 @@ function pickCubeType(chars: readonly [string, string, string]): CubeType | null
   return matches.length > 0 ? (matches[0] as CubeType) : null;
 }
 
+/**
+ * Permissive `pickCubeType`. Returns `{ type, fallback: false }` whenever
+ * `pickCubeType` would succeed, or `{ type, fallback: true }` for the two
+ * unsupported all-one-basis patterns (`ZZZ` → `XZZ`, `XXX` → `ZXX`). Returns
+ * `null` for everything else `pickCubeType` rejects (wildcard-only inputs are
+ * still gated upstream by the all-`?` check in `nodeToCube`).
+ *
+ * The fallback table is a 2-entry literal lookup, not an axis-matching
+ * algorithm: per /autoplan 2026-05-12 eng phase the only inputs that hit the
+ * fallback are `ZZZ`/`XXX` (wildcards are handled at line 354 of `nodeToCube`),
+ * so a literal map is simpler, deterministic, and matches `canonicalCubeForPort`'s
+ * "first valid CUBE_TYPES entry sharing axes" rule for these two cases.
+ *
+ * INVARIANT (eng phase): if a third unsupported-pattern input class is ever
+ * possible, the assertion in `nodeToCube` fires loudly so the table is revisited.
+ */
+const FALLBACK_CUBE_TYPE: ReadonlyMap<string, CubeType> = new Map([
+  ["ZZZ", "XZZ"],
+  ["XXX", "ZXX"],
+]);
+
+export function pickCubeTypeWithFallback(
+  chars: readonly [string, string, string],
+): { type: CubeType; fallback: false } | { type: CubeType; fallback: true; pattern: string } | null {
+  const direct = pickCubeType(chars);
+  if (direct !== null) return { type: direct, fallback: false };
+  // No wildcards (already rejected by pickCubeType) → check fallback table.
+  if (chars.includes("?")) return null;
+  const flat = chars.join("");
+  const fallbackType = FALLBACK_CUBE_TYPE.get(flat);
+  if (fallbackType === undefined) return null;
+  return { type: fallbackType, fallback: true, pattern: flat };
+}
+
 function hadamardPipeVariant(
   axis: Axis,
   cubeBasis: Readonly<Record<Axis, Basis>>,
@@ -353,10 +387,11 @@ export function nodeToCube(
   if (chars.every((s) => s === "?")) {
     return { ok: false, reason: "no-basis-info", faces: { ...node.faces } };
   }
-  const cubeType = pickCubeType(chars);
-  if (cubeType === null) {
+  const picked = pickCubeTypeWithFallback(chars);
+  if (picked === null) {
     return { ok: false, reason: "unsupported-pattern", pattern: chars.join("") };
   }
+  const cubeType = picked.type;
 
   const finalBasis: Record<Axis, Basis> = {
     X: cubeType[0] as Basis,
@@ -364,7 +399,15 @@ export function nodeToCube(
     Z: cubeType[2] as Basis,
   };
   const blocks = new Map<string, Block>();
-  blocks.set(posKey(pos), { pos, type: cubeType, groupId });
+  const cubeBlock: Block = picked.fallback
+    ? {
+        pos,
+        type: cubeType,
+        groupId,
+        freeBuildOnly: { reason: "unsupported-pattern", displayPattern: picked.pattern },
+      }
+    : { pos, type: cubeType, groupId };
+  blocks.set(posKey(pos), cubeBlock);
   const portPositions = new Set<string>();
   const counts = emitSatellites(
     node,

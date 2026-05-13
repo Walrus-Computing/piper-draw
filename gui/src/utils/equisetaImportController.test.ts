@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runEquisetaImport } from "./equisetaImportController";
-import { parseFtqcGraph, type FtqcGraph } from "./equisetaJsonSchema";
+import { parseFtqcGraph, type FtqcGraph, type RidgeId } from "./equisetaJsonSchema";
 import { useBlockStore } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
 
@@ -47,35 +47,66 @@ describe("runEquisetaImport — replace mode", () => {
   });
 
   it("B1: loads blocks into blockStore via loadBlocks", () => {
-    // zxx_memory imports as a valid single cube — used here because
-    // all_blue.json is rejected by the importer (unsupported-pattern ZZZ)
-    // before loadBlocks ever runs.
+    // zxx_memory imports as a valid single cube.
     const graph = loadFixture("zxx_memory.json");
     runEquisetaImport(graph, "zxx memory", "replace");
     expect(useBlockStore.getState().blocks.size).toBe(1);
   });
 
   it("B2: triggers validate() exactly once on successful replace", () => {
-    // zxx_memory imports as a valid single cube — used here because
-    // all_blue.json is rejected by the importer (unsupported-pattern ZZZ)
-    // before loadBlocks ever runs.
     const graph = loadFixture("zxx_memory.json");
     runEquisetaImport(graph, "zxx memory", "replace");
     // mockValidate is called via useValidationStore.getState().validate() →
     // validateDiagram(blocks). The validate() action is fire-and-forget, but
     // it kicks off synchronously and bumps status to "loading" before await.
     expect(mockValidate).toHaveBeenCalledTimes(1);
-    // Status was set to "loading" inside validate() before the await.
     expect(useValidationStore.getState().status).toBe("loading");
   });
 
   it("B4: structural error path — no loadBlocks, no validate", () => {
-    // all_blue.json is rejected by the importer (unsupported pattern ZZZ).
-    // Confirms the structural-error branch never reaches loadBlocks or validate.
-    const graph = loadFixture("all_blue.json");
-    runEquisetaImport(graph, "all blue", "replace");
+    // Synthetic no-basis-info graph: every face is hadamard so the translator
+    // can't anchor any cube basis. Confirms structural-error branch still
+    // skips loadBlocks + validate. (`all_blue.json` used to live here but is
+    // now handled by the freeBuildOnly fallback path — see autoplan
+    // 2026-05-12 / Approach B.)
+    const RIDGE_KEYS: RidgeId[] = [
+      "I_BOT_SOUTH", "I_BOT_NORTH", "I_TOP_SOUTH", "I_TOP_NORTH",
+      "J_BOT_WEST", "J_BOT_EAST", "J_TOP_WEST", "J_TOP_EAST",
+      "K_SOUTH_WEST", "K_SOUTH_EAST", "K_NORTH_WEST", "K_NORTH_EAST",
+    ];
+    const ridges = {} as Record<RidgeId, boolean | null>;
+    for (const k of RIDGE_KEYS) ridges[k] = null;
+    const graph: FtqcGraph = {
+      nodes: [{
+        coordinate: [0, 0, 0],
+        faces: {
+          east: "hadamard",
+          west: "hadamard",
+          north: "hadamard",
+          south: "hadamard",
+          top: "hadamard",
+          bottom: "hadamard",
+        },
+        ridges,
+      }],
+      edges: [],
+    };
+    runEquisetaImport(graph, "all-hadamard synthetic", "replace");
     expect(useBlockStore.getState().blocks.size).toBe(0);
     expect(mockValidate).not.toHaveBeenCalled();
+  });
+
+  it("B5: all_blue.json (view-only path) → loadBlocks runs + validate triggers", () => {
+    // After autoplan 2026-05-12 (Approach B): all_blue produces a fallback
+    // XZZ cube with freeBuildOnly set, so the v0.6.1.0 auto-validate path
+    // engages and the toast surfaces "Enable Free Build" as designed.
+    const graph = loadFixture("all_blue.json");
+    runEquisetaImport(graph, "all blue", "replace");
+    const block = Array.from(useBlockStore.getState().blocks.values())[0];
+    expect(block).toBeDefined();
+    expect(block.type).toBe("XZZ");
+    expect(block.freeBuildOnly?.displayPattern).toBe("ZZZ");
+    expect(mockValidate).toHaveBeenCalledTimes(1);
   });
 });
 

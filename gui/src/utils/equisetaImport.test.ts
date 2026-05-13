@@ -121,36 +121,73 @@ describe("equisetaToBlocks — bundled fixture coverage (D7')", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Suite 2: Expected rejections (bundled fixtures)
+// Suite 2: Permissive translator — formerly-rejected fixtures now produce
+// blocks tagged with `freeBuildOnly` (autoplan 2026-05-12, Approach B).
 // ---------------------------------------------------------------------------
 
-describe("equisetaToBlocks — bundled fixture rejections (D6, E2)", () => {
-  it("all_red.json → unsupported-pattern XXX", () => {
+describe("equisetaToBlocks — view-only fallback for unsupported patterns", () => {
+  it("all_red.json → fallback ZXX cube with freeBuildOnly=XXX", () => {
     const r = equisetaToBlocks(loadFixture("all_red.json"));
-    expect(r).toEqual({ ok: false, reason: "unsupported-pattern", pattern: "XXX" });
+    assertSuccess(r);
+    expect(r.cubeType).toBe("ZXX");
+    expect(r.cubeCount).toBe(1);
+    const block = Array.from(r.blocks.values()).find((b) => b.type === "ZXX")!;
+    expect(block.freeBuildOnly).toEqual({
+      reason: "unsupported-pattern",
+      displayPattern: "XXX",
+    });
   });
 
-  it("all_blue.json → unsupported-pattern ZZZ", () => {
+  it("all_blue.json → fallback XZZ cube with freeBuildOnly=ZZZ", () => {
     const r = equisetaToBlocks(loadFixture("all_blue.json"));
-    expect(r).toEqual({ ok: false, reason: "unsupported-pattern", pattern: "ZZZ" });
+    assertSuccess(r);
+    expect(r.cubeType).toBe("XZZ");
+    expect(r.cubeCount).toBe(1);
+    const block = Array.from(r.blocks.values()).find((b) => b.type === "XZZ")!;
+    expect(block.freeBuildOnly).toEqual({
+      reason: "unsupported-pattern",
+      displayPattern: "ZZZ",
+    });
   });
 
-  it("hadamard_top.json → unsupported-pattern XXX (bottom face anchors X-basis on Z)", () => {
+  it("hadamard_top.json → fallback ZXX cube with freeBuildOnly=XXX", () => {
+    // bottom-face hadamard anchors X-basis on Z-axis; resolves to XXX which
+    // takes the same fallback as all_red.
     const r = equisetaToBlocks(loadFixture("hadamard_top.json"));
-    expect(r).toEqual({ ok: false, reason: "unsupported-pattern", pattern: "XXX" });
+    assertSuccess(r);
+    expect(r.cubeType).toBe("ZXX");
+    const block = Array.from(r.blocks.values()).find((b) => b.type === "ZXX")!;
+    expect(block.freeBuildOnly?.displayPattern).toBe("XXX");
   });
 
-  it("blue_pair_east_west.json (all-BLUE pair) → unsupported-pattern ZZZ on first cube", () => {
-    // Same degenerate case as the legacy single-cube `all_blue.json`: each
-    // cube in the pair resolves to ZZZ (not in CUBE_TYPES). Surfaces an
-    // unsupported-pattern toast — same precedent as `all_red.json`/`all_blue.json`.
+  it("blue_pair_east_west.json (all-BLUE pair) → 2 fallback XZZ cubes + 1 fallback pipe", () => {
     const r = equisetaToBlocks(loadFixture("blue_pair_east_west.json"));
-    expect(r).toEqual({ ok: false, reason: "unsupported-pattern", pattern: "ZZZ" });
+    assertSuccess(r);
+    expect(r.cubeCount).toBe(2);
+    expect(r.pipeCount).toBe(1);
+    const cubes = Array.from(r.blocks.values()).filter((b) => b.type === "XZZ");
+    expect(cubes).toHaveLength(2);
+    for (const c of cubes) {
+      expect(c.freeBuildOnly?.displayPattern).toBe("ZZZ");
+    }
+    const pipe = Array.from(r.blocks.values()).find((b) => isPipeType(b.type));
+    expect(pipe).toBeDefined();
+    expect(pipe!.freeBuildOnly?.displayPattern).toBe("OZZ");
   });
 
-  it("red_pair_east_west.json (all-RED pair) → unsupported-pattern XXX on first cube", () => {
+  it("red_pair_east_west.json (all-RED pair) → 2 fallback ZXX cubes + 1 fallback pipe", () => {
     const r = equisetaToBlocks(loadFixture("red_pair_east_west.json"));
-    expect(r).toEqual({ ok: false, reason: "unsupported-pattern", pattern: "XXX" });
+    assertSuccess(r);
+    expect(r.cubeCount).toBe(2);
+    expect(r.pipeCount).toBe(1);
+    const cubes = Array.from(r.blocks.values()).filter((b) => b.type === "ZXX");
+    expect(cubes).toHaveLength(2);
+    for (const c of cubes) {
+      expect(c.freeBuildOnly?.displayPattern).toBe("XXX");
+    }
+    const pipe = Array.from(r.blocks.values()).find((b) => isPipeType(b.type));
+    expect(pipe).toBeDefined();
+    expect(pipe!.freeBuildOnly?.displayPattern).toBe("OXX");
   });
 });
 
@@ -336,27 +373,34 @@ describe("equisetaToBlocks — two-cube fixtures (v0.5)", () => {
     expect(r.blocks.get("3,0,0")?.type).toBe("XXZ");
   });
 
-  it("zxx_time_evolution.json → edge-no-pipe-type (ZZO not in PIPE_TYPES)", () => {
-    // Two ZZX cubes stacked on K (time). Open axis Z; pipe would be "ZZO"
-    // (cube perpendicular bases are Z,Z). piper-draw's PIPE_TYPES require
-    // mixed perpendicular bases (one Z, one X) — same-basis pipes aren't
-    // modeled in the surface-code semantics. Same root cause as blue_pair.
+  it("zxx_time_evolution.json → 2 ZZX cubes + 1 view-only ZXO pipe (displayPattern=ZZO)", () => {
+    // Two ZZX cubes stacked on K (time). Open axis Z; pipe perpendicular bases
+    // are Z,Z so the natively-derived code is "ZZO" which isn't in PIPE_TYPES.
+    // After autoplan 2026-05-12 (Approach B): the pipe falls back to ZXO with
+    // freeBuildOnly.displayPattern="ZZO" so the user sees the seam rendered
+    // honestly. Cubes are unchanged (ZZX is valid).
     const r = equisetaToBlocks(loadFixture("zxx_time_evolution.json"));
-    if (r.ok) throw new Error("expected reject");
-    expect(r.reason).toBe("edge-no-pipe-type");
-    if (r.reason === "edge-no-pipe-type") {
-      expect(r.pattern).toBe("ZZO");
-    }
+    assertSuccess(r);
+    expect(r.cubeCount).toBe(2);
+    expect(r.pipeCount).toBe(1);
+    expect(r.blocks.get("0,0,0")?.type).toBe("ZZX");
+    expect(r.blocks.get("0,0,0")?.freeBuildOnly).toBeUndefined();
+    const pipe = Array.from(r.blocks.values()).find((b) => isPipeType(b.type));
+    expect(pipe?.type).toBe("ZXO");
+    expect(pipe?.freeBuildOnly?.displayPattern).toBe("ZZO");
   });
 
-  it("port_io_pair.json → edge-no-pipe-type (ZZO not in PIPE_TYPES)", () => {
-    // Same shape as zxx_time_evolution: ZZX cubes stacked on K with PORT
-    // on outer faces. The seam pipe would still be ZZO — unrepresentable.
-    // The OUTER port markers are correctly emitted on the non-seam Z faces;
-    // the import fails on the pipe step.
+  it("port_io_pair.json → 2 ZZX cubes + ports + 1 view-only ZXO pipe", () => {
+    // Same shape as zxx_time_evolution with PORT markers on outer Z faces.
+    // Now succeeds via the pipe fallback path; cubes & ports unchanged.
     const r = equisetaToBlocks(loadFixture("port_io_pair.json"));
-    if (r.ok) throw new Error("expected reject");
-    expect(r.reason).toBe("edge-no-pipe-type");
+    assertSuccess(r);
+    expect(r.cubeCount).toBe(2);
+    expect(r.pipeCount).toBe(1);
+    expect(r.portCount).toBe(2);
+    const pipe = Array.from(r.blocks.values()).find((b) => isPipeType(b.type));
+    expect(pipe?.type).toBe("ZXO");
+    expect(pipe?.freeBuildOnly?.displayPattern).toBe("ZZO");
   });
 
   it("hadamard_pipe.json → ZZX + XXZ cubes joined by OZXH (bases flip across H)", () => {
