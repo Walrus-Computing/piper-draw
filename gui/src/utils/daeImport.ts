@@ -7,6 +7,7 @@ import {
   pipeDirectionIndex,
   rotateBlockKind,
 } from "./blockRotation";
+import { pickFile } from "./filePicker";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -160,6 +161,15 @@ export function parseDaeToBlocks(xmlString: string): Map<string, Block> {
     // Skip correlation surface nodes and ports
     if (kindName.endsWith("_CORRELATION") || kindName === "PORT") continue;
 
+    // Y-twist pipes are a free-build-only piper-draw concept with no TQEC
+    // semantics. If a hand-authored .dae somehow contains one, strip the Y
+    // suffix and import as the matching plain pipe, with a console note so
+    // the conversion is auditable.
+    if (kindName.length === 4 && kindName.endsWith("Y") && kindName.includes("O")) {
+      console.log(`[dae import] stripping Y-twist suffix on ${kindName} → ${kindName.slice(0, 3)} (Y-twist pipes have no TQEC semantics)`);
+      kindName = kindName.slice(0, 3);
+    }
+
     // Validate it's a known block type before rotation
     // (after rotation it should become a valid type)
 
@@ -276,33 +286,29 @@ function canonicaliseImportedCubes(blocks: Map<string, Block>): void {
 
 /**
  * Open a file picker and import a .dae file into the block store.
+ *
+ * Thin wrapper over the shared `pickFile` helper; this function exists for
+ * its callers in Toolbar.tsx and to keep the DAE-specific parse + alert UX
+ * here. Behaviour is preserved: silent no-op on cancel, console.error +
+ * native alert on parse failure.
  */
 export function triggerDaeImport(onLoad: (blocks: Map<string, Block>) => void): void {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".dae";
-  input.style.display = "none";
-  const cleanup = () => {
-    if (input.parentNode) input.parentNode.removeChild(input);
-  };
-  input.addEventListener("change", () => {
-    const file = input.files?.[0];
-    if (!file) { cleanup(); return; }
-    const reader = new FileReader();
-    reader.onload = () => {
-      cleanup();
-      try {
-        const blocks = parseDaeToBlocks(reader.result as string);
-        onLoad(blocks);
-      } catch (err) {
-        console.error("Failed to import DAE file:", err);
-        alert(`Failed to import DAE file: ${err instanceof Error ? err.message : String(err)}`);
+  void pickFile({ accept: ".dae" }).then((result) => {
+    if (!result.ok) {
+      // cancelled / read-error / oversized — DAE import has no maxBytes,
+      // so practically only "cancelled" reaches here. No-op matches prior behaviour.
+      if (result.reason === "read-error") {
+        console.error("DAE read error:", result.message);
+        alert(`Failed to read DAE file: ${result.message}`);
       }
-    };
-    reader.readAsText(file);
+      return;
+    }
+    try {
+      const blocks = parseDaeToBlocks(result.text);
+      onLoad(blocks);
+    } catch (err) {
+      console.error("Failed to import DAE file:", err);
+      alert(`Failed to import DAE file: ${err instanceof Error ? err.message : String(err)}`);
+    }
   });
-  // Remove on cancel (dialog closed without selecting a file)
-  input.addEventListener("cancel", cleanup);
-  document.body.appendChild(input);
-  input.click();
 }

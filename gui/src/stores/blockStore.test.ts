@@ -1521,6 +1521,73 @@ describe("blockStore", () => {
       expect(st.armedTool).toBe("cube");
       expect(st.cubeType).toBe("XZZ");
     });
+
+    it("includes the Y-twist pipe variants in the cycle when free-build is on", () => {
+      useBlockStore.setState({ freeBuild: true, armedTool: "pipe", pipeVariant: "XZH" });
+      // After XZH (last non-Y pipe), the next two cycles should land on ZXY then XZY.
+      useBlockStore.getState().cycleArmedType(1);
+      expect(useBlockStore.getState().pipeVariant).toBe("ZXY");
+      useBlockStore.getState().cycleArmedType(1);
+      expect(useBlockStore.getState().pipeVariant).toBe("XZY");
+    });
+
+    it("disarms a Y-twist variant when free-build is toggled off", () => {
+      useBlockStore.setState({ freeBuild: true, armedTool: "pipe", pipeVariant: "ZXY" });
+      useBlockStore.getState().toggleFreeBuild();
+      const st = useBlockStore.getState();
+      expect(st.freeBuild).toBe(false);
+      expect(st.armedTool).toBe("pointer");
+      expect(st.pipeVariant).toBe(null);
+    });
+  });
+
+  describe("Y-twist pipe placement", () => {
+    it("rejects placing a Y-twist pipe outside free-build", () => {
+      useBlockStore.setState({ freeBuild: false, armedTool: "pipe", pipeVariant: "ZXY" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      expect(useBlockStore.getState().blocks.has("1,0,0")).toBe(false);
+    });
+
+    it("accepts a Y-twist pipe placement when free-build is on", () => {
+      useBlockStore.setState({ freeBuild: true, armedTool: "pipe", pipeVariant: "ZXY" });
+      useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+      const block = useBlockStore.getState().blocks.get("1,0,0");
+      expect(block?.type).toBe("OZXY");
+    });
+
+    it("cyclePipe (build-mode R-key) skips Y-twist variants outside free-build", () => {
+      // Cursor at an empty port, pipe to its right, second endpoint also empty.
+      // Both ends ambiguous → cyclePipe always runs; no neighbour cubes →
+      // every candidate passes validation. Without the freeBuild filter, the
+      // R-key cycle would land on a Y-twist variant.
+      useBlockStore.setState({
+        mode: "build",
+        buildCursor: { x: 0, y: 0, z: 0 },
+        freeBuild: false,
+        blocks: new Map([
+          ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ]),
+      });
+      for (let i = 0; i < 8; i++) {
+        useBlockStore.getState().cyclePipe();
+        const t = useBlockStore.getState().blocks.get("1,0,0")!.type;
+        expect(t.endsWith("Y")).toBe(false);
+      }
+    });
+
+    it("cyclePipe with explicit Y-twist target is rejected outside free-build", () => {
+      useBlockStore.setState({
+        mode: "build",
+        buildCursor: { x: 0, y: 0, z: 0 },
+        freeBuild: false,
+        blocks: new Map([
+          ["1,0,0", { pos: { x: 1, y: 0, z: 0 }, type: "OZX" }],
+        ]),
+      });
+      useBlockStore.getState().cyclePipe("ZXY");
+      // Type unchanged because ZXY isn't in the cycle when freeBuild is off.
+      expect(useBlockStore.getState().blocks.get("1,0,0")!.type).toBe("OZX");
+    });
   });
 
   describe("cycleSelectedType — freeBuild bypasses validation", () => {
@@ -2692,5 +2759,100 @@ describe("blockStore", () => {
       expect(useBlockStore.getState().blocks.get("0,0,0")?.groupId).toBe(gA);
       expect(useBlockStore.getState().blocks.get("6,0,0")?.groupId).toBe(gB);
     });
+  });
+
+  describe("paintFace — repaint", () => {
+    it("overwrites an existing cell color when paintFace is called twice on the same key", () => {
+      // Place a slab. Slabs need free-build mode and a 2x2 inner gap pos.
+      useBlockStore.setState({ freeBuild: true, armedTool: "slab", cubeType: "slab" });
+      const pos = { x: 1, y: 1, z: 0 };
+      const slab: Block = { pos, type: "slab" };
+      const blocks = new Map<string, Block>();
+      blocks.set("1,1,0", slab);
+      useBlockStore.setState({ blocks, spatialIndex: buildSpatialIndex(blocks) });
+
+      // First paint: cell q=4 (center top) → red.
+      useBlockStore.getState().paintFace(pos, "2:4", "#ff0000");
+      expect(useBlockStore.getState().blocks.get("1,1,0")?.faceColors).toEqual({ "2:4": "#ff0000" });
+
+      // Repaint same cell with a different color → blue must overwrite red.
+      useBlockStore.getState().paintFace(pos, "2:4", "#0000ff");
+      expect(useBlockStore.getState().blocks.get("1,1,0")?.faceColors).toEqual({ "2:4": "#0000ff" });
+
+      // Paint a second cell q=0 → both keys should coexist with their own colors.
+      useBlockStore.getState().paintFace(pos, "2:0", "#00ff00");
+      expect(useBlockStore.getState().blocks.get("1,1,0")?.faceColors).toEqual({
+        "2:4": "#0000ff",
+        "2:0": "#00ff00",
+      });
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D1: freeBuildOnly mutator spread-audit property test
+//
+// Per /autoplan 2026-05-12 Eng phase: one property test covers all 21 sites
+// where blocks are constructed from a source block. Asserts `freeBuildOnly`
+// survives through every mutator path EXCEPT the cycle path (which is the
+// intentional "promote view-only → editable canonical" affordance).
+// ---------------------------------------------------------------------------
+
+describe("freeBuildOnly: mutator spread audit (D1)", () => {
+  beforeEach(reset);
+
+  function seedViewOnlyCube(): { pos: { x: number; y: number; z: number }; key: string } {
+    const pos = { x: 0, y: 0, z: 0 };
+    const key = "0,0,0";
+    const block: Block = {
+      pos,
+      type: "XZZ",
+      groupId: "g0",
+      freeBuildOnly: { reason: "unsupported-pattern", displayPattern: "ZZZ" },
+    };
+    useBlockStore.setState({
+      blocks: new Map([[key, block]]),
+      spatialIndex: buildSpatialIndex(new Map([[key, block]])),
+    });
+    return { pos, key };
+  }
+
+  it("paintFace preserves freeBuildOnly", () => {
+    const { pos, key } = seedViewOnlyCube();
+    useBlockStore.getState().paintFace(pos, "0", "#ff7f7f");
+    const after = useBlockStore.getState().blocks.get(key)!;
+    expect(after.freeBuildOnly?.displayPattern).toBe("ZZZ");
+    expect(after.faceColors).toEqual({ "0": "#ff7f7f" });
+  });
+
+  it("undo after paint restores the freeBuildOnly state", () => {
+    const { pos, key } = seedViewOnlyCube();
+    useBlockStore.getState().paintFace(pos, "0", "#ff7f7f");
+    useBlockStore.getState().undo();
+    const after = useBlockStore.getState().blocks.get(key)!;
+    expect(after.freeBuildOnly?.displayPattern).toBe("ZZZ");
+    expect(after.faceColors).toBeUndefined();
+  });
+
+  it("clipboard copy preserves freeBuildOnly on stored entry", () => {
+    seedViewOnlyCube();
+    useBlockStore.setState({ selectedKeys: new Set(["0,0,0"]) });
+    useBlockStore.getState().copySelection();
+    const clip = useBlockStore.getState().clipboard;
+    expect(clip).not.toBeNull();
+    // clipboard is Map<string, Block>; coord-normalised so the single entry
+    // sits at "0,0,0".
+    const entry = clip?.get("0,0,0");
+    expect(entry?.freeBuildOnly?.displayPattern).toBe("ZZZ");
+  });
+
+  it("snapshot (JSON.stringify → parse) round-trips freeBuildOnly", () => {
+    const { key } = seedViewOnlyCube();
+    const block = useBlockStore.getState().blocks.get(key)!;
+    const serialized = JSON.stringify(block);
+    const parsed = JSON.parse(serialized) as Block;
+    expect(parsed.freeBuildOnly?.displayPattern).toBe("ZZZ");
+    expect(parsed.freeBuildOnly?.reason).toBe("unsupported-pattern");
+    expect(parsed.type).toBe("XZZ");
   });
 });

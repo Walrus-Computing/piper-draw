@@ -1,0 +1,106 @@
+{
+  "source": "https://github.com/Walrus-Computing/equiseta/tree/f7a63ea47fd50baf6693fedadaa35859f94b94c9/examples",
+  "regenerate": "Run scripts/sync_equiseta_examples.py to refresh from the equiseta repo. See gui/public/equiseta-examples/README.md.",
+  "groups": [
+    {
+      "label": "Single cube",
+      "examples": [
+        {
+          "filename": "all_open.json",
+          "name": "All open",
+          "description": "Every face OPEN. Minimal connector cube."
+        },
+        {
+          "filename": "all_red.json",
+          "name": "All red",
+          "description": "Every face RED."
+        },
+        {
+          "filename": "all_blue.json",
+          "name": "All blue",
+          "description": "Every face BLUE."
+        },
+        {
+          "filename": "zxx_memory.json",
+          "name": "ZXX memory",
+          "description": "RED top/bottom, BLUE sides. Surface-code memory cube (Z time-boundary, X space-boundary)."
+        },
+        {
+          "filename": "xzz_memory.json",
+          "name": "XZZ memory",
+          "description": "BLUE top/bottom, RED sides. Opposite-basis memory cube."
+        },
+        {
+          "filename": "hadamard_top.json",
+          "name": "Hadamard top",
+          "description": "RED bottom and sides, HADAMARD on top."
+        },
+        {
+          "filename": "port_io.json",
+          "name": "Port I/O",
+          "description": "RED sides, PORT top and bottom."
+        },
+        {
+          "filename": "y_defect_ridges.json",
+          "name": "Y defect ridges",
+          "description": "ZXX faces with K_SOUTH_WEST=true, K_SOUTH_EAST=false. Demonstrates all three is_y_defect states."
+        }
+      ]
+    },
+    {
+      "label": "Two cubes",
+      "examples": [
+        {
+          "filename": "blue_pair_east_west.json",
+          "name": "Blue pair (east-west)",
+          "description": "Two all-BLUE cubes joined east-west via OPEN. Degenerate (ZZZ) \u2014 surfaces an unsupported-pattern toast."
+        },
+        {
+          "filename": "red_pair_east_west.json",
+          "name": "Red pair (east-west)",
+          "description": "Two all-RED cubes joined east-west via OPEN. Degenerate (XXX) \u2014 surfaces an unsupported-pattern toast."
+        },
+        {
+          "filename": "zxx_memory_pair.json",
+          "name": "ZXX memory pair",
+          "description": "Two ZXX-memory cubes merged east-west via OPEN. Lattice-surgery merge along the X axis."
+        },
+        {
+          "filename": "xzz_memory_pair.json",
+          "name": "XZZ memory pair",
+          "description": "Two XZZ-memory cubes merged east-west via OPEN. Opposite-basis counterpart of zxx_memory_pair."
+        },
+        {
+          "filename": "zxx_time_evolution.json",
+          "name": "ZXX time evolution",
+          "description": "Two ZXX cubes stacked along K (time) sharing an OPEN face. piper-draw can't model the ZZO seam pipe \u2014 surfaces an unsupported-pipe toast."
+        },
+        {
+          "filename": "hadamard_pipe.json",
+          "name": "Hadamard pipe",
+          "description": "Two ZXX cubes joined east-west via a HADAMARD pipe (basis change between qubits)."
+        },
+        {
+          "filename": "port_io_pair.json",
+          "name": "Port I/O pair",
+          "description": "Two ZXX cubes stacked along K with PORT on outer faces. Same ZZO seam pipe limitation as zxx_time_evolution \u2014 surfaces an unsupported-pipe toast."
+        },
+        {
+          "filename": "disconnected_pair.json",
+          "name": "Disconnected pair",
+          "description": "Two ZXX cubes at non-adjacent coordinates \u2014 no edge, no pipe."
+        }
+      ]
+    },
+    {
+      "label": "Lattice surgery",
+      "examples": [
+        {
+          "filename": "koval_q_couch_cnot.json",
+          "name": "Koval-q couch CNOT",
+          "description": "10 cubes + 10 pipes + 4 ports implementing the Koval-q couch CNOT gate. Colors adjusted from the equiseta original so each cube's opposite faces share a basis (piper-draw can't model Hadamard-junction cubes); topology is identical."
+        }
+      ]
+    }
+  ]
+}

@@ -34,8 +34,8 @@ the affected components on the next frame.
 |-----------------------|---------------------------------------------------------------------|
 | `gui/src/stores/`     | Zustand stores. `blockStore` is the universe; `groupSelectors`, `keybindStore`, `locateStore`, `validationStore` are focused. |
 | `gui/src/types/`      | Shared types. `index.ts` is currently mixed types+logic; logic is migrating out into focused utility files. |
-| `gui/src/utils/`      | Pure helpers: geometry, validation, ZX graph derivation, DAE im/export, scene share, templates, drag/snap math, the shared `toastBus` (error + info channels). No React, no Zustand subscriptions. |
-| `gui/src/components/` | React + R3F. `BlockInstances` renders the scene; `Toolbar`/`HelpPanel`/`ZXPanel`/`FlowsPanel` are UI panels; the rest are overlays and ghost previews. |
+| `gui/src/utils/`      | Pure helpers: geometry, validation, ZX graph derivation, DAE im/export, Equiseta JSON load + translator (`equisetaJsonLoad.ts`, `equisetaJsonSchema.ts`; orchestrator `equisetaImport.ts`; per-node logic `equisetaNodeToCube.ts`; per-edge logic `equisetaEdgeToPipe.ts`), Equiseta dispatch controllers (`equisetaJsonController.ts`, `equisetaImportController.ts`), scene share, templates, drag/snap math, the shared `toastBus` (error + info channels). No React, no Zustand subscriptions. |
+| `gui/src/components/` | React + R3F. `BlockInstances` renders the scene (geometry-cache helpers split into `blockInstancesShared.ts` for React Fast Refresh + HMR cache invalidation); `Toolbar`/`HelpPanel`/`ZXPanel`/`FlowsPanel`/`EquisetaJsonPanel` are UI panels (the `Equiseta ▾` toolbar dropdown lives in `EquisetaMenu`; the in-panel `Import` / `Insert` buttons live in `EquisetaImportRow`); `ValidationToast` + `StatusPill` are the always-on status overlays (toast = transient validation result; pill = persistent "N view-only blocks" signal while any `Block.freeBuildOnly` is in scene); the rest are overlays and ghost previews. |
 | `gui/src/hooks/`      | Reusable hooks (floating panels, pulse animation, viewport fit). |
 | `gui/src/App.tsx`     | Top-level layout, keybind dispatch, pointer routing. |
 
@@ -52,14 +52,15 @@ the affected components on the next frame.
 
 Hot files; every meaningful PR pulls them into context. Hold the line:
 
-| File                                  | Current LOC | Target LOC |
-|---------------------------------------|------------:|-----------:|
-| `gui/src/stores/blockStore.ts`        |       ~4180 |   < 2,000 |
-| `gui/src/types/index.ts`              |       ~1751 |   < 500   |
-| `gui/src/components/Toolbar.tsx`      |       ~1713 |   < 600   |
-| `gui/src/App.tsx`                     |       ~1314 |   < 600   |
-| `gui/src/components/ZXPanel.tsx`      |        ~964 |   < 600   |
-| `gui/src/components/FlowsPanel.tsx`   |        ~755 |   < 600   |
+| File                                       | Current LOC | Target LOC |
+|--------------------------------------------|------------:|-----------:|
+| `gui/src/stores/blockStore.ts`             |       ~4270 |   < 2,000 |
+| `gui/src/types/index.ts`                   |       ~1751 |   < 500   |
+| `gui/src/components/Toolbar.tsx`           |       ~1745 |   < 600   |
+| `gui/src/App.tsx`                          |       ~1373 |   < 600   |
+| `gui/src/components/ZXPanel.tsx`           |        ~964 |   < 600   |
+| `gui/src/components/FlowsPanel.tsx`        |        ~755 |   < 600   |
+| `gui/src/components/EquisetaJsonPanel.tsx` |        ~581 |   < 500   |
 
 Targets are tracked by the scheduled weekly /retro; ESLint `max-lines: 600`
 enforces the cap going forward (existing offenders grandfathered until their

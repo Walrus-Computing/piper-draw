@@ -20,6 +20,7 @@ import { FpsSampler } from "./components/FpsCounter";
 import { OrientationGizmo } from "./components/OrientationGizmo";
 import { Toolbar } from "./components/Toolbar";
 import { ValidationToast } from "./components/ValidationToast";
+import { StatusPill } from "./components/StatusPill";
 import { InvalidBlockHighlights } from "./components/InvalidBlockHighlights";
 import { LocatePulseHighlight } from "./components/LocatePulseHighlight";
 import { SelectionHighlights } from "./components/SelectionHighlights";
@@ -31,6 +32,7 @@ import { DragShadow } from "./components/DragShadow";
 import { NavControlsModifier } from "./components/NavControlsModifier";
 import { OpenPipeGhosts } from "./components/OpenPipeGhosts";
 import { FlowsPanel } from "./components/FlowsPanel";
+import { EquisetaJsonPanel } from "./components/EquisetaJsonPanel";
 import { ZXPanel } from "./components/ZXPanel";
 import { PortLabels3D } from "./components/PortLabels3D";
 import { FoldOutCubeOverlay } from "./components/FoldOutCubeOverlay";
@@ -1262,6 +1264,7 @@ export default function App() {
         onOpenKeybindEditor={setKeybindEditorMode}
       />
       <ValidationToast toolbarRef={toolbarRef} controlsRef={controlsRef} />
+      <StatusPill />
       {sharedSceneBanner && (
         <SharedSceneBanner
           previousSnapshot={sharedSceneBanner.previousSnapshot}
@@ -1318,6 +1321,7 @@ export default function App() {
       )}
       <FlowsPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
       <ZXPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
+      <EquisetaJsonPanel />
       {showHints && <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />}
       {showHints && <BuildModeHints onCustomize={() => setKeybindEditorMode("build")} />}
       {keybindEditorMode && (

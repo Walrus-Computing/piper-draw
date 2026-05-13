@@ -1,0 +1,1 @@
+/Users/pderks/conductor/repos/piper-draw-raw/.claude/skills/gstack/qa/SKILL.md

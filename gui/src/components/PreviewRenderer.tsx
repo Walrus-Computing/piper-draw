@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import * as THREE from "three";
 import {
   CUBE_TYPES,
+  PIPE_VARIANTS,
   VARIANT_AXIS_MAP,
   createBlockGeometry,
   createBlockEdges,
@@ -9,7 +10,7 @@ import {
   blockThreeSize,
   Y_DEFECT_HEX,
 } from "../types";
-import type { BlockType, PipeVariant, ViewMode } from "../types";
+import type { BlockType, ViewMode } from "../types";
 import { useBlockStore } from "../stores/blockStore";
 import {
   FOLD_ANGLE,
@@ -34,7 +35,7 @@ const PREVIEW_TYPES: { key: string; blockType: BlockType | null; isoZBlockType?:
   { key: "Port", blockType: null },
   ...CUBE_TYPES.map((ct) => ({ key: ct, blockType: ct as BlockType })),
   { key: "Y", blockType: "Y" as BlockType },
-  ...(["ZX", "XZ", "ZXH", "XZH"] as PipeVariant[]).map((v) => ({
+  ...PIPE_VARIANTS.map((v) => ({
     key: v,
     blockType: VARIANT_AXIS_MAP[v][2] as BlockType,
     isoZBlockType: VARIANT_AXIS_MAP[v][1] as BlockType,

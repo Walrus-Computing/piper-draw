@@ -5,12 +5,14 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useBlockStore } from "../stores/blockStore";
 import {
   snapGroundPos,
+  snapGroundPosSlab,
   snapInPlane,
   hasBlockOverlap,
   hasCubeColorConflict,
   hasYCubePipeAxisConflict,
   validatePipePlacement,
   isValidPos,
+  isValidSlabPos,
   isPipeType,
   resolvePipeType,
   posKey,
@@ -134,6 +136,28 @@ export function GridPlane() {
       }
       return;
     }
+    // Paint tool: targets faces of existing blocks, never the empty plane.
+    if (store.armedTool === "paint") {
+      setHoveredGridPos(null);
+      return;
+    }
+    // Slab tool: XY-plane only — snap to the gap centre between 4 pipes
+    // (both x and y at 3k+1). Iso views are not supported for slabs in v1.
+    if (store.armedTool === "slab") {
+      if (viewMode.kind !== "persp") { setHoveredGridPos(null); return; }
+      const pos = snapGroundPosSlab(e.point.x, -e.point.z);
+      const key = posKey(pos);
+      const existing = store.blocks.get(key);
+      const isReplace = !!(existing && existing.type !== "slab");
+      if (existing && existing.type === "slab") {
+        setHoveredGridPos(null);
+      } else if (!isValidSlabPos(pos) || hasBlockOverlap(pos, "slab", store.blocks, store.spatialIndex, existing ? key : undefined)) {
+        setHoveredGridPos(pos, "slab", true, undefined, isReplace);
+      } else {
+        setHoveredGridPos(pos, "slab", false, undefined, isReplace);
+      }
+      return;
+    }
     const forPipe = store.pipeVariant !== null;
     const pos = snapForViewMode(viewMode, e.point, forPipe);
 
@@ -172,8 +196,10 @@ export function GridPlane() {
     if (store.xHeld) { e.stopPropagation(); return; }
 
     // Pass-through: when the click ray also hits a block or port ghost
-    // further along, let that handler own the event. Two scenarios:
+    // further along, let that handler own the event. Three scenarios:
     //   - Pointer: lets sub-ground blocks (TQEC z<0) be selected from above.
+    //   - Paint: lets the bottom face of a slab (or any block) be painted
+    //     when the camera is below the plane (Three.js y=0).
     //   - Placement (cube/pipe/port/paste): from a below-the-floor camera
     //     the plane's back face raycasts closer than the model and would
     //     otherwise hijack every click; passing through lets the block's
@@ -197,9 +223,10 @@ export function GridPlane() {
       return;
     }
 
-    if (store.armedTool === "pointer") {
+    if (store.armedTool === "pointer" || store.armedTool === "paint") {
       e.stopPropagation();
-      store.clearSelection();
+      // Empty-plane click clears the pointer selection; paint is a no-op.
+      if (store.armedTool === "pointer") store.clearSelection();
       return;
     }
     // Paste / port / placement on empty plane: consume the click.
@@ -214,6 +241,13 @@ export function GridPlane() {
     if (store.armedTool === "port") {
       const pos = snapForViewMode(viewMode, e.point, false);
       store.addPortAt(pos);
+      return;
+    }
+    // Slab tool (perspective view, XY plane only).
+    if (store.armedTool === "slab") {
+      if (viewMode.kind !== "persp") return;
+      const pos = snapGroundPosSlab(e.point.x, -e.point.z);
+      addBlock(pos);
       return;
     }
     const forPipe = store.pipeVariant !== null;

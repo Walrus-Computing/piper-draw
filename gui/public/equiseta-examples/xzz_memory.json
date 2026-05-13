@@ -1,0 +1,35 @@
+{
+  "version": "0.0.0",
+  "nodes": [
+    {
+      "coordinate": [
+        0,
+        0,
+        0
+      ],
+      "faces": {
+        "BOTTOM": "blue",
+        "EAST": "red",
+        "NORTH": "red",
+        "SOUTH": "red",
+        "TOP": "blue",
+        "WEST": "red"
+      },
+      "ridges": {
+        "I_BOT_SOUTH": null,
+        "I_BOT_NORTH": null,
+        "I_TOP_SOUTH": null,
+        "I_TOP_NORTH": null,
+        "J_BOT_WEST": null,
+        "J_BOT_EAST": null,
+        "J_TOP_WEST": null,
+        "J_TOP_EAST": null,
+        "K_SOUTH_WEST": null,
+        "K_SOUTH_EAST": null,
+        "K_NORTH_WEST": null,
+        "K_NORTH_EAST": null
+      }
+    }
+  ],
+  "edges": []
+}

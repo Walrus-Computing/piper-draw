@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { useBlockStore } from "../stores/blockStore";
 import { tqecToThree } from "../types";
 import type { Block, Position3D } from "../types";
-import { getCachedGeometry, getCachedEdges } from "./BlockInstances";
+import { getCachedGeometry, getCachedEdges } from "./blockInstancesShared";
 
 const noRaycast = () => {};
 

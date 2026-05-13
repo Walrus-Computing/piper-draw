@@ -59,7 +59,9 @@ Select two or more blocks and press `G` to bundle them into a group. Grouped blo
 
 ### Files
 - **Import** / **Export** round-trip through Collada (`.dae`) files.
+- **Share link** — copy a self-contained URL with the scene compressed into the hash fragment; opening the link restores the exact diagram. Capped at 6 KB; for larger scenes, use Export instead.
 - **Templates** — load a bundled example diagram (CNOT, CZ, move + rotation, three CNOTs, Steane encoding) as a starting point, or insert one into the current scene.
+- **Equiseta JSON viewer + import** — the **Equiseta ▾** toolbar dropdown groups bundled fixtures into **Single cube** and **Two cubes** sections (JSON produced by [Equiseta](https://github.com/Walrus-Computing/equiseta)'s `FTQCGraph.to_json()` serializer). Pick a fixture, drop a `.json` file onto the floating panel, or use **Open JSON…** — the scene auto-imports in one click. If TQEC validation rejects the imported scene, the validation toast offers an inline **Enable Free Build** button that flips Free Build on and dismisses the warning. Fixtures with degenerate all-blue (ZZZ) or all-red (XXX) face patterns are rejected by the importer before the scene loads, so Free Build cannot rescue those (tracked in TODOS.md). Use **Insert** in the panel to append at the +X edge instead of replacing.
 
 ### Bundled templates
 The `.dae` files served from `gui/public/templates/` are generated from [`tqec.gallery`](https://github.com/tqec/tqec/tree/main/src/tqec/gallery) — they originate from the TQEC project and are bundled here for convenience. Re-run the generator if TQEC is updated:
