@@ -1,0 +1,35 @@
+# Format: <commit-sha>:<path>:<rule-id>:<line>
+# Each entry suppresses one gitleaks finding by fingerprint.
+
+# All entries below are inside the vendored .claude/skills/gstack/ directory:
+# test fixtures with fake tokens + a Supabase publishable (client-safe) key.
+
+# Test fixture: fake GitHub PAT used to verify storage-redaction logic
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/browse/test/commands.test.ts:generic-api-key:418
+
+# Test fixture: WebSocket handshake key from RFC 6455 example
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/browse/test/terminal-agent-integration.test.ts:generic-api-key:210
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/browse/test/terminal-agent-integration.test.ts:generic-api-key:236
+
+# Supabase publishable (anon) key — designed to be client-side, not a secret
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/supabase/config.sh:generic-api-key:8
+
+# Test fixtures: fake AWS / OpenAI / GitHub PAT / JWT tokens for brain-sync redaction tests
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/test/brain-sync.test.ts:aws-access-token:288
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/test/brain-sync.test.ts:github-pat:289
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/test/brain-sync.test.ts:generic-api-key:291
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/test/brain-sync.test.ts:jwt:293
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/test/brain-sync.test.ts:github-pat:322
+
+# Test fixture: fake OpenAI key used in cso skill e2e
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/test/skill-e2e-cso.test.ts:generic-api-key:45
+
+# Recorded Haiku responses containing mock JWTs from security benchmark
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/browse/test/fixtures/security-bench-haiku-responses.json:jwt:1077
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/browse/test/fixtures/security-bench-haiku-responses.json:jwt:2965
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/browse/test/fixtures/security-bench-haiku-responses.json:jwt:6855
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/browse/test/fixtures/security-bench-haiku-responses.json:jwt:7629
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/browse/test/fixtures/security-bench-haiku-responses.json:jwt:11351
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/browse/test/fixtures/security-bench-haiku-responses.json:jwt:12755
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/browse/test/fixtures/security-bench-haiku-responses.json:jwt:14104
+12d500bf9ce017ae448605e8a711d34854b0b17f:.claude/skills/gstack/browse/test/fixtures/security-bench-haiku-responses.json:jwt-base64:14104
