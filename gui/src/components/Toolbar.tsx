@@ -547,6 +547,7 @@ export function Toolbar({
           clearAll={clearAll}
           onResetCamera={onResetCamera}
           blocksEmpty={blocksEmpty}
+          controlsRef={controlsRef}
         />
       </div>
 
@@ -1145,12 +1146,15 @@ function FileMenu({
   clearAll,
   onResetCamera,
   blocksEmpty,
+  controlsRef,
 }: {
   loadBlocks: (blocks: Map<string, import("../types").Block>) => void;
   insertBlocks: (blocks: Map<string, import("../types").Block>) => void;
   clearAll: () => void;
   onResetCamera: () => void;
   blocksEmpty: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  controlsRef: React.RefObject<any>;
 }) {
   const [open, setOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -1324,6 +1328,7 @@ function FileMenu({
                 setOpen(false);
               }}
               bgraph={bgraph}
+              controlsRef={controlsRef}
             />
           )}
           <button

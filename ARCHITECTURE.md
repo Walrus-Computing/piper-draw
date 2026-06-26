@@ -36,6 +36,7 @@ the affected components on the next frame.
 | `gui/src/types/`      | Shared types. `index.ts` is currently mixed types+logic; logic is migrating out into focused utility files. `bgraph.ts` holds API request/response types for `/api/bgraph_*`. |
 | `gui/src/utils/`      | Pure helpers: geometry, validation, ZX graph derivation, DAE im/export, scene share, drag/snap math, `pipeAcrossPortRetype` (port-shared pipe reconciliation, issue #307), the shared `toastBus` (error + info channels). `bgraphApi.ts` is a thin `fetch` wrapper for the backend bgraph endpoints; `bgraphImportToBlocks.ts` converts an API response into a `Block` Map and applies the sandwich-cube canonicalization rule. `bgraphToasts.ts` holds shared toast wording constants. No React, no Zustand subscriptions. |
 | `gui/src/components/` | React + R3F. `BlockInstances` renders the scene; `Toolbar`/`HelpPanel`/`ZXPanel`/`FlowsPanel` are UI panels. The bgraph stack lives here too: `PasteBgraphModal` (unified Load/Insert via file picker or paste), `BgraphGalleryPanel` (floating panel for bundled tqec.gallery examples), `BgraphDialogs` (single-mount host), `ImportSubmenu` / `ExportSubmenu` (side submenus opened from File ▾ Import ▸ / Export ▸), `FileDropOverlay` (window-level drag-drop with dashed-border overlay), and the dev-only `RoundTripVerifyButton`. The rest are overlays and ghost previews. |
+| `gui/src/viewer/`     | The standalone-HTML embed viewer — a **second Vite entry** (`gui/viewer.html` → `viewer-main.tsx`). `ViewerScene` is a stripped read-only `<Canvas>` that re-uses `components/BlockInstances` + `components/FlowSurfaceOverlay` (no geometry duplication) and hydrates the shared `blockStore` from a `window.__PIPER_VIEW__` blob. Built fully-inlined via `vite-plugin-singlefile` (see `gui/vite.viewer.config.ts`). See "Standalone HTML export" below. |
 | `gui/src/hooks/`      | Reusable hooks: `useFloatingPanel` (drag + resize + persist), `useFileDropHandler` (window-level drag-drop dispatch by extension), `useBgraphActions` (shared bgraph import/export handlers + dialog state), `usePulseScale`, `useViewportFitScale`. |
 | `gui/src/App.tsx`     | Top-level layout, keybind dispatch, pointer routing. Mounts `<FileDropOverlay />` for canvas drag-drop. |
 | `server.py` + root    | FastAPI app and route handlers (`/api/validate`, `/api/flows`, `/api/zx`). `bgraph_endpoints.py` is a focused module that mounts `/api/bgraph_export` and `/api/bgraph_import` via an `APIRouter`, wrapping `tqec.interop.bgraph.{load_bgraph, write_bgraph}` with piper-draw policy (5 MB / 10k block caps, dup-port-label rejection, empty-graph rejection, strict `BlockGraph.validate()` pre-write). |
@@ -115,6 +116,40 @@ where no existing block needs preserving. See learning
 `paint-faceColors-lost-on-bulk-add-and-clipboard` for the 7 documented
 mutation sites and `piper-draw-block-mutator-spread-audit` for the audit
 pattern.
+
+## Standalone HTML export (embed viewer)
+
+File ▾ → Export ▸ → **Export standalone .html** produces a single self-contained
+file that renders the current view as an interactive, orbit-able object for
+embedding in webpages (e.g. tqec's docs gallery). Data flow:
+
+```
+ExportSubmenu (handler)
+  ├─ captureSnapshot()             utils/sceneSnapshot.ts  (blocks + ports)
+  ├─ captureCameraState(controls)  utils/viewSnapshot.ts   (opening camera)
+  ├─ buildViewSnapshot({...})      utils/viewSnapshot.ts   → ViewSnapshotV1
+  └─ exportStandaloneHtml(view)    utils/htmlExport.ts
+        └─ fetch dist/viewer.html (prebuilt, inlined) → splice in
+           <script>window.__PIPER_VIEW__=…</script> → download
+```
+
+The downloaded file boots `viewer-main.tsx`, which validates the blob
+(`isViewSnapshotV1`), hydrates the shared `blockStore`, and mounts `ViewerScene`.
+
+Key constraints:
+- `utils/viewSnapshot.ts` and `utils/htmlExport.ts` follow the utils boundary —
+  no `stores/*` imports; the component layer reads state and passes it in.
+- `ViewSnapshotV1` **extends** `SceneSnapshotV1` (re-uses its capture/validate);
+  it adds `flowVizMode`, the selected `Flow`, `viewMode`, and a `CameraStateV1`.
+  Opacity/dimming is NOT serialized — `flowVizMode` alone reproduces it via the
+  re-used `BlockInstances` (`DIMMED_OPACITY` stays single-sourced there).
+- The viewer must import only the render components (not `App.tsx`/`Toolbar`) so
+  the bundle tree-shakes; the grid (`CheckerboardGrid`, defined in `App.tsx`) is
+  intentionally excluded from embeds.
+- **Build is two-pass**: `vite build` (main SPA, empties `dist/`) then
+  `vite build --config vite.viewer.config.ts` (`emptyOutDir:false`, appends the
+  inlined `dist/viewer.html`). The Dockerfile copies `dist/` wholesale and
+  `server.py`'s `StaticFiles(html=True)` serves `viewer.html` unchanged.
 
 ## Updating this document
 

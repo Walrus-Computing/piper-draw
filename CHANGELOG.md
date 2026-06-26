@@ -6,6 +6,21 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.2.4.0] - 2026-06-26
+
+### Added
+- **Standalone HTML export** ([#338](https://github.com/Walrus-Computing/piper-draw/issues/338)).
+  File ▾ → Export ▸ gains **Export standalone .html**: download a single,
+  self-contained `.html` of the current view — the lattice plus any
+  correlation surface / opacity you have toggled on via Analyze → Flows. The
+  file bundles everything (no server, works offline) and opens as an
+  interactive, orbit-able 3D object with no editor chrome. The current camera
+  angle sets the opening view (orbit/pan/zoom stay live); when no camera is
+  captured it auto-fits the whole scene. The embed shows the colored X/Y/Z
+  axes, a controls hint, and a **Download .dae** button (generated in-browser,
+  also offline). Built for embedding in webpages such as tqec's docs gallery —
+  the export dialog shows a ready-to-paste `<iframe>` snippet with a Copy button.
+
 ## [0.2.3.1] - 2026-05-11
 
 ### Fixed

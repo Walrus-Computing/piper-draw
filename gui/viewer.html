@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Piper Draw — Embedded Diagram</title>
+    <style>
+      html, body, #viewer-root { margin: 0; height: 100%; width: 100%; overflow: hidden; }
+      #viewer-root { background: #CBDFC6; }
+      .viewer-empty {
+        font-family: system-ui, sans-serif; color: #555;
+        display: flex; align-items: center; justify-content: center;
+        height: 100%; width: 100%; padding: 1rem; box-sizing: border-box; text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="viewer-root"></div>
+    <script type="module" src="/src/viewer/viewer-main.tsx"></script>
+  </body>
+</html>
