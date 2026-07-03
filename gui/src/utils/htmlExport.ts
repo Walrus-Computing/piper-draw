@@ -219,7 +219,10 @@ function frame() {
 frame();
 addEventListener('resize', frame);
 // Render only when the view actually changes — no idle GPU/CPU churn.
-controls.addEventListener('change', render);`;
+controls.addEventListener('change', render);
+// Cmd/Meta held → left-drag pans instead of orbiting ("Cmd + drag to move").
+addEventListener('keydown', (e) => { if (e.key === 'Meta' || e.metaKey) controls.mouseButtons.LEFT = THREE.MOUSE.PAN; });
+addEventListener('keyup', (e) => { if (e.key === 'Meta') controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE; });`;
 
 /** The ES-module body that reconstructs and renders the scene inside the iframe. */
 function buildModuleScript(scene: BakedScene, opacity: number): string {
@@ -307,11 +310,15 @@ if (YEDGE) {
  * camera mirror App.tsx + PreviewRenderer.tsx so the embed matches the app.
  *
  * @param opacity block opacity in [0,1] (edges + Y-defects stay fully opaque)
+ * @param openUrl href for the "Open in Piper Draw" link in the title bar
  */
-export function renderIframeDoc(scene: BakedScene, opacity: number): string {
+export function renderIframeDoc(scene: BakedScene, opacity: number, openUrl: string): string {
   const cdn = `https://cdn.jsdelivr.net/npm/three@${THREE_CDN_VERSION}`;
   return `<!doctype html><html><head><meta charset="utf-8">
-<style>html,body{margin:0;height:100%;overflow:hidden}#c{width:100%;height:100%;display:block}</style>
+<style>html,body{margin:0;height:100%;overflow:hidden}#c{width:100%;height:100%;display:block}
+#bar{position:absolute;top:0;left:0;right:0;box-sizing:border-box;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px;font:15px/1.4 system-ui,-apple-system,sans-serif;color:#333;background:linear-gradient(rgba(255,255,255,0.9),rgba(255,255,255,0));pointer-events:none;user-select:none}
+#bar a{pointer-events:auto;color:#0066cc;text-decoration:none;white-space:nowrap}
+#bar a:hover{text-decoration:underline}</style>
 <script type="importmap">
 { "imports": {
   "three": "${cdn}/build/three.module.js",
@@ -319,6 +326,7 @@ export function renderIframeDoc(scene: BakedScene, opacity: number): string {
 }}
 </script></head>
 <body><canvas id="c"></canvas>
+<div id="bar"><span>Drag to orbit. Scroll to zoom. Shift + drag to move.</span><a href="${openUrl}" target="_blank" rel="noopener">Open in Piper Draw</a></div>
 <script type="module">
 ${buildModuleScript(scene, opacity)}
 </script></body></html>`;
