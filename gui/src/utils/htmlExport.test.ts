@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { bakeScene, renderIframeDoc, buildIframeSnippet } from "./htmlExport";
 import type { Block, FaceMask } from "../types";
+import type { SurfacePiece } from "./flows";
+
+const SURFACES: SurfacePiece[] = [
+  { basis: "X", vertices: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0] },
+  { basis: "Z", vertices: [0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0] },
+];
 
 function scene(): Map<string, Block> {
   const m = new Map<string, Block>();
@@ -26,6 +32,24 @@ describe("htmlExport", () => {
     expect(baked.edges.positions.length).toBeGreaterThan(0);
     expect(baked.bounds.diameter).toBeGreaterThan(0);
     expect(baked.yDefectEdges).toBeUndefined();
+    expect(baked.surfaces).toEqual([]);
+  });
+
+  it("bakes correlation surfaces bucketed by basis with per-basis colors", () => {
+    const baked = bakeScene(scene(), hidden, false, SURFACES);
+    expect(baked.surfaces.length).toBe(2);
+    const colors = baked.surfaces.map((s) => s.color);
+    expect(colors).toContain("#ff7f7f"); // X
+    expect(colors).toContain("#7396ff"); // Z
+    for (const s of baked.surfaces) {
+      expect(s.index.length).toBe(6); // one quad → two triangles
+      expect(Math.max(...s.index)).toBeLessThan(s.positions.length / 3);
+    }
+    // surfaces are emitted as unlit meshes in the iframe
+    const doc = renderIframeDoc(baked, 0.8);
+    expect(doc).toContain("MeshBasicMaterial");
+    // no surfaces => no MeshBasicMaterial
+    expect(renderIframeDoc(bakeScene(scene(), hidden, false), 0.8)).not.toContain("MeshBasicMaterial");
   });
 
   it("emits Y-defect edges only when requested", () => {

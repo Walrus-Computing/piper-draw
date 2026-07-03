@@ -19,9 +19,13 @@ import {
   posKey,
 } from "../types";
 import type { Block, FaceMask } from "../types";
+import type { SurfacePiece } from "./flows";
 
 // Keep in lockstep with the installed three version (gui/package.json).
 const THREE_CDN_VERSION = "0.184.0";
+
+// Per-basis correlation-surface colors (match FlowSurfaceOverlay.tsx).
+const SURFACE_COLOR: Record<"X" | "Z", string> = { X: "#ff7f7f", Z: "#7396ff" };
 
 export interface BakedScene {
   mesh: {
@@ -32,7 +36,52 @@ export interface BakedScene {
   };
   edges: { positions: Float32Array };
   yDefectEdges?: { positions: Float32Array };
+  // Opaque, unlit correlation-surface meshes (one per basis present).
+  surfaces: Array<{ positions: Float32Array; index: Uint32Array; color: string }>;
   bounds: { center: [number, number, number]; diameter: number };
+}
+
+/**
+ * Bucket correlation-surface quads by basis into indexed mesh arrays, growing
+ * the running bbox (min/max) in place. Each piece is a quad → two triangles.
+ * Vertices need no tqecToThree transform: the backend emits them in world coords.
+ */
+function bakeSurfaces(
+  surfaces: SurfacePiece[],
+  min: number[],
+  max: number[],
+): BakedScene["surfaces"] {
+  const buckets: Record<"X" | "Z", { pos: number[]; idx: number[] }> = {
+    X: { pos: [], idx: [] },
+    Z: { pos: [], idx: [] },
+  };
+  for (const piece of surfaces) {
+    const bucket = piece.basis === "X" ? buckets.X : buckets.Z;
+    const base = bucket.pos.length / 3;
+    for (let i = 0; i < piece.vertices.length; i += 3) {
+      const x = piece.vertices[i], y = piece.vertices[i + 1], z = piece.vertices[i + 2];
+      bucket.pos.push(x, y, z);
+      if (x < min[0]) min[0] = x;
+      if (x > max[0]) max[0] = x;
+      if (y < min[1]) min[1] = y;
+      if (y > max[1]) max[1] = y;
+      if (z < min[2]) min[2] = z;
+      if (z > max[2]) max[2] = z;
+    }
+    bucket.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  const out: BakedScene["surfaces"] = [];
+  for (const basis of ["X", "Z"] as const) {
+    const b = buckets[basis];
+    if (b.pos.length > 0) {
+      out.push({
+        positions: new Float32Array(b.pos),
+        index: new Uint32Array(b.idx),
+        color: SURFACE_COLOR[basis],
+      });
+    }
+  }
+  return out;
 }
 
 /**
@@ -45,6 +94,7 @@ export function bakeScene(
   blocks: Map<string, Block>,
   hiddenFaces: Map<string, FaceMask>,
   showYDefects: boolean,
+  surfaces?: SurfacePiece[] | null,
 ): BakedScene {
   const posA: number[] = [];
   const normA: number[] = [];
@@ -110,6 +160,8 @@ export function bakeScene(
     }
   }
 
+  const surfacesOut = bakeSurfaces(surfaces ?? [], min, max);
+
   const center: [number, number, number] = [
     (min[0] + max[0]) / 2,
     (min[1] + max[1]) / 2,
@@ -126,6 +178,7 @@ export function bakeScene(
     },
     edges: { positions: new Float32Array(edgeA) },
     yDefectEdges: showYDefects && yEdgeA.length > 0 ? { positions: new Float32Array(yEdgeA) } : undefined,
+    surfaces: surfacesOut,
     bounds: { center, diameter },
   };
 }
@@ -135,12 +188,58 @@ function arr(a: ArrayLike<number>): string {
   return JSON.stringify(Array.from(a, (v) => Math.round(v * 1e5) / 1e5));
 }
 
+// Static tail of the iframe module: camera framing, on-demand render, resize.
+// `render` is a hoisted function declaration, so the setup part's message
+// listener can call it even though it's declared here (appended after).
+const CAMERA_LOOP_SCRIPT = `
+const FOV = 35;
+const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 100000);
+const controls = new OrbitControls(camera, canvas);
+controls.target.set(CENTER[0], CENTER[1], CENTER[2]);
+
+function render() { renderer.render(scene, camera); }
+
+function frame() {
+  const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  const vFov = FOV * Math.PI / 180;
+  const fitH = (DIAM / 2) / Math.tan(vFov / 2);
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+  const fitW = (DIAM / 2) / Math.tan(hFov / 2);
+  const distance = Math.max(fitH, fitW) * 1.2;
+  const d = new THREE.Vector3(1, 1, -1).normalize();
+  camera.position.set(CENTER[0], CENTER[1], CENTER[2]).addScaledVector(d, distance);
+  camera.near = Math.max(0.1, distance / 1000);
+  camera.far = distance * 10 + DIAM;
+  camera.updateProjectionMatrix();
+  controls.update();
+  render();
+}
+frame();
+addEventListener('resize', frame);
+// Render only when the view actually changes — no idle GPU/CPU churn.
+controls.addEventListener('change', render);`;
+
 /** The ES-module body that reconstructs and renders the scene inside the iframe. */
 function buildModuleScript(scene: BakedScene, opacity: number): string {
-  const { mesh, edges, yDefectEdges, bounds } = scene;
+  const { mesh, edges, yDefectEdges, bounds, surfaces } = scene;
   const yEdges = yDefectEdges ? arr(yDefectEdges.positions) : "null";
+  const surfInit = surfaces
+    .map((s) => `{p:${arr(s.positions)},i:${arr(s.index)},c:${JSON.stringify(s.color)}}`)
+    .join(",");
+  // Correlation surfaces: opaque, unlit, double-sided (per basis). Omitted
+  // entirely when none are shown, so the snippet carries no dead code.
+  const surfBlock = surfaces.length
+    ? `\nfor (const s of [${surfInit}]) {
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.Float32BufferAttribute(s.p, 3));
+  sg.setIndex(s.i);
+  scene.add(new THREE.Mesh(sg, new THREE.MeshBasicMaterial({ color: s.c, side: THREE.DoubleSide })));
+}\n`
+    : "";
 
-  return `import * as THREE from 'three';
+  const setup = `import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const POS = ${arr(mesh.positions)};
@@ -191,41 +290,14 @@ addEventListener('message', (e) => {
 const eg = new THREE.BufferGeometry();
 eg.setAttribute('position', new THREE.Float32BufferAttribute(EDGE, 3));
 scene.add(new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x000000 })));
-
+${surfBlock}
 if (YEDGE) {
   const yg = new THREE.BufferGeometry();
   yg.setAttribute('position', new THREE.Float32BufferAttribute(YEDGE, 3));
   scene.add(new THREE.LineSegments(yg, new THREE.LineBasicMaterial({ color: 0xff39c2 })));
 }
-
-const FOV = 35;
-const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 100000);
-const controls = new OrbitControls(camera, canvas);
-controls.target.set(CENTER[0], CENTER[1], CENTER[2]);
-
-function render() { renderer.render(scene, camera); }
-
-function frame() {
-  const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
-  renderer.setSize(w, h, false);
-  camera.aspect = w / h;
-  const vFov = FOV * Math.PI / 180;
-  const fitH = (DIAM / 2) / Math.tan(vFov / 2);
-  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
-  const fitW = (DIAM / 2) / Math.tan(hFov / 2);
-  const distance = Math.max(fitH, fitW) * 1.2;
-  const d = new THREE.Vector3(1, 1, -1).normalize();
-  camera.position.set(CENTER[0], CENTER[1], CENTER[2]).addScaledVector(d, distance);
-  camera.near = Math.max(0.1, distance / 1000);
-  camera.far = distance * 10 + DIAM;
-  camera.updateProjectionMatrix();
-  controls.update();
-  render();
-}
-frame();
-addEventListener('resize', frame);
-// Render only when the view actually changes — no idle GPU/CPU churn.
-controls.addEventListener('change', render);`;
+`;
+  return setup + CAMERA_LOOP_SCRIPT;
 }
 
 /**
