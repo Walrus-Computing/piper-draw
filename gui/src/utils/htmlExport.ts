@@ -220,9 +220,9 @@ frame();
 addEventListener('resize', frame);
 // Render only when the view actually changes — no idle GPU/CPU churn.
 controls.addEventListener('change', render);
-// Cmd/Meta held → left-drag pans instead of orbiting ("Cmd + drag to move").
-addEventListener('keydown', (e) => { if (e.key === 'Meta' || e.metaKey) controls.mouseButtons.LEFT = THREE.MOUSE.PAN; });
-addEventListener('keyup', (e) => { if (e.key === 'Meta') controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE; });`;
+// Shift held → left-drag pans instead of orbiting ("Cmd + drag to move").
+addEventListener('keydown', (e) => { if (e.key === 'Shift' || e.shiftKey) controls.mouseButtons.LEFT = THREE.MOUSE.PAN; });
+addEventListener('keyup', (e) => { if (e.key === 'Shift') controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE; });`;
 
 /** The ES-module body that reconstructs and renders the scene inside the iframe. */
 function buildModuleScript(scene: BakedScene, opacity: number): string {
@@ -326,7 +326,7 @@ export function renderIframeDoc(scene: BakedScene, opacity: number, openUrl: str
 }}
 </script></head>
 <body><canvas id="c"></canvas>
-<div id="bar"><span>Drag to orbit. Scroll to zoom. Shift + drag to move.</span><a href="${openUrl}" target="_blank" rel="noopener">Open in Piper Draw</a></div>
+<div id="bar"><span>Drag to orbit. Scroll to zoom. Cmd + drag to move.</span><a href="${openUrl}" target="_blank" rel="noopener">Open in Piper Draw</a></div>
 <script type="module">
 ${buildModuleScript(scene, opacity)}
 </script></body></html>`;
