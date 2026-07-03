@@ -7,20 +7,20 @@ function freshState() {
   return useKeybindStore.getState();
 }
 
-describe("keybindMigrate (v15 → v16 navStyle reset)", () => {
-  it("drops persisted navStyle when fromVersion < 16", () => {
-    const out = keybindMigrate({ navStyle: "pan", bindings: {} }, 15) as Record<string, unknown>;
+describe("keybindMigrate (navStyle reset on default flip)", () => {
+  it("drops persisted navStyle when fromVersion < 17", () => {
+    const out = keybindMigrate({ navStyle: "rotate", bindings: {} }, 16) as Record<string, unknown>;
     expect(out.navStyle).toBeUndefined();
     // Other fields survive.
     expect(out.bindings).toEqual({});
   });
 
-  it("preserves persisted navStyle when fromVersion >= 16", () => {
-    const out = keybindMigrate({ navStyle: "pan" }, 16) as Record<string, unknown>;
-    expect(out.navStyle).toBe("pan");
+  it("preserves persisted navStyle when fromVersion >= 17", () => {
+    const out = keybindMigrate({ navStyle: "rotate" }, 17) as Record<string, unknown>;
+    expect(out.navStyle).toBe("rotate");
   });
 
-  it("treats unversioned (fromVersion = 0) records as v15 — drops navStyle", () => {
+  it("treats unversioned (fromVersion = 0) records as pre-v17 — drops navStyle", () => {
     const out = keybindMigrate({ navStyle: "pan" }, 0) as Record<string, unknown>;
     expect(out.navStyle).toBeUndefined();
   });
@@ -47,20 +47,20 @@ describe("keybindMigrate (v15 → v16 navStyle reset)", () => {
 });
 
 describe("keybindMerge (post-migration rehydrate)", () => {
-  it("post-v16-migration: a v15 user with navStyle:'pan' lands on the new 'rotate' default", () => {
-    const migrated = keybindMigrate({ navStyle: "pan", bindings: {} }, 15);
+  it("post-v17-migration: a pre-v17 user with navStyle:'rotate' lands on the new 'pan' default", () => {
+    const migrated = keybindMigrate({ navStyle: "rotate", bindings: {} }, 16);
     const merged = keybindMerge(migrated, freshState());
-    expect(merged.navStyle).toBe("rotate");
+    expect(merged.navStyle).toBe("pan");
   });
 
   it("preserves an explicit user choice when navStyle is still present", () => {
-    const merged = keybindMerge({ navStyle: "pan" }, freshState());
-    expect(merged.navStyle).toBe("pan");
+    const merged = keybindMerge({ navStyle: "rotate" }, freshState());
+    expect(merged.navStyle).toBe("rotate");
   });
 
   it("falls back to the current default for invalid navStyle values", () => {
     const merged = keybindMerge({ navStyle: "wobble" } as unknown as object, freshState());
-    expect(merged.navStyle).toBe("rotate");
+    expect(merged.navStyle).toBe("pan");
   });
 
   it("preserves persisted boolean toggles even when navStyle is missing", () => {

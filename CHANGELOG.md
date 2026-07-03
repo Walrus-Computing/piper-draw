@@ -6,6 +6,12 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+### Changed
+- **Default camera navigation is now "Drag to pan"** (was "Drag to orbit").
+  Left-drag pans; middle/right-drag or <kbd>Shift</kbd>+drag orbits. Existing
+  users are reset to the new default once on upgrade (persist v16 → v17); anyone
+  who prefers orbit can re-pick "Drag to orbit" in Settings.
+
 ## [0.2.3.1] - 2026-05-11
 
 ### Fixed

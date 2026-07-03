@@ -270,16 +270,18 @@ function cloneDefaults(): BindingsByMode {
 
 // Exported for unit testing. The `persist` config below is the only runtime caller.
 //
-// v16 (2026-05-07): the camera default flipped from "pan" → "rotate". Zustand
-// persist had already written the old default into every prior user's
-// localStorage, so the new default would otherwise never reach them. On
-// migration we drop the persisted navStyle so `keybindMerge` falls back to
-// the current default; users who explicitly preferred pan can re-pick it.
+// The camera default has been flipped twice. Each flip drops the persisted
+// navStyle on migration so `keybindMerge` falls back to the new code default;
+// Zustand persist had already written the old default into every prior user's
+// localStorage, so the new one would otherwise never reach them. Users who
+// explicitly preferred the old style can re-pick it.
+//   v16 (2026-05-07): "pan" → "rotate".
+//   v17 (2026-07-03): "rotate" → "pan".
 export function keybindMigrate(persisted: unknown, fromVersion: number): unknown {
   const p = (persisted ?? {}) as Partial<KeybindState> & Record<string, unknown>;
-  // Treat NaN / non-numeric / undefined as "older than v16" — corrupted or
-  // hand-edited records get the same one-time reset as anyone on v15.
-  if (!Number.isFinite(fromVersion) || (fromVersion as number) < 16) {
+  // Treat NaN / non-numeric / undefined as "older than v17" — corrupted or
+  // hand-edited records get the same one-time reset as anyone pre-v17.
+  if (!Number.isFinite(fromVersion) || (fromVersion as number) < 17) {
     delete p.navStyle;
   }
   return p;
@@ -322,7 +324,7 @@ export const useKeybindStore = create<KeybindState>()(
       bindings: cloneDefaults(),
       cameraFollowsBuild: false,
       axisAbsoluteWasd: false,
-      navStyle: "rotate",
+      navStyle: "pan",
 
       setBinding: (mode, action, binding) =>
         set((state) => {
@@ -357,7 +359,7 @@ export const useKeybindStore = create<KeybindState>()(
     }),
     {
       name: "piper-draw-keybinds",
-      version: 16,
+      version: 17,
       migrate: (persisted, fromVersion) => keybindMigrate(persisted, fromVersion) as KeybindState,
       merge: (persisted, current) => keybindMerge(persisted, current as KeybindState),
     },
