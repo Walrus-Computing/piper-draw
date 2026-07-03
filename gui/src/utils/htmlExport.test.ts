@@ -3,6 +3,8 @@ import { bakeScene, renderIframeDoc, buildIframeSnippet } from "./htmlExport";
 import type { Block, FaceMask } from "../types";
 import type { SurfacePiece } from "./flows";
 
+const URL = "https://piper-draw.example/#scene=abc123";
+
 const SURFACES: SurfacePiece[] = [
   { basis: "X", vertices: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0] },
   { basis: "Z", vertices: [0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0] },
@@ -46,10 +48,10 @@ describe("htmlExport", () => {
       expect(Math.max(...s.index)).toBeLessThan(s.positions.length / 3);
     }
     // surfaces are emitted as unlit meshes in the iframe
-    const doc = renderIframeDoc(baked, 0.8);
+    const doc = renderIframeDoc(baked, 0.8, URL);
     expect(doc).toContain("MeshBasicMaterial");
     // no surfaces => no MeshBasicMaterial
-    expect(renderIframeDoc(bakeScene(scene(), hidden, false), 0.8)).not.toContain("MeshBasicMaterial");
+    expect(renderIframeDoc(bakeScene(scene(), hidden, false), 0.8, URL)).not.toContain("MeshBasicMaterial");
   });
 
   it("emits Y-defect edges only when requested", () => {
@@ -62,7 +64,7 @@ describe("htmlExport", () => {
   });
 
   it("renders a self-contained doc that references the pinned three CDN", () => {
-    const doc = renderIframeDoc(bakeScene(scene(), hidden, false), 0.8);
+    const doc = renderIframeDoc(bakeScene(scene(), hidden, false), 0.8, URL);
     expect(doc).toContain("cdn.jsdelivr.net/npm/three@0.184.0");
     expect(doc).toContain("OrbitControls");
     expect(doc).toContain("#CBDFC6");
@@ -70,8 +72,15 @@ describe("htmlExport", () => {
     expect(doc.startsWith("<!doctype html>")).toBe(true);
   });
 
+  it("includes a title bar with usage hints and an Open-in-Piper-Draw link", () => {
+    const doc = renderIframeDoc(bakeScene(scene(), hidden, false), 0.8, URL);
+    expect(doc).toContain("Drag to orbit. Scroll to zoom. Cmd + drag to move.");
+    expect(doc).toContain("Open in Piper Draw");
+    expect(doc).toContain(`href="${URL}"`);
+  });
+
   it("wraps into an escaped iframe srcdoc with no raw double-quotes in the payload", () => {
-    const doc = renderIframeDoc(bakeScene(scene(), hidden, false), 1);
+    const doc = renderIframeDoc(bakeScene(scene(), hidden, false), 1, URL);
     const snip = buildIframeSnippet(doc);
     expect(snip.startsWith('<iframe srcdoc="')).toBe(true);
     // extract the srcdoc attribute value; it must not contain an unescaped "

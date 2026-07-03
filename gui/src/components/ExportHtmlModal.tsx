@@ -17,13 +17,31 @@ import { createPortal } from "react-dom";
 import { useExportHtmlStore } from "../stores/exportHtmlStore";
 import { useBlockStore } from "../stores/blockStore";
 import { bakeScene, renderIframeDoc, buildIframeSnippet } from "../utils/htmlExport";
+import { captureSnapshot } from "../utils/sceneSnapshot";
+import { encodeSnapshotToHashParam, buildShareUrl } from "../utils/sceneShare";
 
 type CopyStatus = "idle" | "copied" | "error";
 
 // Default block opacity: lower when correlation surfaces are present so they
 // show through the blocks; opaque-ish otherwise.
 const DEFAULT_OPACITY = 80;
-const FLOW_OPACITY = 30;
+const FLOW_OPACITY = 25;
+
+// "Open in Piper Draw" tries to encode the whole scene into a share link; past
+// this URL length we fall back to the plain app (same cap as the Share button).
+const SHARE_URL_MAX_LEN = 6144;
+
+/** Scene-loading share URL, or the plain app origin if it won't fit / fails. */
+async function buildOpenUrl(): Promise<string> {
+  const fallback = typeof window !== "undefined" ? window.location.origin : "";
+  try {
+    const encoded = await encodeSnapshotToHashParam(captureSnapshot());
+    const url = buildShareUrl(encoded);
+    return url.length <= SHARE_URL_MAX_LEN ? url : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 const BACKDROP_STYLE: React.CSSProperties = {
   position: "fixed",
@@ -141,7 +159,7 @@ function DialogBody({
   onClose,
 }: {
   empty: boolean;
-  innerDoc: string;
+  innerDoc: string | null;
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   opacity: number;
   setOpacity: (v: number) => void;
@@ -162,26 +180,45 @@ function DialogBody({
       </>
     );
   }
+  const notReady = innerDoc == null;
   return (
     <>
       <div style={{ fontSize: 13, fontFamily: "Arial", color: "#555" }}>
         Simply paste the snippet into your webpage's HTML. Drag to rotate, scroll to zoom, cmd + drag to move.
       </div>
       <OpacityRow opacity={opacity} setOpacity={setOpacity} />
-      <iframe
-        ref={iframeRef}
-        srcDoc={innerDoc}
-        title="piper-draw preview"
-        onLoad={() =>
-          iframeRef.current?.contentWindow?.postMessage({ __piperOpacity: opacity / 100 }, "*")
-        }
-        style={{ width: "100%", height: "min(55vh, 400px)", border: "1px solid #ccc", borderRadius: 4 }}
-      />
+      {notReady ? (
+        <div
+          style={{
+            width: "100%",
+            height: "min(55vh, 400px)",
+            border: "1px solid #ccc",
+            borderRadius: 4,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#888",
+            fontSize: 13,
+          }}
+        >
+          Preparing preview…
+        </div>
+      ) : (
+        <iframe
+          ref={iframeRef}
+          srcDoc={innerDoc}
+          title="piper-draw preview"
+          onLoad={() =>
+            iframeRef.current?.contentWindow?.postMessage({ __piperOpacity: opacity / 100 }, "*")
+          }
+          style={{ width: "100%", height: "min(55vh, 400px)", border: "1px solid #ccc", borderRadius: 4 }}
+        />
+      )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10 }}>
         <span style={{ fontSize: 12, color: copyStatus === "error" ? "#c00" : "#2a7", marginRight: "auto" }}>
           {copyStatus === "copied" ? "Copied to clipboard!" : copyStatus === "error" ? "Could not copy." : ""}
         </span>
-        <button onClick={onCopy} style={primaryBtn(false)}>
+        <button onClick={onCopy} disabled={notReady} style={primaryBtn(notReady)}>
           {copyLabel}
         </button>
         <button onClick={onClose} style={plainBtn}>
@@ -205,12 +242,29 @@ function ExportHtmlDialog({ onClose }: { onClose: () => void }) {
   }, []);
   const empty = scene.mesh.positions.length === 0;
   const initialOpacity = scene.surfaces.length > 0 ? FLOW_OPACITY : DEFAULT_OPACITY;
-  const innerDoc = useMemo(() => renderIframeDoc(scene, initialOpacity / 100), [scene, initialOpacity]);
 
   const [opacity, setOpacity] = useState(initialOpacity);
+  const [openUrl, setOpenUrl] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Resolve the "Open in Piper Draw" link (async: scene compression). Fast, but
+  // gates the preview so its baked-in link matches what "Copy snippet" emits.
+  useEffect(() => {
+    let alive = true;
+    void buildOpenUrl().then((url) => {
+      if (alive) setOpenUrl(url);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const innerDoc = useMemo(
+    () => (openUrl == null ? null : renderIframeDoc(scene, initialOpacity / 100, openUrl)),
+    [scene, initialOpacity, openUrl],
+  );
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -232,7 +286,8 @@ function ExportHtmlDialog({ onClose }: { onClose: () => void }) {
   }, [opacity]);
 
   const copy = async () => {
-    const snippet = buildIframeSnippet(renderIframeDoc(scene, opacity / 100));
+    const url = openUrl ?? (typeof window !== "undefined" ? window.location.origin : "");
+    const snippet = buildIframeSnippet(renderIframeDoc(scene, opacity / 100, url));
     try {
       await navigator.clipboard.writeText(snippet);
       setCopyStatus("copied");
