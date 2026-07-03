@@ -20,7 +20,10 @@ import { bakeScene, renderIframeDoc, buildIframeSnippet } from "../utils/htmlExp
 
 type CopyStatus = "idle" | "copied" | "error";
 
-const INITIAL_OPACITY = 80;
+// Default block opacity: lower when correlation surfaces are present so they
+// show through the blocks; opaque-ish otherwise.
+const DEFAULT_OPACITY = 80;
+const FLOW_OPACITY = 30;
 
 const BACKDROP_STYLE: React.CSSProperties = {
   position: "fixed",
@@ -192,12 +195,19 @@ function DialogBody({
 function ExportHtmlDialog({ onClose }: { onClose: () => void }) {
   const scene = useMemo(() => {
     const s = useBlockStore.getState();
-    return bakeScene(s.blocks, s.hiddenFaces, s.showYDefects);
+    // Include correlation surfaces iff they're currently shown in 3D (same gate
+    // as FlowSurfaceOverlay): flow viz on + a valid selected flow.
+    const surfaces =
+      s.flowVizMode && s.selectedFlowIndex != null && s.selectedFlowIndex >= 0
+        ? (s.flows[s.selectedFlowIndex]?.surfaces ?? null)
+        : null;
+    return bakeScene(s.blocks, s.hiddenFaces, s.showYDefects, surfaces);
   }, []);
   const empty = scene.mesh.positions.length === 0;
-  const innerDoc = useMemo(() => renderIframeDoc(scene, INITIAL_OPACITY / 100), [scene]);
+  const initialOpacity = scene.surfaces.length > 0 ? FLOW_OPACITY : DEFAULT_OPACITY;
+  const innerDoc = useMemo(() => renderIframeDoc(scene, initialOpacity / 100), [scene, initialOpacity]);
 
-  const [opacity, setOpacity] = useState(INITIAL_OPACITY);
+  const [opacity, setOpacity] = useState(initialOpacity);
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
