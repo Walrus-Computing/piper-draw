@@ -1,8 +1,9 @@
 // ---------------------------------------------------------------------------
 // BgraphDialogs — single-mount host for the unified import modal and the
-// examples gallery panel. Toolbar renders this once at the bottom of the
-// File ▾ tree; menu items in <ImportSubmenu /> and <ExportSubmenu /> share
-// state through the BgraphActions object.
+// examples gallery panel. Toolbar renders this once in the Import/Export
+// column; the ImportMenu / ExportMenu dropdown items (<ImportSubmenu /> /
+// <ExportSubmenu />) and the standalone "Examples" button share state through
+// the BgraphActions object.
 // ---------------------------------------------------------------------------
 
 import { BgraphImportModal } from "./PasteBgraphModal";

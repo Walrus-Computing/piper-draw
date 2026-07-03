@@ -512,6 +512,8 @@ interface BlockStore {
   viewMode: ViewMode;
   /** Per-axis last-used slice so toggling between iso views remembers position. */
   lastIsoSlice: { x: number; y: number; z: number };
+  /** Last iso axis viewed, so the Iso-Plane View toggle can restore it. */
+  lastIsoAxis: IsoAxis;
   setPerspView: () => void;
   setIsoView: (axis: IsoAxis) => void;
   stepSlice: (delta: number) => void;
@@ -877,11 +879,13 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
   viewMode: { kind: "persp" },
   lastIsoSlice: { x: 0, y: 0, z: 0 },
+  lastIsoAxis: "z",
   setPerspView: () =>
     set((s) => (s.viewMode.kind === "persp" ? s : { viewMode: { kind: "persp" } })),
   setIsoView: (axis) =>
     set((s) => ({
       viewMode: { kind: "iso", axis, slice: s.lastIsoSlice[axis] },
+      lastIsoAxis: axis,
     })),
   stepSlice: (delta) =>
     set((s) => {
