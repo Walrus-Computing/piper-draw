@@ -6,6 +6,16 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.2.4.0] - 2026-07-03
+
+### Fixed
+- **Nav style no longer resets when visualizing flows**
+  ([#345](https://github.com/Walrus-Computing/piper-draw/issues/345)).
+  Toggling **View in 3D** in the Flows panel silently switched perspective
+  navigation back to drag-to-pan — even though the Settings menu still showed
+  your chosen style (e.g. "Drag to orbit"). Your navigation-style preference
+  now survives flow visualization and other re-renders.
+
 ## [0.2.3.1] - 2026-05-11
 
 ### Fixed
