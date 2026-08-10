@@ -42,6 +42,8 @@ import { BuildModeHints } from "./components/BuildModeHints";
 import { EditModeHints } from "./components/EditModeHints";
 import { KeybindEditor, type KeybindEditorTab } from "./components/KeybindEditor";
 import { HelpPanel } from "./components/HelpPanel";
+import { TutorialPanel } from "./components/TutorialPanel";
+import { useTutorialStore } from "./stores/tutorialStore";
 import { useBlockStore } from "./stores/blockStore";
 import {
   useKeybindStore,
@@ -1329,9 +1331,13 @@ export default function App() {
               // ignore (e.g. private mode)
               void err;
             }
+            // First visit: offer the interactive tour once the intro closes
+            // (no-op when a previous visit completed or dismissed it).
+            useTutorialStore.getState().maybeAutoStart();
           }}
         />
       )}
+      <TutorialPanel />
       <FlowsPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
       <ZXPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
       <EquisetaJsonPanel />

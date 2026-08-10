@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from "react";
+import { useTutorialStore } from "../stores/tutorialStore";
 
 export function HelpPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
@@ -83,6 +84,32 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
             TQEC terminology guide
           </a>
           .
+        </p>
+
+        <button
+          onClick={() => {
+            useTutorialStore.getState().start();
+            onClose();
+          }}
+          style={{
+            display: "block",
+            width: "100%",
+            padding: "8px 12px",
+            marginBottom: 4,
+            background: "#4a9eff",
+            color: "#fff",
+            border: "none",
+            borderRadius: 6,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          ▶ Start the interactive tutorial
+        </button>
+        <p style={{ margin: "4px 0 0", fontSize: 11, color: "#888", textAlign: "center" }}>
+          A hands-on tour: place cubes and pipes, verify, and analyze — every
+          step is a real edit.
         </p>
 
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Tips</h4>

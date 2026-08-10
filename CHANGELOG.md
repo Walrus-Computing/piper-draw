@@ -6,6 +6,9 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+### Added
+- **Interactive tutorial.** A hands-on, in-app tour modeled on the neutral-atom editor's click-through tutorial: 11 steps from placing a first cube through pipes, type cycling, Keyboard Build, ports, Verify, the CNOT template, copy/paste, and Flows. Every step is a real edit on the live scene — completion is detected from document state (counts vs. a per-step, undo-aware baseline), never by trusting a "Next" click. The card shows progress, pulses the relevant toolbar controls, offers Skip per step, and remembers completion/dismissal in localStorage. Auto-offers once after the first-visit intro closes; restart anytime from the ? help panel.
+
 ## [0.7.2.0] - 2026-08-10
 
 ### Fixed

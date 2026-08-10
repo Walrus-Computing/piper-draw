@@ -639,6 +639,7 @@ export function Toolbar({
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           <button
             key="pointer"
+            data-tutorial="select-tool"
             onClick={() => {
               if (mode === "build") setMode("edit");
               setArmedTool("pointer");
@@ -658,11 +659,12 @@ export function Toolbar({
       <div style={{ width: 1, background: "#ddd" }} />
 
       {/* Blocks group (Port + ZXCubes + Y) */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      <div data-tutorial="blocks-palette" style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <span style={groupLabelStyle}>Blocks</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           <button
             key="port"
+            data-tutorial="port-tool"
             onPointerDown={() => {
               if (mode !== "edit") return;
               // With a single block/port selected, defer to onClick (which
@@ -777,7 +779,7 @@ export function Toolbar({
       <div style={{ width: 1, background: "#ddd" }} />
 
       {/* Pipes group */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      <div data-tutorial="pipes-palette" style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <span style={groupLabelStyle}>Pipes</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           {PIPE_VARIANTS.filter((v) => freeBuild || !FREE_BUILD_PIPE_VARIANTS.has(v)).map((v) => (
@@ -1239,10 +1241,10 @@ function ModeSegmented({
         background: "#fff",
       }}
     >
-      <button onClick={() => setMode("edit")} style={segStyle(mode === "edit")}>
+      <button data-tutorial="mode-pill" onClick={() => setMode("edit")} style={segStyle(mode === "edit")}>
         Drag / Drop
       </button>
-      <button onClick={() => setMode("build")} style={segStyle(mode === "build")}>
+      <button data-tutorial="mode-pill" onClick={() => setMode("build")} style={segStyle(mode === "build")}>
         Keyboard Build
       </button>
     </div>
@@ -1411,6 +1413,7 @@ function FileMenu({
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
       <button
+        data-tutorial="file-menu"
         onClick={() => setOpen((v) => !v)}
         style={{ ...btnStyle(open), whiteSpace: "nowrap", width: "100%" }}
         title="Import / Export / Templates / Clear"
@@ -1633,6 +1636,7 @@ function AnalyzeMenu() {
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
       <button
+        data-tutorial="analyze-menu"
         onClick={() => setOpen((v) => !v)}
         title={triggerTitle}
         style={triggerStyle}
