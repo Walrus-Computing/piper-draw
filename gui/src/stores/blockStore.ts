@@ -59,6 +59,7 @@ import {
 // prior verify, fixing R7). The bus itself has no dependency on validationStore,
 // so the old dynamic-import workaround for the circular dependency is gone.
 import { toastBus } from "../utils/toastBus";
+import { snapPasteDelta, fallbackPasteDelta } from "../utils/pasteMath";
 
 /**
  * Walk `blocksAfter` (post-delete state), find any group that just dropped
@@ -565,6 +566,46 @@ function doRemove(
 }
 
 /**
+ * Batched remove-then-add for a set of moved blocks (rotation commit and its
+ * undo/redo). Per-entry doRemove/doAdd clone the full blocks + hiddenFaces
+ * Maps per call — O(n²) across a large selection, a multi-second freeze when
+ * rotating a whole imported scene. This clones once, applies every move, then
+ * recomputes affected hidden faces against the final map;
+ * recomputeAffectedHiddenFaces skips vacated positions, so late recomputation
+ * is safe.
+ */
+function batchMoveBlocks(
+  srcBlocks: Map<string, Block>,
+  spatialIndex: SpatialIndex,
+  srcHidden: Map<string, FaceMask>,
+  moves: Array<{ fromKey: string; from: Block; toKey: string; to: Block }>,
+): { blocks: Map<string, Block>; hiddenFaces: Map<string, FaceMask> } {
+  const blocks = new Map(srcBlocks);
+  const hiddenFaces = new Map(srcHidden);
+  // Remove all sources first so collisions on mixed remove/add don't trip.
+  for (const m of moves) {
+    const existing = blocks.get(m.fromKey);
+    if (!existing) continue;
+    removeFromSpatialIndex(spatialIndex, existing);
+    blocks.delete(m.fromKey);
+    hiddenFaces.delete(m.fromKey);
+  }
+  for (const m of moves) {
+    addToSpatialIndex(spatialIndex, m.to);
+    blocks.set(m.toKey, m.to);
+  }
+  for (const m of moves) {
+    for (const affected of [
+      recomputeAffectedHiddenFaces(m.from.pos, m.from.type, blocks, spatialIndex),
+      recomputeAffectedHiddenFaces(m.to.pos, m.to.type, blocks, spatialIndex),
+    ]) {
+      for (const [k, v] of affected) hiddenFaces.set(k, v);
+    }
+  }
+  return { blocks, hiddenFaces };
+}
+
+/**
  * For every open pipe endpoint with ≥2 attached pipes and no cube, insert the canonical cube.
  * Never auto-demotes. Call this only after pipe-mutating operations (add pipe, load, undo of a
  * pipe removal, etc.) — cube additions/removals do not change pipe attachment counts elsewhere,
@@ -756,28 +797,23 @@ function commitPasteReducer(state: BlockStore): Partial<BlockStore> | BlockStore
   const clip = state.clipboard;
   if (!clip || clip.size === 0) return state;
   const hover = state.hoveredGridPos;
-  if (hover) {
-    const delta: Position3D = {
-      x: Math.floor(hover.x / 3) * 3,
-      y: Math.floor(hover.y / 3) * 3,
-      z: Math.floor(hover.z / 3) * 3,
-    };
-    return mergeBlocksWithDelta(state, clip, delta) ?? state;
+  const delta = hover ? snapPasteDelta(hover) : fallbackPasteDelta(state.blocks, clip);
+  const patch = mergeBlocksWithDelta(state, clip, delta);
+  if (patch === null) {
+    toastBus.error.emit(
+      `Paste failed: no valid position here for any of the ${clip.size} copied blocks`,
+    );
+    return state;
   }
-  let delta: Position3D = { x: 0, y: 0, z: 0 };
-  if (state.blocks.size > 0) {
-    let existingMaxX = -Infinity;
-    for (const b of state.blocks.values()) {
-      if (b.pos.x > existingMaxX) existingMaxX = b.pos.x;
-    }
-    let incomingMinX = Infinity;
-    for (const b of clip.values()) {
-      if (b.pos.x < incomingMinX) incomingMinX = b.pos.x;
-    }
-    const raw = existingMaxX + 3 - incomingMinX;
-    delta = { x: Math.ceil(raw / 3) * 3, y: 0, z: 0 };
+  const placedCount = (patch.selectedKeys as Set<string>).size;
+  if (placedCount < clip.size) {
+    toastBus.info.emit(
+      `Pasted ${placedCount} of ${clip.size} blocks (${clip.size - placedCount} skipped: occupied or invalid)`,
+    );
+  } else {
+    toastBus.info.emit(`Pasted ${placedCount} block${placedCount === 1 ? "" : "s"}`);
   }
-  return mergeBlocksWithDelta(state, clip, delta) ?? state;
+  return patch;
 }
 
 function computeDerivedFromBlocks(blocks: Map<string, Block>): {
@@ -2161,16 +2197,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
 
       if (cmd.kind === "rotate-selection") {
-        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
-        for (const entry of cmd.entries) {
-          const cur = blocks.get(entry.newKey);
-          if (cur) {
-            ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, entry.newKey, cur));
-          }
-        }
-        for (const entry of cmd.entries) {
-          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, entry.oldKey, entry.oldBlock));
-        }
+        const { blocks, hiddenFaces } = batchMoveBlocks(
+          state.blocks,
+          state.spatialIndex,
+          state.hiddenFaces,
+          cmd.entries.map((e) => ({ fromKey: e.newKey, from: e.newBlock, toKey: e.oldKey, to: e.oldBlock })),
+        );
         return {
           blocks,
           hiddenFaces,
@@ -2645,16 +2677,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
 
       if (cmd.kind === "rotate-selection") {
-        let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
-        for (const entry of cmd.entries) {
-          const cur = blocks.get(entry.oldKey);
-          if (cur) {
-            ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, entry.oldKey, cur));
-          }
-        }
-        for (const entry of cmd.entries) {
-          ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, entry.newKey, entry.newBlock));
-        }
+        const { blocks, hiddenFaces } = batchMoveBlocks(
+          state.blocks,
+          state.spatialIndex,
+          state.hiddenFaces,
+          cmd.entries.map((e) => ({ fromKey: e.oldKey, from: e.oldBlock, toKey: e.newKey, to: e.newBlock })),
+        );
         return {
           blocks,
           hiddenFaces,
@@ -2761,19 +2789,7 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       // Offset along +X so incoming sits past the existing scene's right edge,
       // with a one-cube gap. Delta components must be multiples of 3 to keep
       // cubes on block-slots and pipes on pipe-slots (grid period = 3).
-      let delta: Position3D = { x: 0, y: 0, z: 0 };
-      if (state.blocks.size > 0) {
-        let existingMaxX = -Infinity;
-        for (const b of state.blocks.values()) {
-          if (b.pos.x > existingMaxX) existingMaxX = b.pos.x;
-        }
-        let incomingMinX = Infinity;
-        for (const b of incoming.values()) {
-          if (b.pos.x < incomingMinX) incomingMinX = b.pos.x;
-        }
-        const raw = existingMaxX + 3 - incomingMinX;
-        delta = { x: Math.ceil(raw / 3) * 3, y: 0, z: 0 };
-      }
+      const delta = fallbackPasteDelta(state.blocks, incoming);
 
       return mergeBlocksWithDelta(state, incoming, delta) ?? state;
     }),
@@ -2790,6 +2806,14 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         if (b.pos.z < minZ) minZ = b.pos.z;
       }
       if (minX === Infinity) return state;
+      // Snap the normalization origin down to the grid period. When the
+      // selection's min on an axis is a pipe slot (coord ≡ 1 mod 3), subtracting
+      // the raw min would shift every clipboard entry off the cube/pipe lattice
+      // parity — and since paste deltas are always multiples of 3, such a
+      // clipboard could never place a single block.
+      minX = Math.floor(minX / 3) * 3;
+      minY = Math.floor(minY / 3) * 3;
+      minZ = Math.floor(minZ / 3) * 3;
       const clipboard = new Map<string, Block>();
       for (const key of state.selectedKeys) {
         const b = state.blocks.get(key);
@@ -2801,6 +2825,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         clipboard.set(posKey(pos), { ...b, pos });
       }
       if (clipboard.size === 0) return state;
+      toastBus.info.emit(
+        `Copied ${clipboard.size} block${clipboard.size === 1 ? "" : "s"} — paste with the paste shortcut`,
+      );
       return { clipboard };
     }),
 
@@ -2812,6 +2839,9 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       if (state.armedTool === "paste") {
         return commitPasteReducer(state);
       }
+      toastBus.info.emit(
+        "Paste armed — click a spot (or paste again) to place. Esc cancels.",
+      );
       return {
         armedTool: "paste",
         mode: "edit",
@@ -3285,17 +3315,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
     }
 
     set((s) => {
-      let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
-      // Remove all old blocks first so collisions on mixed remove/add don't trip
-      for (const entry of entries) {
-        const existing = blocks.get(entry.oldKey);
-        if (existing) {
-          ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, entry.oldKey, existing));
-        }
-      }
-      for (const entry of entries) {
-        ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, entry.newKey, entry.newBlock));
-      }
+      const { blocks, hiddenFaces } = batchMoveBlocks(
+        s.blocks,
+        s.spatialIndex,
+        s.hiddenFaces,
+        entries.map((e) => ({ fromKey: e.oldKey, from: e.oldBlock, toKey: e.newKey, to: e.newBlock })),
+      );
       // Rotation invalidates undetermined build-mode state for rotated cubes.
       const newUndetermined = new Map(s.undeterminedCubes);
       for (const entry of entries) newUndetermined.delete(entry.oldKey);
@@ -3330,6 +3355,12 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         getAllPortPositions(state.blocks, state.portPositions).map(posKey),
       );
       if (state.blocks.size === 0 && allPortKeys.size === 0) return state;
+      // Explicit feedback: on large scenes the highlight overlay alone is easy
+      // to miss, and users read a silent Cmd+A as "select all is broken".
+      toastBus.info.emit(
+        `Selected ${state.blocks.size} block${state.blocks.size === 1 ? "" : "s"}` +
+          (allPortKeys.size > 0 ? ` and ${allPortKeys.size} port${allPortKeys.size === 1 ? "" : "s"}` : ""),
+      );
       return {
         selectedKeys: new Set(state.blocks.keys()),
         selectedPortPositions: allPortKeys,
