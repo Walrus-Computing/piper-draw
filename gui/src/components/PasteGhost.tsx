@@ -5,6 +5,7 @@ import { tqecToThree, yBlockZOffset, isValidPos } from "../types";
 import type { Block, Position3D } from "../types";
 import { getCachedGeometry, getCachedEdges } from "./blockInstancesShared";
 import { GroundShadowAbsolute } from "./GroundShadowAbsolute";
+import { snapPasteDelta, fallbackPasteDelta } from "../utils/pasteMath";
 
 const MAX_PASTE_SHADOWS = 200;
 
@@ -37,19 +38,13 @@ const invalidLineMaterial = new THREE.LineBasicMaterial({
   depthWrite: false,
 });
 
-function snapDelta(hover: Position3D): Position3D {
-  return {
-    x: Math.floor(hover.x / 3) * 3,
-    y: Math.floor(hover.y / 3) * 3,
-    z: Math.floor(hover.z / 3) * 3,
-  };
-}
-
 /**
  * Translucent preview of the clipboard in "placing paste" mode. The group is
  * translated by the snapped hover delta (same snap commitPaste uses), and each
  * entry is rendered with full faces (no adjacency-based hiding) since we don't
- * compute a merged spatial index for the preview.
+ * compute a merged spatial index for the preview. With no hover target the
+ * ghost previews the fallback +X placement a hoverless commit would use, so
+ * arming paste is never invisible.
  */
 export function PasteGhost() {
   const mode = useBlockStore((s) => s.mode);
@@ -63,11 +58,13 @@ export function PasteGhost() {
     return Array.from(clipboard.values()).slice(0, MAX_PASTE_SHADOWS);
   }, [clipboard]);
 
-  if (mode !== "edit" || armedTool !== "paste" || !hoveredGridPos || !entries) {
+  if (mode !== "edit" || armedTool !== "paste" || !clipboard || !entries) {
     return null;
   }
 
-  const delta = snapDelta(hoveredGridPos);
+  const delta = hoveredGridPos
+    ? snapPasteDelta(hoveredGridPos)
+    : fallbackPasteDelta(existingBlocks, clipboard);
 
   return (
     <group>

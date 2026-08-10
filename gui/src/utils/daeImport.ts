@@ -8,6 +8,7 @@ import {
   rotateBlockKind,
 } from "./blockRotation";
 import { pickFile } from "./filePicker";
+import { toastBus } from "./toastBus";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -109,8 +110,13 @@ function daeToGridPos(x: number, y: number, z: number): Position3D {
 
 /**
  * Parse a tqec-compatible Collada DAE XML string into a piper-draw block map.
+ * `onSummary` (optional) receives the skip/repair/canonicalise tallies so
+ * interactive callers can surface them; silent callers (templates) omit it.
  */
-export function parseDaeToBlocks(xmlString: string): Map<string, Block> {
+export function parseDaeToBlocks(
+  xmlString: string,
+  onSummary?: (summary: DaeImportSummary) => void,
+): Map<string, Block> {
   const parser = new DOMParser();
   const doc = parser.parseFromString(xmlString, "application/xml");
 
@@ -143,6 +149,9 @@ export function parseDaeToBlocks(xmlString: string): Map<string, Block> {
   }
 
   const blocks = new Map<string, Block>();
+  // kind name → count of scene nodes skipped for that kind (unknown type or
+  // unsupported rotation). Surfaced in the post-import summary toast.
+  const skipped = new Map<string, number>();
 
   // Extract all blocks
   for (const instanceNode of childrenByLocalName(sketchUpNode, "node")) {
@@ -185,6 +194,7 @@ export function parseDaeToBlocks(xmlString: string): Map<string, Block> {
         kindName = rotateBlockKind(kindName, rot);
       } catch {
         console.warn(`Skipping block with unsupported rotation: ${kindName}`);
+        skipped.set(kindName, (skipped.get(kindName) ?? 0) + 1);
         continue;
       }
     }
@@ -203,6 +213,7 @@ export function parseDaeToBlocks(xmlString: string): Map<string, Block> {
     // Validate block type
     if (!ALL_BLOCK_TYPES.has(kindName)) {
       console.warn(`Unknown block type "${kindName}", skipping.`);
+      skipped.set(kindName, (skipped.get(kindName) ?? 0) + 1);
       continue;
     }
 
@@ -250,8 +261,42 @@ export function parseDaeToBlocks(xmlString: string): Map<string, Block> {
     blocks.set(key, { pos, type: blockType });
   }
 
-  canonicaliseImportedCubes(blocks);
+  const { canonicalised, repaired } = canonicaliseImportedCubes(blocks);
+  onSummary?.({ skipped, repaired, canonicalised });
+
   return blocks;
+}
+
+/** What the importer silently changed or dropped, for user-facing summaries. */
+export type DaeImportSummary = {
+  /** kind name → count of scene nodes skipped for that kind. */
+  skipped: Map<string, number>;
+  repaired: number;
+  canonicalised: number;
+};
+
+/**
+ * One-line user-facing summary of a parse, or null when nothing noteworthy
+ * happened. Emitted as a toast only on the interactive import path
+ * (`triggerDaeImport`) — bundled template loads parse the same way but must
+ * stay silent (console notes already cover auditability there).
+ */
+export function daeImportSummaryMessage(summary: DaeImportSummary): string | null {
+  const { skipped, repaired, canonicalised } = summary;
+  const notes: string[] = [];
+  if (skipped.size > 0) {
+    const total = [...skipped.values()].reduce((a, b) => a + b, 0);
+    const kinds = [...skipped.keys()].join(", ");
+    notes.push(`${total} unsupported node${total === 1 ? "" : "s"} skipped (${kinds})`);
+  }
+  if (repaired > 0) {
+    notes.push(`${repaired} cube type${repaired === 1 ? "" : "s"} repaired to match adjacent pipes`);
+  }
+  if (canonicalised > 0) {
+    notes.push(`${canonicalised} ambiguous cube type${canonicalised === 1 ? "" : "s"} canonicalised`);
+  }
+  if (notes.length === 0) return null;
+  return `DAE import: ${notes.join("; ")} — see console for details`;
 }
 
 /**
@@ -260,28 +305,61 @@ export function parseDaeToBlocks(xmlString: string): Map<string, Block> {
  * are distinct TQEC kinds but indistinguishable in piper-draw's visuals).
  * Piper-draw collapses this ambiguity by always picking the first valid type in
  * CUBE_TYPES order. See CLAUDE.md "Canonicalisation assumption".
+ *
+ * Also REPAIRS cubes whose declared type conflicts with their attached pipes
+ * (some exporters — e.g. ftdp — use a different junction-cube convention).
+ * Left as-is, such cubes fail piper-draw's color-rule check as imported, which
+ * vetoes every subsequent whole-scene rotation/flip/move. Repaired cubes take
+ * the pipe-determined type, or the canonical-first valid option when the pipes
+ * leave several. Returns counts so callers can surface a summary to the user.
  */
-function canonicaliseImportedCubes(blocks: Map<string, Block>): void {
+export function canonicaliseImportedCubes(
+  blocks: Map<string, Block>,
+): { canonicalised: number; repaired: number } {
+  let canonicalised = 0;
+  let repaired = 0;
   for (const [key, block] of blocks) {
     if (isPipeType(block.type) || block.type === "Y") continue;
-    // Only canonicalise when pipes actually constrain the cube to 2+ options.
-    // An isolated cube (no adjacent pipes) has all 6 types valid but the user's
-    // declared type should be preserved.
-    if (countAttachedPipes(block.pos, blocks) < 2) continue;
+    // An isolated cube (no adjacent pipes) has all 6 types valid; the user's
+    // declared type is always preserved.
+    const attached = countAttachedPipes(block.pos, blocks);
+    if (attached === 0) continue;
     const result = determineCubeOptions(block.pos, blocks);
-    if (result.determined) continue;
-    if (result.options.length < 2) continue;
-    if (!result.options.includes(block.type as CubeType)) continue;
+    if (result.determined) {
+      if (result.type !== block.type) {
+        console.log(`[dae import] repairing cube at ${key}: ${block.type} → ${result.type} (type is determined by its pipes)`);
+        blocks.set(key, { ...block, type: result.type });
+        repaired++;
+      }
+      continue;
+    }
+    // options.length === 0 means the pipes themselves conflict — no cube type
+    // can satisfy them, so there is nothing sane to repair to. Leave the block
+    // for Verify to flag.
+    if (result.options.length === 0) continue;
+    const declaredValid = result.options.includes(block.type as CubeType);
+    // A VALID declared type is only canonicalised at 2+ pipe junctions (see
+    // CLAUDE.md); a single-pipe cube keeps its valid declared type. Conflicting
+    // declared types are repaired regardless of pipe count — even one attached
+    // pipe makes the conflict fail every color-rule check as imported.
+    if (declaredValid && (attached < 2 || result.options.length < 2)) continue;
     for (const ct of CUBE_TYPES) {
       if (result.options.includes(ct)) {
         if (ct !== block.type) {
-          console.log(`[dae import] canonicalising cube at ${key}: ${block.type} → ${ct}`);
-          blocks.set(key, { pos: block.pos, type: ct });
+          if (declaredValid) {
+            console.log(`[dae import] canonicalising cube at ${key}: ${block.type} → ${ct}`);
+            canonicalised++;
+          } else {
+            console.log(`[dae import] repairing cube at ${key}: ${block.type} → ${ct} (declared type conflicts with its pipes)`);
+            repaired++;
+          }
+          blocks.set(key, { ...block, type: ct });
         }
         break;
       }
     }
   }
+  return { canonicalised, repaired };
 }
 
 /**
@@ -304,7 +382,10 @@ export function triggerDaeImport(onLoad: (blocks: Map<string, Block>) => void): 
       return;
     }
     try {
-      const blocks = parseDaeToBlocks(result.text);
+      const blocks = parseDaeToBlocks(result.text, (summary) => {
+        const msg = daeImportSummaryMessage(summary);
+        if (msg) toastBus.info.emit(msg);
+      });
       onLoad(blocks);
     } catch (err) {
       console.error("Failed to import DAE file:", err);

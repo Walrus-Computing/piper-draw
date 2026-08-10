@@ -666,9 +666,18 @@ export default function App() {
       }
 
       // Global shortcuts (work in both modes). Run before mode-specific bindings.
-      // Ctrl/Cmd-modified globals: copy, paste, export.
+      // Ctrl/Cmd-modified globals: select-all, copy, paste, export.
       if (ctrl && !alt && !shift) {
         switch (key) {
+          case "a":
+            // Must work from any mode: in build mode the edit-binding dispatch
+            // below is never reached, so Cmd+A previously fell through to the
+            // browser's own select-all. Selection is an edit-mode concept, so
+            // leave build mode first.
+            e.preventDefault();
+            if (mode === "build") store.setMode("edit");
+            store.selectAll();
+            return;
           case "c":
             if (store.selectedKeys.size > 0) {
               e.preventDefault();
@@ -943,7 +952,11 @@ export default function App() {
         case "flipX":
         case "flipY":
         case "flipZ": {
-          if (store.selectedKeys.size === 0) return;
+          if (store.selectedKeys.size === 0) {
+            // Previously a silent no-op — users read it as "rotation is broken".
+            toastBus.info.emit("Nothing selected to rotate — select blocks first");
+            return;
+          }
           e.preventDefault();
           const { axis, operation } = ROTATION_ACTIONS[action as RotationActionName];
           const hovered = store.hoveredGridPos;

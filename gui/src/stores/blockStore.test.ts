@@ -2361,6 +2361,37 @@ describe("blockStore", () => {
       expect(s.blocks.has("5,0,0")).toBe(false);
     });
 
+    it("keeps grid parity when the selection's bbox min is a pipe slot (adder regression)", () => {
+      // Pipe OXZ@(1,0,0) + cube ZXZ@(3,0,0) selected WITHOUT the origin cube:
+      // the raw selection mins (1,0,0) are pipe-slot coords. Un-snapped
+      // normalization used to shift the whole clipboard off the mod-3 lattice,
+      // after which no paste target could ever place a block (commit deltas
+      // are always multiples of 3).
+      const map = new Map<string, Block>();
+      for (const b of [
+        { x: 0, y: 0, z: 0, type: "ZXZ" as const },
+        { x: 1, y: 0, z: 0, type: "OXZ" as const },
+        { x: 3, y: 0, z: 0, type: "ZXZ" as const },
+      ]) {
+        map.set(`${b.x},${b.y},${b.z}`, { pos: { x: b.x, y: b.y, z: b.z }, type: b.type });
+      }
+      useBlockStore.getState().loadBlocks(map);
+      useBlockStore.setState({ selectedKeys: new Set(["1,0,0", "3,0,0"]) });
+      useBlockStore.getState().copySelection();
+      const clip = useBlockStore.getState().clipboard!;
+      // Mins snapped down to (0,0,0) → entries keep their pipe/cube parity.
+      expect(clip.has("1,0,0")).toBe(true);
+      expect(clip.has("3,0,0")).toBe(true);
+
+      useBlockStore.getState().clearAll();
+      useBlockStore.getState().pasteClipboard(); // arm
+      useBlockStore.setState({ hoveredGridPos: { x: 6, y: 0, z: 0 } });
+      useBlockStore.getState().commitPaste();
+      const s = useBlockStore.getState();
+      expect(s.blocks.get("7,0,0")?.type).toBe("OXZ");
+      expect(s.blocks.get("9,0,0")?.type).toBe("ZXZ");
+    });
+
     it("copySelection with empty selection is a no-op and preserves prior clipboard", () => {
       useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
       useBlockStore.getState().selectAll();
