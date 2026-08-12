@@ -138,6 +138,9 @@ export const useTutorialStore = create<TutorialStore>((set, get) => {
       furthestStepIndex: Math.max(furthestStepIndex, nextStepIndex),
       celebrating: false,
     });
+    // The user may already have completed this step during the previous
+    // step's confirmation beat, when store-driven checks were paused.
+    checkCompletion();
   }
 
   /** An undo during the beat can invalidate the step; re-verify before moving on. */
@@ -204,6 +207,9 @@ export const useTutorialStore = create<TutorialStore>((set, get) => {
     advance: () => advanceToNext(),
 
     back: () => {
+      // The current step is already complete during the confirmation beat.
+      // Keep that pending completion intact until it advances.
+      if (get().celebrating) return;
       cancelPendingAdvance();
       pendingBaseline = null;
       const { stepIndex } = get();

@@ -133,7 +133,7 @@ function StepFooter({
         marginTop: 10,
       }}
     >
-      <BackButton visible={!isFirst} onBack={onBack} />
+      <BackButton visible={!isFirst && !celebrating} onBack={onBack} />
       {waitsForAction ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 13, color: celebrating ? "#34a853" : "#4a9eff" }}>

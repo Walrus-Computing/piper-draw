@@ -110,6 +110,35 @@ describe("tutorialStore", () => {
     expect(useTutorialStore.getState().stepIndex).toBe(stepIndexOf("place-cube") + 1);
   });
 
+  it("does not discard a completed step when Back is pressed during the beat", () => {
+    driveTo("place-cube");
+    useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+    const completedStep = stepIndexOf("place-cube");
+
+    useTutorialStore.getState().back();
+
+    expect(useTutorialStore.getState().stepIndex).toBe(completedStep);
+    expect(useTutorialStore.getState().celebrating).toBe(true);
+    vi.advanceTimersByTime(ADVANCE_DELAY_MS);
+    expect(useTutorialStore.getState().stepIndex).toBe(completedStep + 1);
+  });
+
+  it("recognizes the next step when its action happens during the prior beat", () => {
+    driveTo("place-cube");
+    useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
+    expect(useTutorialStore.getState().celebrating).toBe(true);
+
+    // Place the pipe before the cube step's confirmation beat has elapsed.
+    useBlockStore.getState().setPipeVariant("ZX");
+    useBlockStore.getState().addBlock({ x: 1, y: 0, z: 0 });
+    vi.advanceTimersByTime(ADVANCE_DELAY_MS);
+
+    expect(useTutorialStore.getState().stepIndex).toBe(stepIndexOf("draw-pipe"));
+    expect(useTutorialStore.getState().celebrating).toBe(true);
+    vi.advanceTimersByTime(ADVANCE_DELAY_MS);
+    expect(useTutorialStore.getState().stepIndex).toBe(stepIndexOf("cycle-type"));
+  });
+
   it("clamps the baseline down: undo before acting does not strand the step", () => {
     // Seed one cube, then start (baseline cubes=1), then undo it (cubes=0).
     useBlockStore.getState().addBlock({ x: 0, y: 0, z: 0 });
