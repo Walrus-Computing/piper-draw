@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useBlockStore, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
+import { useTutorialStore } from "../stores/tutorialStore";
 import { useKeybindStore, type Mode as KeybindMode, type NavStyle } from "../stores/keybindStore";
 import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, determineCubeOptionsWithPipeRetype, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
-import { useBgraphActions } from "../hooks/useBgraphActions";
+import { useBgraphActions, type BgraphActions } from "../hooks/useBgraphActions";
 import { BgraphDialogs } from "./BgraphDialogs";
 import { ImportSubmenu } from "./ImportSubmenu";
 import { ExportSubmenu } from "./ExportSubmenu";
@@ -18,7 +19,6 @@ import { evalCoordExpr } from "../utils/parseCoordExpr";
 import { usePreviewImages } from "./PreviewRenderer";
 import { FpsDisplay } from "./FpsCounter";
 import { useViewportFitScale } from "../hooks/useViewportFitScale";
-import type { ViewMode } from "../types";
 
 // Horizontal margin (px) kept between fixed overlays (toolbar, hint bar) and
 // the viewport edges when they scale down to fit a narrow window.
@@ -71,6 +71,10 @@ const btnStyle = (active: boolean) => ({
   background: active ? "#e8f0fe" : "#fff",
   fontWeight: "normal" as const,
 });
+
+// Shared width for the two menu columns (settings/analyze + import/export) so
+// they line up. Sized to comfortably fit the widest button label.
+const MENU_COL_WIDTH = 140;
 
 const blockBtnStyle = (active: boolean, disabled?: boolean) => ({
   ...btnStyle(active),
@@ -128,6 +132,22 @@ export function Toolbar({
   const insertBlocks = useBlockStore((s) => s.insertBlocks);
   const blocksEmpty = useBlockStore((s) => s.blocks.size === 0);
   const freeBuild = useBlockStore((s) => s.freeBuild);
+
+  // Bgraph import/export actions + dialog state, lifted here so the Import
+  // menu, the Export menu, and the standalone "Examples" toolbar button share
+  // one modal, one examples panel, and one set of handlers. The refs let the
+  // hook dismiss whichever menu is open after an in-menu action (only one is
+  // ever open at a time, so closing both is safe).
+  const closeImportMenuRef = useRef<() => void>(() => {});
+  const closeExportMenuRef = useRef<() => void>(() => {});
+  const bgraph = useBgraphActions({
+    loadBlocks,
+    insertBlocks,
+    onItemClick: () => {
+      closeImportMenuRef.current();
+      closeExportMenuRef.current();
+    },
+  });
   const toggleFreeBuild = useBlockStore((s) => s.toggleFreeBuild);
   const selectedCount = useBlockStore((s) => {
     if (s.selectedKeys.size === 0) return 0;
@@ -417,6 +437,7 @@ export function Toolbar({
   const viewMode = useBlockStore((s) => s.viewMode);
   const setPerspView = useBlockStore((s) => s.setPerspView);
   const setIsoView = useBlockStore((s) => s.setIsoView);
+  const lastIsoAxis = useBlockStore((s) => s.lastIsoAxis);
   const stepSlice = useBlockStore((s) => s.stepSlice);
 
   const previewImg = (key: string) => {
@@ -452,24 +473,78 @@ export function Toolbar({
         boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
       }}
     >
-      {/* Mode segmented control */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
+      {/* Mode segmented control + Free Build + Undo/Redo */}
+      <div data-tutorial="build-mode" style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+        <span style={groupLabelStyle}>Build Mode</span>
         <ModeSegmented mode={mode} setMode={setMode} />
+        <FreeBuildToggle freeBuild={freeBuild} toggleFreeBuild={toggleFreeBuild} />
+        <div style={{ display: "flex", gap: "4px" }}>
+          <button
+            onClick={undo}
+            disabled={historyLen === 0}
+            title="Undo"
+            style={{
+              ...btnStyle(false),
+              padding: "4px 6px",
+              flex: 1,
+              opacity: historyLen === 0 ? 0.4 : 1,
+              cursor: historyLen === 0 ? "default" : "pointer",
+            }}
+          >
+            ↩
+          </button>
+          <button
+            onClick={redo}
+            disabled={futureLen === 0}
+            title="Redo"
+            style={{
+              ...btnStyle(false),
+              padding: "4px 6px",
+              flex: 1,
+              opacity: futureLen === 0 ? 0.4 : 1,
+              cursor: futureLen === 0 ? "default" : "pointer",
+            }}
+          >
+            ↪
+          </button>
+        </div>
       </div>
 
-      {/* View buttons: 3D (perspective + free orbit) and Iso (axis-locked elevation) */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
+      {/* Settings + Analyze + Iso-Plane View toggle (off = free 3D) */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: MENU_COL_WIDTH }}>
+        <span style={groupLabelStyle}>Inspect</span>
+        <SettingsMenu onOpenKeybindEditor={onOpenKeybindEditor} />
+        <AnalyzeMenu />
         <button
-          onClick={setPerspView}
-          style={{ ...btnStyle(viewMode.kind === "persp"), whiteSpace: "nowrap" }}
-          title="Free 3D perspective view with orbit"
+          onClick={() => (viewMode.kind === "iso" ? setPerspView() : setIsoView(lastIsoAxis))}
+          style={{ ...btnStyle(viewMode.kind === "iso"), whiteSpace: "nowrap" }}
+          title={
+            viewMode.kind === "iso"
+              ? "Iso-Plane View is ON — axis-locked orthographic slice. Click to return to free 3D."
+              : "Iso-Plane View (off) — click for an axis-locked orthographic slice view. Free 3D perspective is active."
+          }
         >
-          3D
+          Iso-Plane View
         </button>
-        <IsoMenu
-          viewMode={viewMode}
-          onPick={setIsoView}
-        />
+        {viewMode.kind === "iso" && (
+          <div style={{ display: "flex", gap: "2px" }}>
+            {(["x", "y", "z"] as IsoAxis[]).map((axis) => (
+              <button
+                key={axis}
+                onClick={() => setIsoView(axis)}
+                title={`Look down the ${axis.toUpperCase()} axis`}
+                style={{
+                  ...btnStyle(viewMode.axis === axis),
+                  padding: "2px 6px",
+                  fontSize: "11px",
+                  flex: 1,
+                }}
+              >
+                {axis.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        )}
         {viewMode.kind === "iso" && (
           <div style={{ display: "flex", gap: "2px", alignItems: "center" }}>
             <button
@@ -502,52 +577,48 @@ export function Toolbar({
         )}
       </div>
 
-      {/* History + Analyze */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
-        <div style={{ display: "flex", gap: "4px" }}>
-          <button
-            onClick={undo}
-            disabled={historyLen === 0}
-            title="Undo"
-            style={{
-              ...btnStyle(false),
-              padding: "4px 6px",
-              flex: 1,
-              opacity: historyLen === 0 ? 0.4 : 1,
-              cursor: historyLen === 0 ? "default" : "pointer",
-            }}
-          >
-            ↩
-          </button>
-          <button
-            onClick={redo}
-            disabled={futureLen === 0}
-            title="Redo"
-            style={{
-              ...btnStyle(false),
-              padding: "4px 6px",
-              flex: 1,
-              opacity: futureLen === 0 ? 0.4 : 1,
-              cursor: futureLen === 0 ? "default" : "pointer",
-            }}
-          >
-            ↪
-          </button>
-        </div>
-        <AnalyzeMenu />
-      </div>
-
-      {/* Free Build + Settings + File menu */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px", justifyContent: "center" }}>
-        <FreeBuildToggle freeBuild={freeBuild} toggleFreeBuild={toggleFreeBuild} />
-        <SettingsMenu onOpenKeybindEditor={onOpenKeybindEditor} />
-        <FileMenu
+      {/* Import + Export + Examples + Clear all */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: MENU_COL_WIDTH }}>
+        <span style={groupLabelStyle}>I/O</span>
+        <ImportMenu
           loadBlocks={loadBlocks}
           insertBlocks={insertBlocks}
-          clearAll={clearAll}
-          onResetCamera={onResetCamera}
-          blocksEmpty={blocksEmpty}
+          bgraph={bgraph}
+          closeMenuRef={closeImportMenuRef}
         />
+        <ExportMenu
+          blocksEmpty={blocksEmpty}
+          bgraph={bgraph}
+          closeMenuRef={closeExportMenuRef}
+        />
+        <button
+          data-tutorial="examples-button"
+          onClick={() => bgraph.setExamplesOpen(true)}
+          title="Browse pre-bundled TQEC example graphs"
+          style={{ ...btnStyle(false), whiteSpace: "nowrap", width: "100%" }}
+        >
+          Examples
+        </button>
+        <button
+          onClick={() => {
+            if (!window.confirm("Are you sure you want to delete the whole diagram?")) return;
+            clearAll();
+            onResetCamera();
+          }}
+          disabled={blocksEmpty}
+          title="Delete the whole diagram"
+          style={{
+            ...btnStyle(false),
+            whiteSpace: "nowrap",
+            width: "100%",
+            color: "#dc3545",
+            opacity: blocksEmpty ? 0.4 : 1,
+            cursor: blocksEmpty ? "default" : "pointer",
+          }}
+        >
+          Clear all
+        </button>
+        <BgraphDialogs actions={bgraph} />
       </div>
 
       {/* Separator */}
@@ -559,6 +630,7 @@ export function Toolbar({
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           <button
             key="pointer"
+            data-tutorial="select-tool"
             onClick={() => {
               if (mode === "build") setMode("edit");
               setArmedTool("pointer");
@@ -578,7 +650,7 @@ export function Toolbar({
       <div style={{ width: 1, background: "#ddd" }} />
 
       {/* Blocks group (Port + ZXCubes + Y) */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      <div data-tutorial="blocks-palette" style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <span style={groupLabelStyle}>Blocks</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           <button
@@ -697,7 +769,7 @@ export function Toolbar({
       <div style={{ width: 1, background: "#ddd" }} />
 
       {/* Pipes group */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      <div data-tutorial="pipes-palette" style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <span style={groupLabelStyle}>Pipes</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           {PIPE_VARIANTS.map((v) => (
@@ -916,81 +988,6 @@ function ResizeHandle({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Iso view menu — dropdown to pick which axis to view down
-// ---------------------------------------------------------------------------
-
-const ISO_AXIS_LABEL: Record<IsoAxis, string> = {
-  x: "Iso X",
-  y: "Iso Y",
-  z: "Iso Z",
-};
-
-function IsoMenu({ viewMode, onPick }: { viewMode: ViewMode; onPick: (axis: IsoAxis) => void }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const active = viewMode.kind === "iso";
-  const label = active ? ISO_AXIS_LABEL[viewMode.axis] : "Iso";
-
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
-
-  const pick = (axis: IsoAxis) => {
-    onPick(axis);
-    setOpen(false);
-  };
-
-  return (
-    <div ref={wrapRef} style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        style={{ ...btnStyle(active), whiteSpace: "nowrap", width: "100%" }}
-        title="Axis-locked orthographic elevation view"
-      >
-        {label} ▾
-      </button>
-      {open && (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            left: 0,
-            background: "#fff",
-            border: "1px solid #ccc",
-            borderRadius: 4,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-            padding: 4,
-            minWidth: 90,
-            zIndex: 1000,
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-          }}
-        >
-          {(["x", "y", "z"] as IsoAxis[]).map((axis) => (
-            <button
-              key={axis}
-              onClick={() => pick(axis)}
-              style={{
-                ...btnStyle(active && viewMode.axis === axis),
-                textAlign: "left",
-                padding: "4px 10px",
-              }}
-            >
-              {ISO_AXIS_LABEL[axis]}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // PositionEditor — editable X/Y/Z inputs for the build cursor
@@ -1078,6 +1075,7 @@ function ModeSegmented({
     color: active ? "#fff" : "#555",
     fontWeight: active ? 600 : "normal",
     borderRadius: 3,
+    whiteSpace: "nowrap",
     transition: "background 0.1s, color 0.1s",
   });
   return (
@@ -1096,7 +1094,7 @@ function ModeSegmented({
         Drag / Drop
       </button>
       <button onClick={() => setMode("build")} style={segStyle(mode === "build")}>
-        Keyboard Build
+        Keyboard
       </button>
     </div>
   );
@@ -1136,40 +1134,89 @@ function SelectionInspector({
 }
 
 // ---------------------------------------------------------------------------
-// FileMenu — Import / Export / Photo / Clear dropdown
+// ImportMenu — Load/Insert .dae or bgraph dropdown
 // ---------------------------------------------------------------------------
 
-function FileMenu({
+function ImportMenu({
   loadBlocks,
   insertBlocks,
-  clearAll,
-  onResetCamera,
-  blocksEmpty,
+  bgraph,
+  closeMenuRef,
 }: {
   loadBlocks: (blocks: Map<string, import("../types").Block>) => void;
   insertBlocks: (blocks: Map<string, import("../types").Block>) => void;
-  clearAll: () => void;
-  onResetCamera: () => void;
-  blocksEmpty: boolean;
+  bgraph: BgraphActions;
+  closeMenuRef: React.RefObject<() => void>;
 }) {
   const [open, setOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
-  const bgraph = useBgraphActions({
-    loadBlocks,
-    insertBlocks,
-    onItemClick: () => setOpen(false),
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  // Let the lifted bgraph hook dismiss this popup after an import action.
+  useEffect(() => {
+    closeMenuRef.current = () => setOpen(false);
   });
 
-  // Mutually exclusive side-submenu toggles — opening one closes the other.
-  const openImport = () => {
-    setExportOpen(false);
-    setImportOpen((v) => !v);
-  };
-  const openExport = () => {
-    setImportOpen(false);
-    setExportOpen((v) => !v);
-  };
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const item = (disabled: boolean): React.CSSProperties => ({
+    ...btnStyle(false),
+    textAlign: "left",
+    padding: "4px 10px",
+    opacity: disabled ? 0.4 : 1,
+    cursor: disabled ? "default" : "pointer",
+    whiteSpace: "nowrap",
+  });
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{ ...btnStyle(open), whiteSpace: "nowrap", width: "100%" }}
+        title="Open or paste a scene (.dae or bgraph)"
+      >
+        Import ▾
+      </button>
+      {open && (
+        <ImportSubmenu
+          itemStyle={item(false)}
+          onItemClick={() => setOpen(false)}
+          loadBlocks={loadBlocks}
+          insertBlocks={insertBlocks}
+          bgraph={bgraph}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ExportMenu — Export / Share link / Screenshot dropdown
+// ---------------------------------------------------------------------------
+
+function ExportMenu({
+  blocksEmpty,
+  bgraph,
+  closeMenuRef,
+}: {
+  blocksEmpty: boolean;
+  bgraph: BgraphActions;
+  closeMenuRef: React.RefObject<() => void>;
+}) {
+  const [open, setOpen] = useState(false);
+
+  // Expose a close handler so the lifted bgraph hook (and any other out-of-menu
+  // trigger) can dismiss this popup after an action.
+  useEffect(() => {
+    closeMenuRef.current = () => setOpen(false);
+  });
+
   const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "too-long" | "error">("idle");
   const shareTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -1185,8 +1232,6 @@ function FileMenu({
     const onDocClick = (e: MouseEvent) => {
       if (!wrapRef.current?.contains(e.target as Node)) {
         setOpen(false);
-        setImportOpen(false);
-        setExportOpen(false);
       }
     };
     document.addEventListener("mousedown", onDocClick);
@@ -1217,6 +1262,9 @@ function FileMenu({
       } else {
         await navigator.clipboard.writeText(url);
         setShareStatus("copied");
+        // Only advance the tutorial once a usable link reached the clipboard.
+        // Oversized URLs and clipboard failures keep the step available.
+        useTutorialStore.getState().recordShareLink();
       }
     } catch {
       setShareStatus("error");
@@ -1251,11 +1299,12 @@ function FileMenu({
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
       <button
+        data-tutorial="export-menu"
         onClick={() => setOpen((v) => !v)}
         style={{ ...btnStyle(open), whiteSpace: "nowrap", width: "100%" }}
-        title="Import / Export / Share / Screenshot / Clear"
+        title="Export / Share link / Download Screenshot"
       >
-        File ▾
+        Export ▾
       </button>
       {open && (
         <div
@@ -1275,58 +1324,15 @@ function FileMenu({
             gap: 2,
           }}
         >
+          <ExportSubmenu
+            itemStyle={item(false)}
+            itemStyleDisabled={item(true)}
+            blocksEmpty={blocksEmpty}
+            onItemClick={() => setOpen(false)}
+            bgraph={bgraph}
+          />
           <button
-            onClick={openImport}
-            style={{
-              ...item(false),
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              background: importOpen ? "#e8f0fe" : "#fff",
-            }}
-            title="Open or paste a file"
-          >
-            Import <span style={{ opacity: 0.6, marginLeft: 6 }}>{importOpen ? "▾" : "▸"}</span>
-          </button>
-          {importOpen && (
-            <ImportSubmenu
-              itemStyle={item(false)}
-              onItemClick={() => {
-                setImportOpen(false);
-                setOpen(false);
-              }}
-              loadBlocks={loadBlocks}
-              insertBlocks={insertBlocks}
-              bgraph={bgraph}
-            />
-          )}
-          <button
-            onClick={openExport}
-            disabled={blocksEmpty}
-            style={{
-              ...item(blocksEmpty),
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              background: exportOpen ? "#e8f0fe" : "#fff",
-            }}
-            title="Save scene to file"
-          >
-            Export <span style={{ opacity: 0.6, marginLeft: 6 }}>{exportOpen ? "▾" : "▸"}</span>
-          </button>
-          {exportOpen && (
-            <ExportSubmenu
-              itemStyle={item(false)}
-              itemStyleDisabled={item(true)}
-              blocksEmpty={blocksEmpty}
-              onItemClick={() => {
-                setExportOpen(false);
-                setOpen(false);
-              }}
-              bgraph={bgraph}
-            />
-          )}
-          <button
+            data-tutorial="share-link"
             onClick={() => {
               void onShare();
             }}
@@ -1345,24 +1351,10 @@ function FileMenu({
             title="Save current view as PNG"
             style={item(blocksEmpty)}
           >
-            Screenshot
-          </button>
-          <div style={{ height: 1, background: "#eee", margin: "4px 0" }} />
-          <button
-            onClick={() => {
-              if (!window.confirm("Are you sure you want to delete the whole diagram?")) return;
-              clearAll();
-              onResetCamera();
-              setOpen(false);
-            }}
-            disabled={blocksEmpty}
-            style={{ ...item(blocksEmpty), color: "#dc3545" }}
-          >
-            Clear all
+            Download Screenshot
           </button>
         </div>
       )}
-      <BgraphDialogs actions={bgraph} />
     </div>
   );
 }
@@ -1424,6 +1416,7 @@ function AnalyzeMenu() {
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
       <button
+        data-tutorial="analyze-menu"
         onClick={() => setOpen((v) => !v)}
         title={triggerTitle}
         style={triggerStyle}
@@ -1464,6 +1457,7 @@ function AnalyzeMenu() {
             {validationStatus === "loading" ? "Verifying..." : "Verify (tqec)"}
           </button>
           <button
+            data-tutorial="flows-menu-item"
             onClick={() => useBlockStore.getState().toggleFlowsPanel()}
             title="Show stabilizer flows for the current diagram (computed by the tqec package)"
             style={{
@@ -1475,6 +1469,7 @@ function AnalyzeMenu() {
             Flows (tqec)
           </button>
           <button
+            data-tutorial="zx-menu-item"
             onClick={() => useBlockStore.getState().toggleZXPanel()}
             title="Show the ZX-calculus diagram corresponding to this pipe diagram (tqec builds the graph, pyzx owns the .qgraph export and full_reduce simplification)"
             style={{
@@ -1535,7 +1530,8 @@ function FreeBuildToggle({
 }
 
 // ---------------------------------------------------------------------------
-// SettingsMenu — Free Build, navigation style, keybind editor entry
+// SettingsMenu — Y-defect highlight, navigation style, keyboard-build options,
+// keybind editor entry (Free Build is its own top-level toolbar button)
 // ---------------------------------------------------------------------------
 
 const NAV_STYLE_LABELS: Record<NavStyle, string> = {
@@ -1572,10 +1568,10 @@ function SettingsMenu({
     <div ref={wrapRef} style={{ position: "relative" }}>
       <button
         onClick={() => setOpen((v) => !v)}
-        title="Settings"
+        title="View Settings"
         style={{ ...btnStyle(open), whiteSpace: "nowrap", width: "100%" }}
       >
-        ⚙ Settings
+        ⚙ View Settings
       </button>
       {open && (
         <div

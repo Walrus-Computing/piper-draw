@@ -7,7 +7,7 @@
 // Why one modal for both sources: paste and load-from-file are the same
 // underlying action (parse a bgraph string → blocks Map → store). Giving
 // them a single surface keeps the (action × source) grid honest and shrinks
-// the File ▾ Import submenu from 3 bgraph items to 2.
+// the Import ▾ menu from 3 bgraph items to 2.
 // ---------------------------------------------------------------------------
 
 import { useEffect, useRef, useState } from "react";

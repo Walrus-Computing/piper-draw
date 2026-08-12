@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBlockStore } from "../stores/blockStore";
+import { useTutorialStore } from "../stores/tutorialStore";
 import { computeFlows, type FlowsResult } from "../utils/flows";
 import { getAllPortPositions, type Position3D } from "../types";
 import { isInSpanGF2, pauliToSymplectic } from "../utils/stabilizerSpan";
@@ -213,6 +214,9 @@ export function FlowsPanel({
     // Publish to store so the 3D overlay can read surfaces by index.
     if (res.ok) setFlowsStore(res.flows, sig);
     else setFlowsStore([], sig);
+    // Only advance once the promised flow results exist. Validation or server
+    // errors leave the step available for a retry (or the tutorial's Skip).
+    if (res.ok) useTutorialStore.getState().recordFlowCompute();
   }, [ensurePortLabels, setFlowsStore]);
 
   // When the diagram changes after a compute, auto-exit flow viz mode so the
@@ -362,6 +366,7 @@ export function FlowsPanel({
             ?
           </button>
           <button
+            data-tutorial="flows-compute"
             onClick={handleCompute}
             disabled={loading || portCount === 0}
             style={{

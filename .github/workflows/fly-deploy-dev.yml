@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     concurrency: deploy-dev-group
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # Pinned to the v1.5 release commit (was @master). Mutable refs in a
       # job that holds FLY_API_TOKEN_DEV give upstream maintainers (or anyone
       # who compromises them) a direct path to deploying the dev app.

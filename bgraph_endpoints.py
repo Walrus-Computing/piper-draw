@@ -2,7 +2,7 @@
 
 Bgraph is TQEC's plain-text section-based file format introduced in PR #864
 (`tqec.interop.bgraph`). It is distinct from `BlockGraph.to_json()`. This module
-wraps TQEC's `load_bgraph` / `write_bgraph` for piper-draw scenes.
+wraps TQEC's `read_bgraph` / `write_bgraph` for piper-draw scenes.
 
 Round-trip pipeline (lossless on TQEC data — paint, groupId, port rank, port io,
 view camera all drop on export by design; see CEO plan D3=A).
@@ -24,7 +24,7 @@ view camera all drop on export by design; see CEO plan D3=A).
 
     IMPORT (bgraph string → piper-draw blocks):
         bgraph_str
-            │  (size cap + load_bgraph — raises TQECError on malformed)
+            │  (size cap + read_bgraph — raises TQECError on malformed)
             ▼
         BlockGraph
             │  (to_dict)
@@ -42,7 +42,7 @@ The backend returns the cube types verbatim as TQEC produced them; the frontend
 normalizes and surfaces the count via a toast.
 
 Policy stricter than TQEC's parser:
-- Reject empty bgraph on import (TQEC's `load_bgraph` accepts 0-cube graphs).
+- Reject empty bgraph on import (TQEC's bgraph reader accepts 0-cube graphs).
 - Reject empty scene on export.
 - Reject duplicate port labels on import (TQEC's `BlockGraph.add_cube` raises
   this naturally; we surface it as a named HTTPException).
@@ -57,8 +57,14 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from tqec.computation.block_graph import BlockGraph
-from tqec.interop.bgraph import load_bgraph, write_bgraph
+from tqec.interop.bgraph import write_bgraph
 from tqec.utils.exceptions import TQECError
+
+try:
+    from tqec.interop.bgraph import read_bgraph
+except ImportError:
+    # TQEC renamed load_bgraph to read_bgraph after the revision in uv.lock.
+    from tqec.interop.bgraph import load_bgraph as read_bgraph
 
 # Caps (CEO plan D11). Text cap is bytes; block cap is cubes + pipes combined.
 MAX_BGRAPH_BYTES = 5 * 1024 * 1024
@@ -374,7 +380,7 @@ async def bgraph_import(req: BgraphImportRequest) -> BgraphImportResponse:
         )
 
     try:
-        graph = load_bgraph(req.bgraph)
+        graph = read_bgraph(req.bgraph)
     except TQECError as e:
         raise HTTPException(
             status_code=400,
@@ -402,7 +408,7 @@ async def bgraph_import(req: BgraphImportRequest) -> BgraphImportResponse:
             },
         )
 
-    # BlockGraph.add_cube enforces port-label uniqueness; load_bgraph does NOT.
+    # BlockGraph.add_cube enforces port-label uniqueness; the bgraph reader does NOT.
     # Walk ports manually so a hand-edited bgraph with dup port labels is
     # rejected with a clear error rather than passing through silently.
     seen_labels: set[str] = set()

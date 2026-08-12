@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseDaeToBlocks } from "./daeImport";
+import { parseDaeToBlocks, canonicaliseImportedCubes, daeImportSummaryMessage, type DaeImportSummary } from "./daeImport";
+import type { Block } from "../types";
 
 /** Minimal valid DAE with a single block instance. */
 function minimalDae(
@@ -185,5 +186,131 @@ describe("parseDaeToBlocks", () => {
     // type is preserved. Only pipe-constrained ambiguity triggers canonicalisation.
     const blocks = parseDaeToBlocks(minimalDae("zxz"));
     expect(blocks.get("0,0,0")!.type).toBe("ZXZ");
+  });
+});
+
+function blockMap(
+  items: Array<{ x: number; y: number; z: number; type: Block["type"] }>,
+): Map<string, Block> {
+  const m = new Map<string, Block>();
+  for (const b of items) {
+    m.set(`${b.x},${b.y},${b.z}`, { pos: { x: b.x, y: b.y, z: b.z }, type: b.type });
+  }
+  return m;
+}
+
+describe("canonicaliseImportedCubes — repair of pipe-conflicting cube types", () => {
+  it("repairs a cube whose pipes fully determine a different type (ftdp junction convention)", () => {
+    // X-pipes on both x-ends and Y-pipes on both y-ends force XXZ; ftdp
+    // exports such junction cubes as xzz (pattern from adder_35bit_6x6.dae).
+    // Left unrepaired, the cube fails every color-rule check as imported,
+    // which vetoes any whole-scene rotation/flip.
+    const blocks = blockMap([
+      { x: 3, y: 3, z: 0, type: "XZZ" },
+      { x: 4, y: 3, z: 0, type: "OXZ" },
+      { x: 1, y: 3, z: 0, type: "OXZ" },
+      { x: 3, y: 4, z: 0, type: "XOZ" },
+      { x: 3, y: 1, z: 0, type: "XOZ" },
+    ]);
+    const { repaired, canonicalised } = canonicaliseImportedCubes(blocks);
+    expect(blocks.get("3,3,0")!.type).toBe("XXZ");
+    expect(repaired).toBe(1);
+    expect(canonicalised).toBe(0);
+  });
+
+  it("leaves a determined cube alone when its declared type already matches", () => {
+    const blocks = blockMap([
+      { x: 3, y: 3, z: 0, type: "XXZ" },
+      { x: 4, y: 3, z: 0, type: "OXZ" },
+      { x: 1, y: 3, z: 0, type: "OXZ" },
+      { x: 3, y: 4, z: 0, type: "XOZ" },
+      { x: 3, y: 1, z: 0, type: "XOZ" },
+    ]);
+    const { repaired, canonicalised } = canonicaliseImportedCubes(blocks);
+    expect(blocks.get("3,3,0")!.type).toBe("XXZ");
+    expect(repaired).toBe(0);
+    expect(canonicalised).toBe(0);
+  });
+
+  it("repairs a conflicting declared type to the canonical-first valid option", () => {
+    // Two colinear X-open pipes leave {ZXZ, XXZ}; the declared ZZX conflicts
+    // with both, so the cube is repaired to ZXZ (first in CUBE_TYPES order).
+    const blocks = blockMap([
+      { x: 3, y: 0, z: 0, type: "ZZX" },
+      { x: 4, y: 0, z: 0, type: "OXZ" },
+      { x: 1, y: 0, z: 0, type: "OXZ" },
+    ]);
+    const { repaired } = canonicaliseImportedCubes(blocks);
+    expect(blocks.get("3,0,0")!.type).toBe("ZXZ");
+    expect(repaired).toBe(1);
+  });
+
+  it("does not repair when the pipes themselves conflict (no valid type exists)", () => {
+    // OXZ (y=X, z=Z) vs OZX (y=Z, z=X) — no cube type satisfies both, so the
+    // block is left as declared for Verify to flag.
+    const blocks = blockMap([
+      { x: 3, y: 0, z: 0, type: "XZZ" },
+      { x: 4, y: 0, z: 0, type: "OXZ" },
+      { x: 1, y: 0, z: 0, type: "OZX" },
+    ]);
+    const { repaired, canonicalised } = canonicaliseImportedCubes(blocks);
+    expect(blocks.get("3,0,0")!.type).toBe("XZZ");
+    expect(repaired).toBe(0);
+    expect(canonicalised).toBe(0);
+  });
+});
+
+describe("canonicaliseImportedCubes — single-pipe cubes", () => {
+  it("repairs a single-pipe cube whose declared type conflicts with that pipe", () => {
+    // One OXZ pipe requires y=X, z=Z (options {ZXZ, XXZ}); the declared XZZ
+    // conflicts. Even one attached pipe makes the conflict fail every
+    // color-rule check as imported, so it must be repaired (to ZXZ,
+    // canonical-first among the options).
+    const blocks = blockMap([
+      { x: 3, y: 0, z: 0, type: "XZZ" },
+      { x: 4, y: 0, z: 0, type: "OXZ" },
+    ]);
+    const { repaired, canonicalised } = canonicaliseImportedCubes(blocks);
+    expect(blocks.get("3,0,0")!.type).toBe("ZXZ");
+    expect(repaired).toBe(1);
+    expect(canonicalised).toBe(0);
+  });
+
+  it("preserves a single-pipe cube whose declared type is valid (no canonicalising)", () => {
+    // XXZ is also compatible with a lone OXZ pipe; a valid declared type on a
+    // 1-pipe cube must never be rewritten to the canonical-first option.
+    const blocks = blockMap([
+      { x: 3, y: 0, z: 0, type: "XXZ" },
+      { x: 4, y: 0, z: 0, type: "OXZ" },
+    ]);
+    const { repaired, canonicalised } = canonicaliseImportedCubes(blocks);
+    expect(blocks.get("3,0,0")!.type).toBe("XXZ");
+    expect(repaired).toBe(0);
+    expect(canonicalised).toBe(0);
+  });
+});
+
+describe("import summary", () => {
+  it("parseDaeToBlocks reports the summary only via the callback (silent by default)", () => {
+    let summary: DaeImportSummary | null = null;
+    parseDaeToBlocks(minimalDae("bogus"), (s) => { summary = s; });
+    expect(summary).not.toBeNull();
+    expect([...summary!.skipped.keys()]).toEqual(["BOGUS"]);
+    // Omitting the callback (templates path) must not throw.
+    expect(() => parseDaeToBlocks(minimalDae("bogus"))).not.toThrow();
+  });
+
+  it("daeImportSummaryMessage composes counts and returns null when clean", () => {
+    expect(
+      daeImportSummaryMessage({ skipped: new Map(), repaired: 0, canonicalised: 0 }),
+    ).toBeNull();
+    const msg = daeImportSummaryMessage({
+      skipped: new Map([["OXX", 1]]),
+      repaired: 2,
+      canonicalised: 1,
+    });
+    expect(msg).toContain("1 unsupported node skipped (OXX)");
+    expect(msg).toContain("2 cube types repaired");
+    expect(msg).toContain("1 ambiguous cube type canonicalised");
   });
 });
