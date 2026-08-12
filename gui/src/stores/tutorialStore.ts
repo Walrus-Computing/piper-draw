@@ -26,6 +26,8 @@ const ADVANCE_DELAY_MS = 700;
 interface TutorialStore {
   active: boolean;
   stepIndex: number;
+  /** Highest step reached, used to make earlier steps reviewable without repeating them. */
+  furthestStepIndex: number;
   /** True during the completion beat between finishing a step and advancing. */
   celebrating: boolean;
   start: () => void;
@@ -33,6 +35,12 @@ interface TutorialStore {
   maybeAutoStart: () => void;
   /** Advance: primary button on passive steps, Skip on action steps. */
   advance: () => void;
+  /** Return to the previous step without discarding forward progress. */
+  back: () => void;
+  /** Record pressing Compute in the stabilizer-flows panel. */
+  recordFlowCompute: () => void;
+  /** Record pressing Share link in the File menu. */
+  recordShareLink: () => void;
   dismiss: () => void;
 }
 
@@ -100,6 +108,9 @@ function cancelPendingAdvance(): void {
   advanceTimer = null;
 }
 
+// The factory intentionally keeps the transition helpers together so timer,
+// baseline, and navigation changes remain one state machine.
+// eslint-disable-next-line max-lines-per-function
 export const useTutorialStore = create<TutorialStore>((set, get) => {
   function stepIsComplete(): boolean {
     const step = TUTORIAL_STEPS[get().stepIndex];
@@ -111,7 +122,7 @@ export const useTutorialStore = create<TutorialStore>((set, get) => {
 
   function advanceToNext(): void {
     cancelPendingAdvance();
-    const { stepIndex } = get();
+    const { stepIndex, furthestStepIndex } = get();
     if (stepIndex >= TUTORIAL_STEPS.length - 1) {
       baseline = null;
       pendingBaseline = null;
@@ -121,7 +132,12 @@ export const useTutorialStore = create<TutorialStore>((set, get) => {
     }
     baseline = pendingBaseline ?? currentSnapshot();
     pendingBaseline = null;
-    set({ stepIndex: stepIndex + 1, celebrating: false });
+    const nextStepIndex = stepIndex + 1;
+    set({
+      stepIndex: nextStepIndex,
+      furthestStepIndex: Math.max(furthestStepIndex, nextStepIndex),
+      celebrating: false,
+    });
   }
 
   /** An undo during the beat can invalidate the step; re-verify before moving on. */
@@ -144,7 +160,11 @@ export const useTutorialStore = create<TutorialStore>((set, get) => {
   }
 
   function checkCompletion(): void {
-    if (!get().active) return;
+    const state = get();
+    if (!state.active) return;
+    // Earlier steps are being reviewed; their actions have already been
+    // completed or skipped, so they advance with Next instead of re-firing.
+    if (state.stepIndex < state.furthestStepIndex) return;
     if (advanceTimer !== null) return;
     if (stepIsComplete()) scheduleAdvance();
   }
@@ -164,13 +184,14 @@ export const useTutorialStore = create<TutorialStore>((set, get) => {
   return {
     active: false,
     stepIndex: 0,
+    furthestStepIndex: 0,
     celebrating: false,
 
     start: () => {
       cancelPendingAdvance();
       pendingBaseline = null;
       baseline = currentSnapshot();
-      set({ active: true, stepIndex: 0, celebrating: false });
+      set({ active: true, stepIndex: 0, furthestStepIndex: 0, celebrating: false });
     },
 
     maybeAutoStart: () => {
@@ -181,6 +202,25 @@ export const useTutorialStore = create<TutorialStore>((set, get) => {
     },
 
     advance: () => advanceToNext(),
+
+    back: () => {
+      cancelPendingAdvance();
+      pendingBaseline = null;
+      const { stepIndex } = get();
+      if (stepIndex === 0) return;
+      baseline = currentSnapshot();
+      set({ stepIndex: stepIndex - 1, celebrating: false });
+    },
+
+    recordFlowCompute: () => {
+      counters.flowComputes++;
+      checkCompletion();
+    },
+
+    recordShareLink: () => {
+      counters.shareLinks++;
+      checkCompletion();
+    },
 
     dismiss: () => {
       cancelPendingAdvance();

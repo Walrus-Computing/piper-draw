@@ -44,7 +44,13 @@ describe("buildTutorialSnapshot", () => {
     ]);
     const s = buildTutorialSnapshot(
       source({ blocks, portPositions: new Set(["6,0,0"]) }),
-      { ...ZERO_ACTION_COUNTERS, buildSteps: 2, verifyRuns: 2 },
+      {
+        ...ZERO_ACTION_COUNTERS,
+        buildSteps: 2,
+        verifyRuns: 2,
+        flowComputes: 1,
+        shareLinks: 1,
+      },
     );
     expect(s.cubes).toBe(2);
     expect(s.pipes).toBe(1);
@@ -52,6 +58,8 @@ describe("buildTutorialSnapshot", () => {
     expect(s.ports).toBe(1);
     expect(s.buildSteps).toBe(2);
     expect(s.verifyRuns).toBe(2);
+    expect(s.flowComputes).toBe(1);
+    expect(s.shareLinks).toBe(1);
   });
 });
 
@@ -61,8 +69,8 @@ describe("counterKeyForHistoryKind", () => {
     expect(counterKeyForHistoryKind("build-step")).toBe("buildSteps");
     expect(counterKeyForHistoryKind("load")).toBe("sceneLoads");
     expect(counterKeyForHistoryKind("bulk-add")).toBe("bulkAdds");
-    expect(counterKeyForHistoryKind("add-port")).toBe("portAdds");
-    expect(counterKeyForHistoryKind("port")).toBe("portAdds");
+    expect(counterKeyForHistoryKind("add-port")).toBeNull();
+    expect(counterKeyForHistoryKind("port")).toBeNull();
     expect(counterKeyForHistoryKind("add")).toBeNull();
     expect(counterKeyForHistoryKind("remove")).toBeNull();
   });
@@ -88,7 +96,7 @@ describe("clampTutorialBaseline", () => {
 });
 
 describe("step predicates", () => {
-  it("welcome and done are passive (no predicate)", () => {
+  it("welcome and done are passive", () => {
     expect(step("welcome").isComplete).toBeUndefined();
     expect(step("done").isComplete).toBeUndefined();
   });
@@ -106,14 +114,6 @@ describe("step predicates", () => {
     expect(p(snap({ buildSteps: 2 }), base)).toBe(true);
   });
 
-  it("add-port completes on an explicit port or an add-port history entry", () => {
-    const base = snap();
-    const p = step("add-port").isComplete!;
-    expect(p(snap({ ports: 1 }), base)).toBe(true);
-    expect(p(snap({ portAdds: 1 }), base)).toBe(true);
-    expect(p(snap(), base)).toBe(false);
-  });
-
   it("verify completes on a new verify attempt", () => {
     const base = snap({ verifyRuns: 3 });
     expect(step("verify").isComplete!(snap({ verifyRuns: 4 }), base)).toBe(true);
@@ -127,17 +127,30 @@ describe("step predicates", () => {
     expect(p(snap({ bulkAdds: 1 }), base)).toBe(true);
   });
 
-  it("flows requires freshly opening an analysis panel", () => {
+  it("flows requires freshly opening the Flows panel", () => {
     const p = step("flows").isComplete!;
     expect(p(snap({ flowsOpen: true }), snap())).toBe(true);
+    expect(p(snap({ zxOpen: true }), snap())).toBe(false);
     // Already open at step start → must be opened fresh.
     expect(p(snap({ flowsOpen: true }), snap({ flowsOpen: true }))).toBe(false);
   });
 
+  it("requires pressing Compute after opening Flows", () => {
+    const p = step("compute-flows").isComplete!;
+    expect(p(snap({ flowComputes: 1 }), snap())).toBe(true);
+    expect(p(snap({ flowsOpen: true }), snap())).toBe(false);
+  });
+
+  it("includes opening ZX and pressing Share link", () => {
+    expect(step("zx").isComplete!(snap({ zxOpen: true }), snap())).toBe(true);
+    expect(step("share-link").isComplete!(snap({ shareLinks: 1 }), snap())).toBe(true);
+  });
+
   it("every highlight target is a known data-tutorial anchor", () => {
     const known = new Set([
-      "select-tool", "blocks-palette", "pipes-palette", "port-tool",
-      "mode-pill", "file-menu", "analyze-menu",
+      "select-tool", "blocks-palette", "pipes-palette",
+      "mode-pill", "file-menu", "share-link", "analyze-menu",
+      "flows-menu-item", "flows-compute", "zx-menu-item",
     ]);
     for (const s of TUTORIAL_STEPS) {
       for (const h of s.highlights) {

@@ -129,6 +129,37 @@ describe("tutorialStore", () => {
     useValidationStore.setState({ status: "idle" });
   });
 
+  it("goes back to review a completed step, then returns with Next", () => {
+    driveTo("verify");
+    const verifyIndex = stepIndexOf("verify");
+    useTutorialStore.getState().back();
+    expect(useTutorialStore.getState().stepIndex).toBe(verifyIndex - 1);
+    expect(useTutorialStore.getState().furthestStepIndex).toBe(verifyIndex);
+
+    useTutorialStore.getState().advance();
+    expect(useTutorialStore.getState().stepIndex).toBe(verifyIndex);
+    expect(useTutorialStore.getState().furthestStepIndex).toBe(verifyIndex);
+  });
+
+  it("counts pressing Compute in the stabilizer-flows panel", () => {
+    driveTo("compute-flows");
+    useTutorialStore.getState().recordFlowCompute();
+    expect(useTutorialStore.getState().celebrating).toBe(true);
+    vi.advanceTimersByTime(ADVANCE_DELAY_MS);
+    expect(useTutorialStore.getState().stepIndex).toBe(stepIndexOf("zx"));
+  });
+
+  it("includes opening ZX and pressing Share link", () => {
+    driveTo("zx");
+    useBlockStore.setState({ zxPanelOpen: true });
+    expect(useTutorialStore.getState().celebrating).toBe(true);
+    vi.advanceTimersByTime(ADVANCE_DELAY_MS);
+    expect(useTutorialStore.getState().stepIndex).toBe(stepIndexOf("share-link"));
+
+    useTutorialStore.getState().recordShareLink();
+    expect(useTutorialStore.getState().celebrating).toBe(true);
+  });
+
   it("finishing the last step persists 'completed' and deactivates", () => {
     driveTo("done");
     useTutorialStore.getState().advance(); // Finish

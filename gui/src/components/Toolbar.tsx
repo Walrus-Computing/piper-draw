@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useBlockStore, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
+import { useTutorialStore } from "../stores/tutorialStore";
 import { useKeybindStore, type Mode as KeybindMode, type NavStyle } from "../stores/keybindStore";
 import { CUBE_TYPES, FREE_BUILD_PIPE_VARIANTS, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, determineCubeOptionsWithPipeRetype, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey, X_HEX, Z_HEX, H_HEX } from "../types";
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
@@ -1366,6 +1367,7 @@ function FileMenu({
 
   const onShare = async () => {
     if (!compressionSupported || blocksEmpty) return;
+    useTutorialStore.getState().recordShareLink();
     if (shareTimeoutRef.current !== null) {
       clearTimeout(shareTimeoutRef.current);
       shareTimeoutRef.current = null;
@@ -1469,6 +1471,7 @@ function FileMenu({
             Export
           </button>
           <button
+            data-tutorial="share-link"
             onClick={() => {
               void onShare();
             }}
@@ -1677,6 +1680,7 @@ function AnalyzeMenu() {
             {validationStatus === "loading" ? "Verifying..." : "Verify (tqec)"}
           </button>
           <button
+            data-tutorial="flows-menu-item"
             onClick={() => useBlockStore.getState().toggleFlowsPanel()}
             title="Show stabilizer flows for the current diagram (computed by the tqec package)"
             style={{
@@ -1688,6 +1692,7 @@ function AnalyzeMenu() {
             Flows (tqec)
           </button>
           <button
+            data-tutorial="zx-menu-item"
             onClick={() => useBlockStore.getState().toggleZXPanel()}
             title="Show the ZX-calculus diagram corresponding to this pipe diagram (tqec builds the graph, pyzx owns the .qgraph export and full_reduce simplification)"
             style={{

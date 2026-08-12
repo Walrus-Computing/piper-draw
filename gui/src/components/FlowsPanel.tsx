@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBlockStore } from "../stores/blockStore";
+import { useTutorialStore } from "../stores/tutorialStore";
 import { computeFlows, type FlowsResult } from "../utils/flows";
 import { getAllPortPositions, type Position3D } from "../types";
 import { isInSpanGF2, pauliToSymplectic } from "../utils/stabilizerSpan";
@@ -201,6 +202,7 @@ export function FlowsPanel({
   }, [open, ensurePortLabels, blocks, portPositions]);
 
   const handleCompute = useCallback(async () => {
+    useTutorialStore.getState().recordFlowCompute();
     ensurePortLabels();
     setLoading(true);
     const s = useBlockStore.getState();
@@ -362,6 +364,7 @@ export function FlowsPanel({
             ?
           </button>
           <button
+            data-tutorial="flows-compute"
             onClick={handleCompute}
             disabled={loading || portCount === 0}
             style={{

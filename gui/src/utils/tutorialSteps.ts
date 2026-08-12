@@ -21,8 +21,9 @@ export type TutorialActionCounters = {
   buildSteps: number;
   sceneLoads: number;
   bulkAdds: number;
-  portAdds: number;
   verifyRuns: number;
+  flowComputes: number;
+  shareLinks: number;
 };
 
 export const ZERO_ACTION_COUNTERS: TutorialActionCounters = {
@@ -30,8 +31,9 @@ export const ZERO_ACTION_COUNTERS: TutorialActionCounters = {
   buildSteps: 0,
   sceneLoads: 0,
   bulkAdds: 0,
-  portAdds: 0,
   verifyRuns: 0,
+  flowComputes: 0,
+  shareLinks: 0,
 };
 
 /** Undo-command kind → the action counter it increments (when newly pushed). */
@@ -41,8 +43,6 @@ export function counterKeyForHistoryKind(kind: string): keyof TutorialActionCoun
     case "build-step": return "buildSteps";
     case "load": return "sceneLoads";
     case "bulk-add": return "bulkAdds";
-    case "add-port":
-    case "port": return "portAdds";
     default: return null;
   }
 }
@@ -132,10 +132,10 @@ export type TutorialStep = {
 export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: "welcome",
-    title: "Build your first pipe diagram",
+    title: "Build a pipe diagram",
     instruction:
-      "A quick hands-on tour: cubes, pipes, ports, color rules, and "
-      + "verification. Every step is a real edit — undo anytime with Ctrl/Cmd+Z.",
+      "You'll place cubes, connect them with pipes, and verify the finished "
+      + "diagram. You can undo any step with Ctrl/Cmd+Z.",
     highlights: [],
   },
   {
@@ -178,16 +178,6 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     isComplete: (now, base) => now.buildSteps >= base.buildSteps + 2,
   },
   {
-    id: "add-port",
-    title: "Mark a port",
-    instruction:
-      "Ports are the open inputs/outputs where a computation connects to the "
-      + "outside. Back in Drag / Drop mode, click Port in the palette, then "
-      + "click the open end of a pipe.",
-    highlights: ["port-tool", "mode-pill"],
-    isComplete: (now, base) => now.ports > base.ports || now.portAdds > base.portAdds,
-  },
-  {
     id: "verify",
     title: "Verify the diagram",
     instruction:
@@ -220,21 +210,47 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   },
   {
     id: "flows",
-    title: "See the correlation surfaces",
+    title: "Open stabilizer flows",
     instruction:
-      "Open Analyze ▾ → Flows (tqec) to compute the circuit's stabilizer "
-      + "flows and visualize each correlation surface directly in 3D.",
-    highlights: ["analyze-menu"],
-    isComplete: (now, base) =>
-      (now.flowsOpen && !base.flowsOpen) || (now.zxOpen && !base.zxOpen),
+      "Open Analyze ▾ and choose Flows (tqec). This opens the stabilizer "
+      + "flows panel for the current diagram.",
+    highlights: ["analyze-menu", "flows-menu-item"],
+    isComplete: (now, base) => now.flowsOpen && !base.flowsOpen,
+  },
+  {
+    id: "compute-flows",
+    title: "Compute the stabilizer flows",
+    instruction:
+      "Click Compute in the Stabilizer flows panel. The results show the "
+      + "correlations supported by the diagram.",
+    highlights: ["flows-compute"],
+    isComplete: (now, base) => now.flowComputes > base.flowComputes,
+  },
+  {
+    id: "zx",
+    title: "Open the ZX diagram",
+    instruction:
+      "Open Analyze ▾ and choose ZX (tqec + pyzx). The ZX graph is generated "
+      + "automatically; close the Flows panel first if you want more room.",
+    highlights: ["analyze-menu", "zx-menu-item"],
+    isComplete: (now, base) => now.zxOpen && !base.zxOpen,
+  },
+  {
+    id: "share-link",
+    title: "Copy a share link",
+    instruction:
+      "Open File ▾ and click Share link. The copied URL contains the diagram, "
+      + "so anyone who opens it sees the same scene.",
+    highlights: ["file-menu", "share-link"],
+    isComplete: (now, base) => now.shareLinks > base.shareLinks,
   },
   {
     id: "done",
     title: "That's the workflow",
     instruction:
-      "Sketch, verify, analyze, export. Export ships a TQEC-compatible .dae; "
-      + "Share link packs small scenes into a URL. Press ? for every "
-      + "shortcut, and the ? button for this tour's big sibling — the manual.",
-    highlights: ["file-menu"],
+      "You can now build, verify, analyze, and share a diagram. Open Settings "
+      + "→ Edit keybindings to view or change shortcuts, or click the Help (?) "
+      + "button in the bottom-left corner for the full guide.",
+    highlights: [],
   },
 ];

@@ -8,24 +8,35 @@ import { TUTORIAL_STEPS, type TutorialStep } from "../utils/tutorialSteps";
  * instruction with a progress bar, pulses the relevant toolbar controls
  * (elements carrying a matching `data-tutorial` attribute get the
  * `.tutorial-target` CSS class), and shows a brief "✓" beat when the step's
- * completion predicate fires before auto-advancing. Action steps offer Skip;
- * the passive first/last steps use a primary Start/Finish button.
+ * completion predicate fires before auto-advancing. Action steps offer Skip,
+ * and completed steps can be revisited with Back without repeating the action.
  */
 
-/** Pulse the step's toolbar targets. Buttons live in the always-mounted
- * toolbar, so applying classes on step change is sufficient — no per-render
- * re-query needed. */
+/** Pulse the step's targets. A MutationObserver picks up menu items that only
+ * enter the DOM after the user opens File or Analyze. */
 function useStepHighlights(active: boolean, step: TutorialStep | undefined) {
   useEffect(() => {
     if (!active || !step) return;
-    const marked: HTMLElement[] = [];
-    for (const target of step.highlights) {
-      for (const el of document.querySelectorAll<HTMLElement>(`[data-tutorial="${target}"]`)) {
-        el.classList.add("tutorial-target");
-        marked.push(el);
+    const marked = new Set<HTMLElement>();
+    const sync = () => {
+      const next = new Set<HTMLElement>();
+      for (const target of step.highlights) {
+        for (const el of document.querySelectorAll<HTMLElement>(`[data-tutorial="${target}"]`)) {
+          el.classList.add("tutorial-target");
+          next.add(el);
+        }
       }
-    }
+      for (const el of marked) {
+        if (!next.has(el)) el.classList.remove("tutorial-target");
+      }
+      marked.clear();
+      for (const el of next) marked.add(el);
+    };
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(document.body, { childList: true, subtree: true });
     return () => {
+      observer.disconnect();
       for (const el of marked) el.classList.remove("tutorial-target");
     };
   }, [active, step]);
@@ -76,18 +87,43 @@ function ProgressHeader({
   );
 }
 
+function BackButton({ visible, onBack }: { visible: boolean; onBack: () => void }) {
+  if (!visible) return <span />;
+  return (
+    <button
+      onClick={onBack}
+      style={{
+        background: "none",
+        border: "none",
+        padding: "3px 0",
+        cursor: "pointer",
+        color: "#555",
+        fontSize: 13,
+      }}
+    >
+      ← Back
+    </button>
+  );
+}
+
 function StepFooter({
   step,
+  isFirst,
   isLast,
+  reviewing,
   celebrating,
+  onBack,
   onAdvance,
 }: {
   step: TutorialStep;
+  isFirst: boolean;
   isLast: boolean;
+  reviewing: boolean;
   celebrating: boolean;
+  onBack: () => void;
   onAdvance: () => void;
 }) {
-  const waitsForAction = step.isComplete !== undefined;
+  const waitsForAction = step.isComplete !== undefined && !reviewing;
   return (
     <div
       style={{
@@ -97,8 +133,9 @@ function StepFooter({
         marginTop: 10,
       }}
     >
+      <BackButton visible={!isFirst} onBack={onBack} />
       {waitsForAction ? (
-        <>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 13, color: celebrating ? "#34a853" : "#4a9eff" }}>
             {celebrating ? "Nice — moving on…" : "Do it in the scene to continue"}
           </span>
@@ -116,26 +153,23 @@ function StepFooter({
           >
             Skip
           </button>
-        </>
+        </div>
       ) : (
-        <>
-          <span />
-          <button
-            onClick={onAdvance}
-            style={{
-              background: "#4a9eff",
-              border: "none",
-              borderRadius: 4,
-              padding: "5px 14px",
-              cursor: "pointer",
-              color: "#fff",
-              fontWeight: 600,
-              fontSize: 14,
-            }}
-          >
-            {isLast ? "Finish" : "Start tour"}
-          </button>
-        </>
+        <button
+          onClick={onAdvance}
+          style={{
+            background: "#4a9eff",
+            border: "none",
+            borderRadius: 4,
+            padding: "5px 14px",
+            cursor: "pointer",
+            color: "#fff",
+            fontWeight: 600,
+            fontSize: 14,
+          }}
+        >
+          {isLast ? "Finish" : reviewing ? "Next" : isFirst ? "Start tour" : "Continue"}
+        </button>
       )}
     </div>
   );
@@ -144,8 +178,10 @@ function StepFooter({
 export function TutorialPanel() {
   const active = useTutorialStore((s) => s.active);
   const stepIndex = useTutorialStore((s) => s.stepIndex);
+  const furthestStepIndex = useTutorialStore((s) => s.furthestStepIndex);
   const celebrating = useTutorialStore((s) => s.celebrating);
   const advance = useTutorialStore((s) => s.advance);
+  const back = useTutorialStore((s) => s.back);
   const dismiss = useTutorialStore((s) => s.dismiss);
 
   const step = TUTORIAL_STEPS[stepIndex];
@@ -186,8 +222,11 @@ export function TutorialPanel() {
       <p style={{ margin: 0 }}>{step.instruction}</p>
       <StepFooter
         step={step}
+        isFirst={stepIndex === 0}
         isLast={stepIndex === TUTORIAL_STEPS.length - 1}
+        reviewing={stepIndex < furthestStepIndex}
         celebrating={celebrating}
+        onBack={back}
         onAdvance={advance}
       />
     </div>
