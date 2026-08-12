@@ -55,6 +55,14 @@ is applied:
 3. On `.dae` import for any loaded cube whose position is pipe-ambiguous
    (`utils/daeImport.ts` — emits a console note so imports are auditable).
 
+In addition, `.dae` import **repairs** cubes whose declared type conflicts
+with their attached pipes (some exporters — e.g. ftdp — use a different
+junction-cube convention). A conflicted cube takes the pipe-determined type,
+or the canonical-first valid option when several fit; each repair logs a
+console note and the import toast reports the total. Without the repair such
+cubes fail every color-rule check as imported, which vetoes whole-scene
+rotations/flips.
+
 **Consequence:** a hand-authored TQEC graph that deliberately uses the
 non-canonical sandwich type (e.g. `XZX` where piper-draw would pick `ZZX`) will
 be silently normalised on import. TQEC validation may therefore compute
