@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { useBlockStore } from "./blockStore";
 import type { Block } from "../types";
-import { buildSpatialIndex } from "../types";
+import { buildSpatialIndex, getHiddenFaceMaskForPos } from "../types";
 
 function reset() {
   useBlockStore.setState({
@@ -749,6 +749,34 @@ describe("blockStore", () => {
       expect(blocks.has("3,-2,0")).toBe(true);
       // The pipe is now Y-axis at (3,-2,0).
       expect(blocks.get("3,-2,0")?.type).toBe("ZOX");
+    });
+
+    it("recomputes hidden faces with the final type when a Y block and cube swap positions", () => {
+      const blocks = new Map<string, Block>();
+      for (const block of [
+        { pos: { x: 3, y: 0, z: 3 }, type: "Y" as const },
+        { pos: { x: -3, y: 0, z: 3 }, type: "XZZ" as const },
+        { pos: { x: -3, y: 0, z: 4 }, type: "ZXO" as const },
+      ]) {
+        blocks.set(`${block.pos.x},${block.pos.y},${block.pos.z}`, block);
+      }
+      useBlockStore.getState().loadBlocks(blocks);
+      // Preserve this order so the cube's source-position recomputation runs
+      // after the Y block has moved into that position.
+      useBlockStore.setState({
+        selectedKeys: new Set(["3,0,3", "-3,0,3"]),
+        freeBuild: true,
+      });
+
+      expect(useBlockStore.getState().rotateSelected("z", "flip")).toEqual({ ok: true });
+
+      const state = useBlockStore.getState();
+      const rebuiltIndex = buildSpatialIndex(state.blocks);
+      for (const [key, block] of state.blocks) {
+        expect(state.hiddenFaces.get(key) ?? 0).toBe(
+          getHiddenFaceMaskForPos(block.pos, block.type, state.blocks, rebuiltIndex),
+        );
+      }
     });
 
     it("CCW then CW returns to original state", () => {

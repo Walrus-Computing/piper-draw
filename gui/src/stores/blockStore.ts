@@ -595,9 +595,15 @@ function batchMoveBlocks(
     blocks.set(m.toKey, m.to);
   }
   for (const m of moves) {
+    // A destination may reuse another move's source key. In that case the
+    // final occupant can have different dimensions (for example a Y half-cube
+    // replacing a cube), so recompute that occupied position with its final
+    // type rather than the block type that moved away from it.
+    const fromType = blocks.get(m.fromKey)?.type ?? m.from.type;
+    const toType = blocks.get(m.toKey)?.type ?? m.to.type;
     for (const affected of [
-      recomputeAffectedHiddenFaces(m.from.pos, m.from.type, blocks, spatialIndex),
-      recomputeAffectedHiddenFaces(m.to.pos, m.to.type, blocks, spatialIndex),
+      recomputeAffectedHiddenFaces(m.from.pos, fromType, blocks, spatialIndex),
+      recomputeAffectedHiddenFaces(m.to.pos, toType, blocks, spatialIndex),
     ]) {
       for (const [k, v] of affected) hiddenFaces.set(k, v);
     }
