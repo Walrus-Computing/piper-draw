@@ -6,6 +6,12 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+### Added
+- **Interactive tutorial for the reorganized toolbar.** The hands-on tour now
+  guides users through Build Mode, Analyze, Examples, stabilizer flows, ZX,
+  and sharing from the separate Export menu. Steps advance from real scene
+  actions, pulse the current controls, and can be restarted from Help (?).
+
 ## [0.2.4.0] - 2026-07-03
 
 ### Fixed

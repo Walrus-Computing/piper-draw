@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from "react";
+import { useTutorialStore } from "../stores/tutorialStore";
 
 export function HelpPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
@@ -85,15 +86,42 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
           .
         </p>
 
+        <button
+          onClick={() => {
+            useTutorialStore.getState().start();
+            onClose();
+          }}
+          style={{
+            display: "block",
+            width: "100%",
+            padding: "8px 12px",
+            marginBottom: 4,
+            background: "#4a9eff",
+            color: "#fff",
+            border: "none",
+            borderRadius: 6,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          ▶ Start the interactive tutorial
+        </button>
+        <p style={{ margin: "4px 0 0", fontSize: 11, color: "#888", textAlign: "center" }}>
+          A hands-on tour: place cubes and pipes, verify, and analyze — every
+          step is a real edit.
+        </p>
+
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Tips</h4>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
           <li>Use <b>Undo</b>/<b>Redo</b> or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z.</li>
           <li>
             <b>Camera</b> — drag to orbit, middle/right-drag (or
             <kbd>Shift</kbd>+drag) to pan, scroll to zoom. To make pan primary,
-            switch to “Drag to pan” in Settings; the gestures swap (drag pans,
+            switch to “Drag to pan” in View Settings; the gestures swap (drag pans,
             middle/right-drag and <kbd>Shift</kbd>/<kbd>Alt</kbd>+drag orbit).
-            Use the <b>Iso ▾</b> menu to snap to an axis-locked orthographic view.
+            Turn on <b>Iso-Plane View</b>, then choose X, Y, or Z for an
+            axis-locked orthographic view.
           </li>
           <li>
             <b>Shortcuts</b> — every key binding is listed and rebindable in
@@ -112,8 +140,8 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
             modifier to click-to-delete.
           </li>
           <li>
-            <b>Keyboard Build</b> — move a cursor with the keyboard to extend
-            from the last block.
+            <b>Keyboard</b> — choose it under <b>Build Mode</b> to move a
+            cursor with the keyboard and extend from the last block.
           </li>
         </ul>
 
@@ -173,7 +201,11 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
 
         <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Files</h4>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
-          <li><b>Import</b>/<b>Export</b> round-trip through Collada (.dae) files.</li>
+          <li>
+            Use <b>Import ▾</b> and <b>Export ▾</b> in the I/O column for
+            Collada (.dae) and TQEC bgraph files; <b>Examples</b> opens the
+            bundled reference circuits.
+          </li>
         </ul>
 
         <p style={{ margin: "14px 0 0", fontSize: 12, color: "#666" }}>

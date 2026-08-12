@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------
-// ImportSubmenu — side submenu opened from the File ▾ "Import ▸" button.
-// Holds all open-a-scene operations: .dae file pickers, the unified bgraph
-// modal (file or paste, load or insert), and the examples gallery.
+// ImportSubmenu — dropdown body for the top-level "Import ▾" toolbar button.
+// Holds all open-a-scene operations: .dae file pickers and the unified bgraph
+// modal (file or paste, load or insert). The examples gallery has its own
+// top-level toolbar button ("Examples").
 // ---------------------------------------------------------------------------
 
 import type { Block } from "../types";
@@ -18,9 +19,8 @@ interface Props {
 
 const SUBMENU_STYLE: React.CSSProperties = {
   position: "absolute",
-  top: 0,
-  left: "100%",
-  marginLeft: 4,
+  top: "calc(100% + 4px)",
+  left: 0,
   background: "#fff",
   border: "1px solid #ccc",
   borderRadius: 4,
@@ -77,17 +77,6 @@ export function ImportSubmenu({
         onClick={() => bgraph.openImportModal("insert")}
       >
         Insert bgraph…
-      </button>
-      <div style={{ height: 1, background: "#eee", margin: "2px 0" }} />
-      <button
-        style={itemStyle}
-        title="Browse pre-bundled TQEC example graphs"
-        onClick={() => {
-          close();
-          bgraph.setExamplesOpen(true);
-        }}
-      >
-        Browse examples…
       </button>
     </div>
   );
