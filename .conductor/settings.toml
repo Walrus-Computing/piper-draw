@@ -1,0 +1,10 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+run_mode = "concurrent"
+
+[scripts.run.dev]
+available_in = [ "local" ]
+command = "make install && cd gui && VITE_PORT=$CONDUCTOR_PORT BACKEND_PORT=$((CONDUCTOR_PORT + 1)) npm run dev"
+default = true
+icon = "play"

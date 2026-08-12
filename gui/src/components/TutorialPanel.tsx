@@ -42,7 +42,7 @@ function ProgressHeader({
 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-      <span style={{ fontSize: 11, color: "#666", whiteSpace: "nowrap" }}>
+      <span style={{ fontSize: 12, color: "#666", whiteSpace: "nowrap" }}>
         {stepIndex + 1} of {TUTORIAL_STEPS.length}
       </span>
       <div style={{ flex: 1, height: 4, background: "#e4e9f0", borderRadius: 2 }}>
@@ -99,7 +99,7 @@ function StepFooter({
     >
       {waitsForAction ? (
         <>
-          <span style={{ fontSize: 11, color: celebrating ? "#34a853" : "#4a9eff" }}>
+          <span style={{ fontSize: 13, color: celebrating ? "#34a853" : "#4a9eff" }}>
             {celebrating ? "Nice — moving on…" : "Do it in the scene to continue"}
           </span>
           <button
@@ -111,7 +111,7 @@ function StepFooter({
               padding: "3px 10px",
               cursor: "pointer",
               color: "#555",
-              fontSize: 12,
+              fontSize: 13,
             }}
           >
             Skip
@@ -130,7 +130,7 @@ function StepFooter({
               cursor: "pointer",
               color: "#fff",
               fontWeight: 600,
-              fontSize: 13,
+              fontSize: 14,
             }}
           >
             {isLast ? "Finish" : "Start tour"}
@@ -164,22 +164,22 @@ export function TutorialPanel() {
         position: "fixed",
         ...(analysisOpen ? { left: 16 } : { right: 16 }),
         bottom: 56,
-        width: 300,
+        width: 340,
         zIndex: 60,
         background: "#fff",
         border: `2px solid ${celebrating ? "#34a853" : "#4a9eff"}`,
         borderRadius: 10,
         boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
-        padding: "12px 14px",
+        padding: "14px 16px",
         fontFamily: "sans-serif",
-        fontSize: 13,
+        fontSize: 16,
         color: "#222",
-        lineHeight: 1.45,
+        lineHeight: 1.5,
         transition: "border-color 0.2s",
       }}
     >
       <ProgressHeader stepIndex={stepIndex} celebrating={celebrating} onDismiss={dismiss} />
-      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+      <div style={{ fontWeight: 600, fontSize: 17, marginBottom: 5 }}>
         {celebrating ? "✓ " : ""}
         {step.title}
       </div>
