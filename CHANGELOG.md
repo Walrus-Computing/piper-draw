@@ -6,6 +6,8 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.3.0.0] - 2026-08-12
+
 ### Added
 - **Interactive tutorial for the reorganized toolbar.** The hands-on tour now
   guides users through Build Mode, Analyze, Examples, stabilizer flows, ZX,
@@ -20,6 +22,10 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 - **Select-all highlights now cover the whole selection.** Selection highlights were capped at 200 meshes (2% of a large imported scene, clustered in one corner — easy to read as "nothing happened"). Selections above 200 blocks now render as one instanced highlight mesh per block type, covering every selected block.
 
 ### Changed
+- **The toolbar is reorganized around common workflows.** Build and inspect
+  controls are grouped more clearly, Examples is directly accessible, and
+  file operations are split into dedicated Import and Export menus. The Help
+  panel and README now match the new layout.
 - **Silent no-ops around the clipboard now speak up.** Select-all reports what it selected; copy confirms the block count; arming paste explains the click-to-place step; a paste that places nothing (or drops blocks on collision) says so; pressing a rotate key with nothing selected shows a hint instead of doing nothing. Interactive `.dae` imports surface skipped/repaired/canonicalised counts in a toast (bundled template loads stay silent; console notes remain for auditability).
 - **The paste ghost is always visible while paste is armed.** With no hover target it previews the fallback +X placement a hoverless commit would use, instead of rendering nothing until the pointer crosses the grid.
 - **Shared paste math extracted to `utils/pasteMath.ts`** (`snapPasteDelta`, `fallbackPasteDelta`) — one source of truth for `commitPaste`, `insertBlocks`, and the paste ghost.
