@@ -47,7 +47,7 @@ Piper-draw has two interaction modes for placing blocks:
 - **Drag / Drop** — arm a placement tool in the toolbar (cube, pipe, or port) to click-place blocks, or switch to **Select** to pick existing blocks. Shift-click adds/removes from the selection, Ctrl+Shift-drag marquee-selects cubes, pipes, and ports. Hold the delete modifier to click-to-delete.
 - **Keyboard Build** — move a cursor with the arrow keys / WASD to extend from the last block. Click any cube or port to jump the cursor there. Cycle cube and pipe variants with `C` and `R`, jump between ports with `P` / `Shift+P`, undo a step with `Q`, exit with `Esc`.
 
-Use the **Iso ▾** menu in the toolbar to snap to an axis-locked orthographic view; slice stepping auto-advances through depth as you build.
+Turn on **Iso-Plane View** in the Inspect column, then choose X, Y, or Z to snap to an axis-locked orthographic view; slice stepping auto-advances through depth as you build.
 
 ### Groups
 Select two or more blocks and press `G` to bundle them into a group. Grouped blocks share a colored dashed outline and behave as a unit: clicking any member selects the whole group, and `Verify` / `ZX` automatically scope to that group's blocks. Press `G` again on a group to ungroup. `Alt+click` drills in to a single member without disturbing the rest; `Alt+marquee` is a one-shot literal-set selection. Copy/paste duplicates a group as a fresh new group with its own color, leaving the original intact. The grid toggle (previously `G`) moved to `Shift+G`.
@@ -58,9 +58,9 @@ Select two or more blocks and press `G` to bundle them into a group. Grouped blo
 - **ZX diagrams (tqec, pyzx)** — convert the diagram to a ZX-calculus graph, optionally simplify it, and extract the corresponding quantum circuit using [PyZX](https://github.com/zxcalc/pyzx). Export to `.qgraph`, `.qasm`, `.qc`, or `.qsim`.
 
 ### Files
-- **Import ▸** — load (replace) or insert next to current scene. Reads Collada (`.dae`) directly, or opens a modal for `.bgraph` (TQEC's plain-text format) that accepts either a file or pasted text.
-- **Export ▸** — save current scene as `.dae` or `.bgraph`.
-- **Browse examples…** — picker for bundled TQEC reference graphs (CNOT, CZ, memory, stability, move + rotation, three CNOTs, Steane encoding). Click `Load` to replace or `+` to insert.
+- **Import ▾** — load (replace) or insert next to the current scene. Reads Collada (`.dae`) directly, or opens a modal for `.bgraph` (TQEC's plain-text format) that accepts either a file or pasted text.
+- **Export ▾** — save as `.dae` or `.bgraph`, copy a share link, or download a screenshot.
+- **Examples** — picker for bundled TQEC reference graphs (CNOT, CZ, memory, stability, move + rotation, three CNOTs, Steane encoding). Click `Load` to replace or `+` to insert.
 
 ### Bundled examples
 The `.bgraph` files served from `gui/public/bgraph-examples/` are generated from [`tqec.gallery`](https://github.com/tqec/tqec/tree/main/src/tqec/gallery) — they originate from the TQEC project and are bundled here for convenience. Re-run the generator if TQEC is updated:

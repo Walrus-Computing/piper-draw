@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useBlockStore, type BuildStep } from "../stores/blockStore";
 import { useValidationStore } from "../stores/validationStore";
+import { useTutorialStore } from "../stores/tutorialStore";
 import { useKeybindStore, type Mode as KeybindMode, type NavStyle } from "../stores/keybindStore";
 import { CUBE_TYPES, PIPE_VARIANTS, VARIANT_AXIS_MAP, isPipeType, pipeAxisFromPos, posKey, determineCubeOptions, determineCubeOptionsWithPipeRetype, hasYCubePipeAxisConflict, PIPE_TYPE_TO_VARIANT, traversedPipeKey } from "../types";
 import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } from "../types";
@@ -473,7 +474,7 @@ export function Toolbar({
       }}
     >
       {/* Mode segmented control + Free Build + Undo/Redo */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      <div data-tutorial="build-mode" style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <span style={groupLabelStyle}>Build Mode</span>
         <ModeSegmented mode={mode} setMode={setMode} />
         <FreeBuildToggle freeBuild={freeBuild} toggleFreeBuild={toggleFreeBuild} />
@@ -591,6 +592,7 @@ export function Toolbar({
           closeMenuRef={closeExportMenuRef}
         />
         <button
+          data-tutorial="examples-button"
           onClick={() => bgraph.setExamplesOpen(true)}
           title="Browse pre-bundled TQEC example graphs"
           style={{ ...btnStyle(false), whiteSpace: "nowrap", width: "100%" }}
@@ -628,6 +630,7 @@ export function Toolbar({
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           <button
             key="pointer"
+            data-tutorial="select-tool"
             onClick={() => {
               if (mode === "build") setMode("edit");
               setArmedTool("pointer");
@@ -647,7 +650,7 @@ export function Toolbar({
       <div style={{ width: 1, background: "#ddd" }} />
 
       {/* Blocks group (Port + ZXCubes + Y) */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      <div data-tutorial="blocks-palette" style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <span style={groupLabelStyle}>Blocks</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           <button
@@ -766,7 +769,7 @@ export function Toolbar({
       <div style={{ width: 1, background: "#ddd" }} />
 
       {/* Pipes group */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      <div data-tutorial="pipes-palette" style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         <span style={groupLabelStyle}>Pipes</span>
         <div style={{ display: "flex", gap: "4px", flex: 1, alignItems: "stretch" }}>
           {PIPE_VARIANTS.map((v) => (
@@ -1259,6 +1262,9 @@ function ExportMenu({
       } else {
         await navigator.clipboard.writeText(url);
         setShareStatus("copied");
+        // Only advance the tutorial once a usable link reached the clipboard.
+        // Oversized URLs and clipboard failures keep the step available.
+        useTutorialStore.getState().recordShareLink();
       }
     } catch {
       setShareStatus("error");
@@ -1293,6 +1299,7 @@ function ExportMenu({
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
       <button
+        data-tutorial="export-menu"
         onClick={() => setOpen((v) => !v)}
         style={{ ...btnStyle(open), whiteSpace: "nowrap", width: "100%" }}
         title="Export / Share link / Download Screenshot"
@@ -1325,6 +1332,7 @@ function ExportMenu({
             bgraph={bgraph}
           />
           <button
+            data-tutorial="share-link"
             onClick={() => {
               void onShare();
             }}
@@ -1408,6 +1416,7 @@ function AnalyzeMenu() {
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
       <button
+        data-tutorial="analyze-menu"
         onClick={() => setOpen((v) => !v)}
         title={triggerTitle}
         style={triggerStyle}
@@ -1448,6 +1457,7 @@ function AnalyzeMenu() {
             {validationStatus === "loading" ? "Verifying..." : "Verify (tqec)"}
           </button>
           <button
+            data-tutorial="flows-menu-item"
             onClick={() => useBlockStore.getState().toggleFlowsPanel()}
             title="Show stabilizer flows for the current diagram (computed by the tqec package)"
             style={{
@@ -1459,6 +1469,7 @@ function AnalyzeMenu() {
             Flows (tqec)
           </button>
           <button
+            data-tutorial="zx-menu-item"
             onClick={() => useBlockStore.getState().toggleZXPanel()}
             title="Show the ZX-calculus diagram corresponding to this pipe diagram (tqec builds the graph, pyzx owns the .qgraph export and full_reduce simplification)"
             style={{

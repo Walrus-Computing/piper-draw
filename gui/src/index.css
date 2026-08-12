@@ -5,3 +5,15 @@ html, body, #root {
   height: 100vh;
   overflow: hidden;
 }
+
+/* Interactive tutorial target ring. Menu items mounted after their trigger is
+   opened are picked up by TutorialPanel's MutationObserver. */
+@keyframes tutorial-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.9); }
+  50%      { box-shadow: 0 0 0 6px rgba(74, 158, 255, 0.25); }
+}
+
+.tutorial-target {
+  animation: tutorial-pulse 1.2s ease-in-out infinite;
+  border-radius: 4px;
+}

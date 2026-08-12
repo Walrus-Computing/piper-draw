@@ -41,6 +41,8 @@ import { BuildModeHints } from "./components/BuildModeHints";
 import { EditModeHints } from "./components/EditModeHints";
 import { KeybindEditor, type KeybindEditorTab } from "./components/KeybindEditor";
 import { HelpPanel } from "./components/HelpPanel";
+import { TutorialPanel } from "./components/TutorialPanel";
+import { useTutorialStore } from "./stores/tutorialStore";
 import { useBlockStore } from "./stores/blockStore";
 import {
   useKeybindStore,
@@ -1334,9 +1336,11 @@ export default function App() {
               // ignore (e.g. private mode)
               void err;
             }
+            useTutorialStore.getState().maybeAutoStart();
           }}
         />
       )}
+      <TutorialPanel />
       <FlowsPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
       <ZXPanel controlsRef={controlsRef} toolbarRef={toolbarRef} />
       {showHints && <EditModeHints onCustomize={() => setKeybindEditorMode("edit")} />}
