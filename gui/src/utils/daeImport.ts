@@ -250,8 +250,13 @@ export function parseDaeToBlocks(xmlString: string): Map<string, Block> {
  * are distinct TQEC kinds but indistinguishable in piper-draw's visuals).
  * Piper-draw collapses this ambiguity by always picking the first valid type in
  * CUBE_TYPES order. See CLAUDE.md "Canonicalisation assumption".
+ *
+ * Exported and reused by bgraph import so DAE and bgraph paths share one rule.
+ * Returns the count of cubes whose type changed; the caller decides whether to
+ * surface a toast (bgraph does; DAE does not).
  */
-function canonicaliseImportedCubes(blocks: Map<string, Block>): void {
+export function canonicaliseImportedCubes(blocks: Map<string, Block>): number {
+  let normalizedCount = 0;
   for (const [key, block] of blocks) {
     if (isPipeType(block.type) || block.type === "Y") continue;
     // Only canonicalise when pipes actually constrain the cube to 2+ options.
@@ -265,13 +270,15 @@ function canonicaliseImportedCubes(blocks: Map<string, Block>): void {
     for (const ct of CUBE_TYPES) {
       if (result.options.includes(ct)) {
         if (ct !== block.type) {
-          console.log(`[dae import] canonicalising cube at ${key}: ${block.type} → ${ct}`);
+          console.log(`[import] canonicalising cube at ${key}: ${block.type} → ${ct}`);
           blocks.set(key, { pos: block.pos, type: ct });
+          normalizedCount += 1;
         }
         break;
       }
     }
   }
+  return normalizedCount;
 }
 
 /**

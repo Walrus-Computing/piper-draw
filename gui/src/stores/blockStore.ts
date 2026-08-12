@@ -46,6 +46,7 @@ import {
   currentPlaceableIndex,
 } from "../types";
 import { rotateBlockAroundAxis, type RotationAxis, type RotationOperation } from "../utils/blockRotation";
+import { applyCubeSeedCascade, resolveAcrossPortPipes } from "../utils/pipeAcrossPortRetype";
 import {
   newGroupId as genNewGroupId,
   selectionGroupClassification,
@@ -158,6 +159,10 @@ export type BuildStep = {
   destDetermination?: { key: string; prevUndeterminedInfo: UndeterminedCubeInfo };
   /** Cubes inserted by syncPortsAndPromote because the new pipe pushed a port to ≥2 attachments. */
   autoPromoted?: Array<{ key: string; block: Block; wasUserPort: boolean }>;
+  /** Issue #307: existing pipes retyped to reconcile across-port basis with the newly placed pipe. */
+  acrossPortPipeRetypes?: Array<{ key: string; oldBlock: Block; newBlock: Block }>;
+  /** Issue #307: cubes retyped via cascade because an across-port pipe retype invalidated them. */
+  acrossPortCubeRetypes?: Array<{ key: string; oldBlock: Block; newBlock: Block }>;
 };
 
 type UndoCommand =
@@ -218,6 +223,8 @@ type UndoCommand =
       oldPlacedType: CubeType | "Y" | null; newPlacedType: CubeType | "Y" | null;
       oldPipes?: Array<{ key: string; oldType: PipeType; newType: PipeType }>;
       oldUndetermined?: UndeterminedCubeInfo; newUndetermined?: UndeterminedCubeInfo;
+      acrossPortPipeRetypes?: Array<{ key: string; oldBlock: Block; newBlock: Block }>;
+      acrossPortCubeRetypes?: Array<{ key: string; oldBlock: Block; newBlock: Block }>;
       undeterminedNeighbors?: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> }
   | { kind: "replace"; key: string; oldBlock: Block; newBlock: Block }
   | { kind: "add-port"; key: string }
@@ -231,6 +238,10 @@ type UndoCommand =
       oldBlock: Block | null; newBlock: Block | null;
       oldPortMarker: boolean; newPortMarker: boolean;
       oldPipes?: Array<{ key: string; oldType: PipeType; newType: PipeType }>;
+      /** Issue #307: pipe retypes from across-port reconciliation cascade. */
+      acrossPortPipeRetypes?: Array<{ key: string; oldBlock: Block; newBlock: Block }>;
+      /** Issue #307: cube retypes from far-cube cascade triggered by across-port pipe retypes. */
+      acrossPortCubeRetypes?: Array<{ key: string; oldBlock: Block; newBlock: Block }>;
       prevSelectedKeys: string[]; nextSelectedKeys: string[];
       prevSelectedPortPositions: string[]; nextSelectedPortPositions: string[];
       undeterminedNeighbors?: Array<{ key: string; oldInfo?: UndeterminedCubeInfo; newInfo?: UndeterminedCubeInfo }> };
@@ -1185,6 +1196,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       // The wider gate already vetted feasibility; computePipeRetypes returns the actual
       // updates (preserving Hadamard) or null on far-end conflict.
       const pipeUpdates: Array<{ key: string; oldType: PipeType; newType: PipeType }> = [];
+      const acrossPortPipeRetypes: Array<{ key: string; oldBlock: Block; newBlock: Block }> = [];
+      const acrossPortCubeRetypes: Array<{ key: string; oldBlock: Block; newBlock: Block }> = [];
       if (newBlock && nextOpt.kind === "cube" && nextOpt.type !== "Y" && !s.freeBuild) {
         const retypes = computePipeRetypes(blocks, pos, nextOpt.type as CubeType);
         if (retypes === null) {
@@ -1201,6 +1214,72 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, pu.key, pipeBlock));
           ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, pu.key, { pos: pipeBlock.pos, type: pu.newType }));
           pipeUpdates.push(pu);
+        }
+
+        // Issue #307: for each pipe just retyped, reconcile its far-port endpoint.
+        // The cube-side endpoint is naturally skipped (occupied). Helper failures
+        // are atomically rolled back (mirrors the defense-in-depth bail above).
+        for (const pu of retypes) {
+          const pipeBlock = blocks.get(pu.key);
+          if (!pipeBlock) continue;
+          const ovr = new Map<string, Block | undefined>();
+          const portResult = resolveAcrossPortPipes({
+            pipePos: pipeBlock.pos,
+            pipeType: pipeBlock.type as PipeType,
+            blocks,
+            overrides: ovr,
+          });
+          // Atomic rollback: reverts everything applied so far in this cycle —
+          // any across-port retypes accumulated from prior pu iterations, plus
+          // pipe retypes from computePipeRetypes, plus the cube placement.
+          const rollback = () => {
+            for (let i = acrossPortCubeRetypes.length - 1; i >= 0; i--) {
+              const back = acrossPortCubeRetypes[i];
+              const cur = blocks.get(back.key);
+              if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, back.key, cur));
+              ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, back.key, back.oldBlock));
+            }
+            for (let i = acrossPortPipeRetypes.length - 1; i >= 0; i--) {
+              const back = acrossPortPipeRetypes[i];
+              const cur = blocks.get(back.key);
+              if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, back.key, cur));
+              ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, back.key, back.oldBlock));
+            }
+            for (let i = pipeUpdates.length - 1; i >= 0; i--) {
+              const back = pipeUpdates[i];
+              const cur = blocks.get(back.key);
+              if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, back.key, cur));
+              ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, back.key, { ...cur!, type: back.oldType }));
+            }
+            doRemove(blocks, s.spatialIndex, hiddenFaces, key, newBlock);
+            if (existingBlock) doAdd(blocks, s.spatialIndex, hiddenFaces, key, existingBlock);
+          };
+
+          if (!portResult.ok) {
+            rollback();
+            return s;
+          }
+          for (const r of portResult.pipeRetypes) {
+            const cur = blocks.get(r.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, r.key, cur));
+            ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, r.key, r.newBlock));
+            acrossPortPipeRetypes.push(r);
+          }
+          if (portResult.extraCubeSeeds.length > 0) {
+            const cascadeReplaces: Array<{ key: string; oldBlock: Block; newBlock: Block }> = [];
+            const cascade = applyCubeSeedCascade(portResult.extraCubeSeeds, blocks, ovr, cascadeReplaces, pu.key);
+            if (!cascade.ok) {
+              rollback();
+              return s;
+            }
+            for (const r of cascadeReplaces) {
+              const cur = blocks.get(r.key);
+              if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, r.key, cur));
+              ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, r.key, r.newBlock));
+              if (isPipeType(r.newBlock.type)) acrossPortPipeRetypes.push(r);
+              else acrossPortCubeRetypes.push(r);
+            }
+          }
         }
       }
 
@@ -1265,6 +1344,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         oldBlock: existingBlock, newBlock,
         oldPortMarker, newPortMarker,
         oldPipes: pipeUpdates.length > 0 ? pipeUpdates : undefined,
+        acrossPortPipeRetypes: acrossPortPipeRetypes.length > 0 ? acrossPortPipeRetypes : undefined,
+        acrossPortCubeRetypes: acrossPortCubeRetypes.length > 0 ? acrossPortCubeRetypes : undefined,
         prevSelectedKeys: [...s.selectedKeys],
         nextSelectedKeys: [...newSelectedKeys],
         prevSelectedPortPositions: [...s.selectedPortPositions],
@@ -1807,6 +1888,21 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
             options: [...step.destDetermination.prevUndeterminedInfo.options],
           });
         }
+        // Roll back across-port retypes (issue #307) before removing the pipe.
+        if (step.acrossPortCubeRetypes) {
+          for (const r of step.acrossPortCubeRetypes) {
+            const cur = blocks.get(r.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, r.key, cur));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.key, r.oldBlock));
+          }
+        }
+        if (step.acrossPortPipeRetypes) {
+          for (const r of step.acrossPortPipeRetypes) {
+            const cur = blocks.get(r.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, r.key, cur));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.key, r.oldBlock));
+          }
+        }
         // Remove pipe
         if (step.pipe) {
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, step.pipe.key, step.pipe.block));
@@ -1900,6 +1996,22 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
         const newUndetermined = new Map(state.undeterminedCubes);
 
+        // Roll back across-port retypes (issue #307) before reverting the cube.
+        if (cmd.acrossPortCubeRetypes) {
+          for (const r of cmd.acrossPortCubeRetypes) {
+            const cur = blocks.get(r.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, r.key, cur));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.key, r.oldBlock));
+          }
+        }
+        if (cmd.acrossPortPipeRetypes) {
+          for (const r of cmd.acrossPortPipeRetypes) {
+            const cur = blocks.get(r.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, r.key, cur));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.key, r.oldBlock));
+          }
+        }
+
         // Remove current cube
         const cubeBlock = blocks.get(cmd.cubeKey);
         if (cubeBlock) {
@@ -1949,6 +2061,21 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       if (cmd.kind === "edit-type-cycle") {
         let { blocks, hiddenFaces } = { blocks: state.blocks, hiddenFaces: state.hiddenFaces };
+        // Revert across-port cube retypes first (cascade output rolls back before its inputs).
+        if (cmd.acrossPortCubeRetypes) {
+          for (const r of cmd.acrossPortCubeRetypes) {
+            const cur = blocks.get(r.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, r.key, cur));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.key, r.oldBlock));
+          }
+        }
+        if (cmd.acrossPortPipeRetypes) {
+          for (const r of cmd.acrossPortPipeRetypes) {
+            const cur = blocks.get(r.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, r.key, cur));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.key, r.oldBlock));
+          }
+        }
         if (cmd.newBlock) {
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, cmd.key, cmd.newBlock));
         }
@@ -2272,6 +2399,22 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
             ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, dtc.key, { ...curDest, type: dtc.newType }));
           }
         }
+        // Re-apply across-port retypes (issue #307) — pipes first, then cubes,
+        // mirroring the original buildMove order.
+        if (step.acrossPortPipeRetypes) {
+          for (const r of step.acrossPortPipeRetypes) {
+            const cur = blocks.get(r.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, r.key, cur));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.key, r.newBlock));
+          }
+        }
+        if (step.acrossPortCubeRetypes) {
+          for (const r of step.acrossPortCubeRetypes) {
+            const cur = blocks.get(r.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, r.key, cur));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.key, r.newBlock));
+          }
+        }
         // Re-apply dest determination (existing dest became determined)
         if (step.destDetermination) {
           newUndetermined.delete(step.destDetermination.key);
@@ -2359,6 +2502,21 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
             }
           }
         }
+        // Re-apply across-port retypes (issue #307)
+        if (cmd.acrossPortPipeRetypes) {
+          for (const r of cmd.acrossPortPipeRetypes) {
+            const cur = blocks.get(r.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, r.key, cur));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.key, r.newBlock));
+          }
+        }
+        if (cmd.acrossPortCubeRetypes) {
+          for (const r of cmd.acrossPortCubeRetypes) {
+            const cur = blocks.get(r.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, r.key, cur));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.key, r.newBlock));
+          }
+        }
         // Restore undetermined state
         if (cmd.newUndetermined) newUndetermined.set(cmd.cubeKey, cmd.newUndetermined);
         else newUndetermined.delete(cmd.cubeKey);
@@ -2400,6 +2558,22 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
               ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, pu.key, pb));
               ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, pu.key, { ...pb, type: pu.newType }));
             }
+          }
+        }
+        // Re-apply across-port retypes (issue #307) — pipes first, then cubes,
+        // mirroring the original cycle order.
+        if (cmd.acrossPortPipeRetypes) {
+          for (const r of cmd.acrossPortPipeRetypes) {
+            const cur = blocks.get(r.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, r.key, cur));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.key, r.newBlock));
+          }
+        }
+        if (cmd.acrossPortCubeRetypes) {
+          for (const r of cmd.acrossPortCubeRetypes) {
+            const cur = blocks.get(r.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, r.key, cur));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.key, r.newBlock));
           }
         }
         const newPorts = new Set(state.portPositions);
@@ -3509,6 +3683,35 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
       }
     }
 
+    // Issue #307: reconcile pipe types across a shared port. The source-side
+    // endpoint always has the cursor cube (skipped inside the helper), so this
+    // only fires when the dest side is a port that another pipe shares.
+    let acrossPortPipeRetypes: Array<{ key: string; oldBlock: Block; newBlock: Block }> = [];
+    const acrossPortCubeRetypes: Array<{ key: string; oldBlock: Block; newBlock: Block }> = [];
+    if (!state.freeBuild) {
+      const ovr = new Map<string, Block | undefined>();
+      ovr.set(pipeKey, { pos: pipePos, type: pipeType });
+      if (sourceDetermination || isEmptyOrigin || sourceRetype) {
+        ovr.set(srcKey, { pos: cursor, type: srcType });
+      }
+      if (destTypeChange) {
+        const ed = state.blocks.get(destKey);
+        if (ed) ovr.set(destKey, { ...ed, type: destTypeChange.newType });
+      }
+      const portResult = resolveAcrossPortPipes({ pipePos, pipeType, blocks: state.blocks, overrides: ovr });
+      if (!portResult.ok) return reject(portResult.reason, "color");
+      acrossPortPipeRetypes = portResult.pipeRetypes;
+      if (portResult.extraCubeSeeds.length > 0) {
+        const cascadeReplaces: Array<{ key: string; oldBlock: Block; newBlock: Block }> = [];
+        const cascade = applyCubeSeedCascade(portResult.extraCubeSeeds, state.blocks, ovr, cascadeReplaces, pipeKey);
+        if (!cascade.ok) return reject(cascade.reason, "color");
+        for (const r of cascadeReplaces) {
+          if (isPipeType(r.newBlock.type)) acrossPortPipeRetypes.push(r);
+          else acrossPortCubeRetypes.push(r);
+        }
+      }
+    }
+
     // All validation passed — apply mutations
     set((s) => {
       let { blocks, hiddenFaces } = { blocks: s.blocks, hiddenFaces: s.hiddenFaces };
@@ -3548,6 +3751,18 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, destTypeChange.key, oldDest));
         const newDest: Block = { pos: oldDest.pos, type: destTypeChange.newType };
         ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, destTypeChange.key, newDest));
+      }
+
+      // Apply across-port pipe + cube retypes (issue #307).
+      for (const r of acrossPortPipeRetypes) {
+        const cur = blocks.get(r.key);
+        if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, r.key, cur));
+        ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, r.key, r.newBlock));
+      }
+      for (const r of acrossPortCubeRetypes) {
+        const cur = blocks.get(r.key);
+        if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, r.key, cur));
+        ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, r.key, r.newBlock));
       }
 
       // Clean up undetermined state for existing destination.
@@ -3596,6 +3811,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         destTypeChange,
         destDetermination,
         autoPromoted,
+        acrossPortPipeRetypes: acrossPortPipeRetypes.length > 0 ? acrossPortPipeRetypes : undefined,
+        acrossPortCubeRetypes: acrossPortCubeRetypes.length > 0 ? acrossPortCubeRetypes : undefined,
       };
 
       return {
@@ -3664,6 +3881,23 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           ...step.destDetermination.prevUndeterminedInfo,
           options: [...step.destDetermination.prevUndeterminedInfo.options],
         });
+      }
+
+      // Roll back across-port retypes (issue #307) BEFORE removing the pipe so
+      // doAdd/doRemove see consistent neighborhood state.
+      if (step.acrossPortCubeRetypes) {
+        for (const r of step.acrossPortCubeRetypes) {
+          const cur = blocks.get(r.key);
+          if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, r.key, cur));
+          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, r.key, r.oldBlock));
+        }
+      }
+      if (step.acrossPortPipeRetypes) {
+        for (const r of step.acrossPortPipeRetypes) {
+          const cur = blocks.get(r.key);
+          if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, s.spatialIndex, hiddenFaces, r.key, cur));
+          ({ blocks, hiddenFaces } = doAdd(blocks, s.spatialIndex, hiddenFaces, r.key, r.oldBlock));
+        }
       }
 
       // Remove pipe
@@ -3842,6 +4076,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
 
       // Update adjacent pipes to match new cube type (skip for Y or port — neither changes pipes)
       // In free build mode, skip pipe retyping entirely — just change the cube
+      const acrossPortPipeRetypes: Array<{ key: string; oldBlock: Block; newBlock: Block }> = [];
+      const acrossPortCubeRetypes: Array<{ key: string; oldBlock: Block; newBlock: Block }> = [];
       if (newBlock && placeType !== "Y" && !state.freeBuild) {
         const retypes = computePipeRetypes(blocks, cursor, placeType as CubeType);
         if (retypes === null) {
@@ -3858,6 +4094,69 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
           ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, pu.key, pipeBlock));
           ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, pu.key, { ...pipeBlock, type: pu.newType }));
           pipeUpdates.push(pu);
+        }
+
+        // Issue #307: reconcile far-port endpoints of just-retyped pipes.
+        for (const pu of retypes) {
+          const pipeBlock = blocks.get(pu.key);
+          if (!pipeBlock) continue;
+          const ovr = new Map<string, Block | undefined>();
+          const portResult = resolveAcrossPortPipes({
+            pipePos: pipeBlock.pos,
+            pipeType: pipeBlock.type as PipeType,
+            blocks,
+            overrides: ovr,
+          });
+          // Atomic rollback: reverts all across-port retypes accumulated so far,
+          // pipe retypes from computePipeRetypes, and the cube placement.
+          const rollback = () => {
+            for (let i = acrossPortCubeRetypes.length - 1; i >= 0; i--) {
+              const back = acrossPortCubeRetypes[i];
+              const cur = blocks.get(back.key);
+              if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, back.key, cur));
+              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, back.key, back.oldBlock));
+            }
+            for (let i = acrossPortPipeRetypes.length - 1; i >= 0; i--) {
+              const back = acrossPortPipeRetypes[i];
+              const cur = blocks.get(back.key);
+              if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, back.key, cur));
+              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, back.key, back.oldBlock));
+            }
+            for (let i = pipeUpdates.length - 1; i >= 0; i--) {
+              const back = pipeUpdates[i];
+              const cur = blocks.get(back.key);
+              if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, back.key, cur));
+              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, back.key, { ...cur!, type: back.oldType }));
+            }
+            doRemove(blocks, state.spatialIndex, hiddenFaces, cursorKey, newBlock);
+            if (existingBlock) doAdd(blocks, state.spatialIndex, hiddenFaces, cursorKey, existingBlock);
+          };
+
+          if (!portResult.ok) {
+            rollback();
+            return state;
+          }
+          for (const r of portResult.pipeRetypes) {
+            const cur = blocks.get(r.key);
+            if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, r.key, cur));
+            ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.key, r.newBlock));
+            acrossPortPipeRetypes.push(r);
+          }
+          if (portResult.extraCubeSeeds.length > 0) {
+            const cascadeReplaces: Array<{ key: string; oldBlock: Block; newBlock: Block }> = [];
+            const cascade = applyCubeSeedCascade(portResult.extraCubeSeeds, blocks, ovr, cascadeReplaces, pu.key);
+            if (!cascade.ok) {
+              rollback();
+              return state;
+            }
+            for (const r of cascadeReplaces) {
+              const cur = blocks.get(r.key);
+              if (cur) ({ blocks, hiddenFaces } = doRemove(blocks, state.spatialIndex, hiddenFaces, r.key, cur));
+              ({ blocks, hiddenFaces } = doAdd(blocks, state.spatialIndex, hiddenFaces, r.key, r.newBlock));
+              if (isPipeType(r.newBlock.type)) acrossPortPipeRetypes.push(r);
+              else acrossPortCubeRetypes.push(r);
+            }
+          }
         }
       }
 
@@ -3913,6 +4212,8 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         oldPlacedType: existingType, newPlacedType: placeType,
         oldPipes: pipeUpdates.length > 0 ? pipeUpdates : undefined,
         oldUndetermined, newUndetermined: undefined,
+        acrossPortPipeRetypes: acrossPortPipeRetypes.length > 0 ? acrossPortPipeRetypes : undefined,
+        acrossPortCubeRetypes: acrossPortCubeRetypes.length > 0 ? acrossPortCubeRetypes : undefined,
         undeterminedNeighbors: undeterminedNeighbors.length > 0 ? undeterminedNeighbors : undefined,
       };
       return {
@@ -4192,9 +4493,15 @@ export const useBlockStore = create<BlockStore>((set, get) => ({
         return { portMeta: next };
       }
 
-      // Reject duplicates (TQEC requires unique port labels).
+      // Reject duplicates (TQEC requires unique port labels). The rejection is
+      // loud — emit an error toast so the user sees why their edit didn't stick.
+      // Bgraph export (D8=C) assumes scene state never carries dup labels; this
+      // is the data-layer invariant that backs that assumption.
       for (const [k, m] of state.portMeta) {
-        if (k !== key && m.label === trimmed) return state;
+        if (k !== key && m.label === trimmed) {
+          toastBus.error.emit(`Duplicate port label '${trimmed}'; pick a unique label.`);
+          return state;
+        }
       }
       next.set(key, { ...existing, label: trimmed });
       return { portMeta: next };

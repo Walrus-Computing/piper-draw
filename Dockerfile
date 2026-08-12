@@ -21,7 +21,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project --no-dev
 
-COPY server.py ./
+COPY server.py bgraph_endpoints.py ./
 COPY --from=frontend /app/gui/dist ./gui/dist
 
 ENV PATH="/app/.venv/bin:$PATH"

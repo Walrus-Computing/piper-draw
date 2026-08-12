@@ -6,6 +6,17 @@ updates:
       interval: "weekly"
     target-branch: "dev"
     open-pull-requests-limit: 5
+    groups:
+      npm-production:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      npm-development:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -13,6 +24,11 @@ updates:
       interval: "weekly"
     target-branch: "dev"
     open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "pip"
     directory: "/"
@@ -20,3 +36,14 @@ updates:
       interval: "weekly"
     target-branch: "dev"
     open-pull-requests-limit: 5
+    groups:
+      pip-production:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      pip-development:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"

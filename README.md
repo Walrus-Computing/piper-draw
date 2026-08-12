@@ -58,11 +58,12 @@ Select two or more blocks and press `G` to bundle them into a group. Grouped blo
 - **ZX diagrams (tqec, pyzx)** — convert the diagram to a ZX-calculus graph, optionally simplify it, and extract the corresponding quantum circuit using [PyZX](https://github.com/zxcalc/pyzx). Export to `.qgraph`, `.qasm`, `.qc`, or `.qsim`.
 
 ### Files
-- **Import** / **Export** round-trip through Collada (`.dae`) files.
-- **Templates** — load a bundled example diagram (CNOT, CZ, move + rotation, three CNOTs, Steane encoding) as a starting point, or insert one into the current scene.
+- **Import ▸** — load (replace) or insert next to current scene. Reads Collada (`.dae`) directly, or opens a modal for `.bgraph` (TQEC's plain-text format) that accepts either a file or pasted text.
+- **Export ▸** — save current scene as `.dae` or `.bgraph`.
+- **Browse examples…** — picker for bundled TQEC reference graphs (CNOT, CZ, memory, stability, move + rotation, three CNOTs, Steane encoding). Click `Load` to replace or `+` to insert.
 
-### Bundled templates
-The `.dae` files served from `gui/public/templates/` are generated from [`tqec.gallery`](https://github.com/tqec/tqec/tree/main/src/tqec/gallery) — they originate from the TQEC project and are bundled here for convenience. Re-run the generator if TQEC is updated:
+### Bundled examples
+The `.bgraph` files served from `gui/public/bgraph-examples/` are generated from [`tqec.gallery`](https://github.com/tqec/tqec/tree/main/src/tqec/gallery) — they originate from the TQEC project and are bundled here for convenience. Re-run the generator if TQEC is updated:
 ```sh
-uv run python scripts/generate_templates.py
+uv run python scripts/generate_bgraph_examples.py
 ```

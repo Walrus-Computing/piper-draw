@@ -2,7 +2,7 @@
   "name": "piper-draw-gui",
   "private": true,
   "license": "Apache-2.0",
-  "version": "0.2.1.4",
+  "version": "0.2.4.0",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -22,29 +22,29 @@
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.1",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4",
+    "react-dom": "^19.2.6",
     "three": "^0.184.0",
     "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^25.6.0",
-    "@types/react": "^19.2.14",
+    "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
     "@react-three/test-renderer": "^9.1.0",
-    "@types/three": "^0.184.0",
-    "@vitejs/plugin-react": "^6.0.1",
+    "@types/three": "^0.184.1",
+    "@vitejs/plugin-react": "^6.0.2",
     "concurrently": "^9.1.2",
-    "eslint": "^10.3.0",
+    "eslint": "^10.4.0",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
-    "globals": "^17.4.0",
+    "globals": "^17.6.0",
     "jsdom": "^29.1.1",
     "rollup-plugin-license": "^3.7.1",
     "slop-scan": "^0.3.0",
     "typescript": "~6.0.2",
-    "typescript-eslint": "^8.59.2",
-    "vite": "^8.0.10",
+    "typescript-eslint": "^8.59.4",
+    "vite": "^8.0.13",
     "vitest": "^4.1.5"
   }
 }
