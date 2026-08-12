@@ -28,7 +28,7 @@ export function bgraphResponseToBlocks(resp: BgraphImportResponse): BgraphImport
     const pos = { x: b.pos[0], y: b.pos[1], z: b.pos[2] };
     blocks.set(posKey(pos), { pos, type: b.type as BlockType });
   }
-  const normalizedCount = canonicaliseImportedCubes(blocks);
+  const { canonicalised: normalizedCount } = canonicaliseImportedCubes(blocks);
   const portLabels = resp.port_labels.map((p: BgraphPortLabelOutput) => ({
     pos: { x: p.pos[0], y: p.pos[1], z: p.pos[2] },
     label: p.label,

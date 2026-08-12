@@ -76,13 +76,22 @@ describe("<PasteGhost>", () => {
     expect(r.scene.children).toHaveLength(0);
   });
 
-  it("renders nothing without a hovered grid pos", async () => {
+  it("renders the fallback +X preview without a hovered grid pos", async () => {
+    // No hover → the ghost previews where a hoverless commit would land
+    // (fallbackPasteDelta: one block period past the scene's +X extent), so
+    // arming paste is never invisible.
     setPaste({
       clipboard: new Map([["0,0,0", mk({ x: 0, y: 0, z: 0 })]]),
       hoveredGridPos: null,
+      blocks: new Map([["0,0,0", mk({ x: 0, y: 0, z: 0 })]]),
     });
     const r = await ReactThreeTestRenderer.create(<PasteGhost />);
-    expect(r.scene.children).toHaveLength(0);
+    const meshes = r.scene.findAllByType("Mesh");
+    expect(meshes).toHaveLength(1);
+    // Existing scene max x = 0 → delta.x = ceil((0 + 3 - 0) / 3) * 3 = 3.
+    // tqecToThree maps TQEC x → three x directly for cubes.
+    const group = meshes[0].parent!;
+    expect((group.instance as THREE.Object3D).position.x).toBeGreaterThan(0);
   });
 
   it("renders one paste-ghost per clipboard entry at z=0 (no shadows)", async () => {
