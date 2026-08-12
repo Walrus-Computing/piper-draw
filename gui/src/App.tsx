@@ -306,6 +306,25 @@ function CheckerboardGrid() {
  * Camera + controls that swap based on viewMode. PerspectiveCamera for free-orbit
  * 3D mode; OrthographicCamera for axis-locked elevation views with rotation disabled.
  */
+// Stable object identities for OrbitControls' `mouseButtons`. These MUST be
+// module-level constants, not inline literals: r3f re-applies any prop whose
+// identity changed on re-render, so a fresh `{...}` literal would re-set
+// `controls.mouseButtons` on every render — clobbering the nav-style buttons
+// that NavControlsModifier sets imperatively (issue #345: toggling "View in 3D"
+// re-rendered ViewportCamera and silently reset perspective nav to drag-to-pan).
+// The persp seed is intentionally the "pan" default; NavControlsModifier owns
+// the real per-navStyle assignment from mount onward.
+const PERSP_MOUSE_BUTTONS = {
+  LEFT: THREE.MOUSE.PAN,
+  MIDDLE: THREE.MOUSE.PAN,
+  RIGHT: THREE.MOUSE.PAN,
+};
+const ISO_MOUSE_BUTTONS = {
+  LEFT: THREE.MOUSE.PAN,
+  MIDDLE: THREE.MOUSE.DOLLY,
+  RIGHT: -1 as THREE.MOUSE,
+};
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function ViewportCamera({ controlsRef }: { controlsRef: React.RefObject<any> }) {
   const viewMode = useBlockStore((s) => s.viewMode);
@@ -327,7 +346,7 @@ function ViewportCamera({ controlsRef }: { controlsRef: React.RefObject<any> }) 
           zoomToCursor
           maxDistance={50000}
           screenSpacePanning={false}
-          mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN }}
+          mouseButtons={PERSP_MOUSE_BUTTONS}
         />
       </>
     );
@@ -397,7 +416,7 @@ function IsoViewport({
         maxZoom={500}
         minZoom={2}
         screenSpacePanning
-        mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: -1 as THREE.MOUSE }}
+        mouseButtons={ISO_MOUSE_BUTTONS}
       />
     </>
   );
