@@ -10,10 +10,18 @@
 import { useBlockStore } from "../stores/blockStore";
 import { toastBus } from "../utils/toastBus";
 import { useFileDropHandler } from "../hooks/useFileDropHandler";
-import { parseDaeToBlocks } from "../utils/daeImport";
+import { daeImportSummaryMessage, parseDaeToBlocks } from "../utils/daeImport";
 import { importBgraph } from "../utils/bgraphApi";
 import { bgraphResponseToBlocks } from "../utils/bgraphImportToBlocks";
 import { BgraphApiError } from "../types/bgraph";
+
+function parseDroppedDae(text: string) {
+  let summaryMessage: string | null = null;
+  const blocks = parseDaeToBlocks(text, (summary) => {
+    summaryMessage = daeImportSummaryMessage(summary);
+  });
+  return { blocks, summaryMessage };
+}
 
 export function FileDropOverlay() {
   const loadBlocks = useBlockStore((s) => s.loadBlocks);
@@ -41,9 +49,10 @@ export function FileDropOverlay() {
     },
     onDae: (text, filename) => {
       try {
-        const blocks = parseDaeToBlocks(text);
+        const { blocks, summaryMessage } = parseDroppedDae(text);
         loadBlocks(blocks);
         toastBus.info.emit(`Loaded ${filename} (${blocks.size} blocks).`);
+        if (summaryMessage) toastBus.info.emit(summaryMessage);
       } catch (e) {
         toastBus.error.emit(
           `Couldn't import DAE: ${e instanceof Error ? e.message : String(e)}`,

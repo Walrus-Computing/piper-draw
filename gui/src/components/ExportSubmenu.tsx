@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
-// ExportSubmenu — side submenu opened from the File ▾ "Export ▸" button.
-// Holds the .dae and .bgraph export buttons plus the dev-only round-trip
-// verifier (tree-shaken from production builds).
+// ExportSubmenu — the .dae and .bgraph export buttons plus the dev-only
+// round-trip verifier (tree-shaken from production builds). Rendered inline
+// as list items directly inside the "Export ▾" toolbar dropdown.
 // ---------------------------------------------------------------------------
 
 import { useBlockStore } from "../stores/blockStore";
@@ -17,23 +17,6 @@ interface Props {
   bgraph: BgraphActions;
 }
 
-const SUBMENU_STYLE: React.CSSProperties = {
-  position: "absolute",
-  top: 0,
-  left: "100%",
-  marginLeft: 4,
-  background: "#fff",
-  border: "1px solid #ccc",
-  borderRadius: 4,
-  boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-  padding: 4,
-  minWidth: 180,
-  zIndex: 1001,
-  display: "flex",
-  flexDirection: "column",
-  gap: 2,
-};
-
 export function ExportSubmenu({
   itemStyle,
   itemStyleDisabled,
@@ -42,7 +25,7 @@ export function ExportSubmenu({
   bgraph,
 }: Props) {
   return (
-    <div style={SUBMENU_STYLE}>
+    <>
       <button
         style={blocksEmpty ? itemStyleDisabled : itemStyle}
         disabled={blocksEmpty}
@@ -63,6 +46,6 @@ export function ExportSubmenu({
         Export .bgraph
       </button>
       <RoundTripVerifyButton itemStyle={itemStyle} onClick={onItemClick} />
-    </div>
+    </>
   );
 }

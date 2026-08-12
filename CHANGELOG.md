@@ -6,6 +6,24 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+### Added
+- **Interactive tutorial for the reorganized toolbar.** The hands-on tour now
+  guides users through Build Mode, Analyze, Examples, stabilizer flows, ZX,
+  and sharing from the separate Export menu. Steps advance from real scene
+  actions, pulse the current controls, and can be restarted from Help (?).
+
+### Fixed
+- **Copy → paste of a selection whose edge is a pipe now works.** `copySelection` normalized clipboard positions by the raw selection minimum; when the selection's outermost block on an axis was a pipe (coordinate ≡ 1 mod 3), the whole clipboard shifted off the block lattice and paste could never place a single block — silently. The normalization origin is now snapped down to the 3-unit grid period. This is what made select-all → copy → paste of the imported 35-bit adder place nothing.
+- **`.dae` import now repairs cubes whose declared type conflicts with their attached pipes.** Some exporters (e.g. ftdp) use a different junction-cube convention; the adder scene contained 100 such cubes, which made every whole-scene rotation/flip abort with "Color rules between adjacent blocks would break". Repaired cubes take the pipe-determined type (or the canonical-first valid option), with a per-cube console note and a summary toast.
+- **Cmd/Ctrl+A now selects all from keyboard-build mode too** (it previously fell through to the browser's own select-all there), switching to edit mode first.
+- **Rotating a large selection no longer freezes the tab.** The rotation commit cloned the full block map once per rotated block (quadratic); it now clones once and recomputes affected hidden faces after all moves. Rotating the full 9,941-block adder: ~6.4s → ~0.3s.
+- **Select-all highlights now cover the whole selection.** Selection highlights were capped at 200 meshes (2% of a large imported scene, clustered in one corner — easy to read as "nothing happened"). Selections above 200 blocks now render as one instanced highlight mesh per block type, covering every selected block.
+
+### Changed
+- **Silent no-ops around the clipboard now speak up.** Select-all reports what it selected; copy confirms the block count; arming paste explains the click-to-place step; a paste that places nothing (or drops blocks on collision) says so; pressing a rotate key with nothing selected shows a hint instead of doing nothing. Interactive `.dae` imports surface skipped/repaired/canonicalised counts in a toast (bundled template loads stay silent; console notes remain for auditability).
+- **The paste ghost is always visible while paste is armed.** With no hover target it previews the fallback +X placement a hoverless commit would use, instead of rendering nothing until the pointer crosses the grid.
+- **Shared paste math extracted to `utils/pasteMath.ts`** (`snapPasteDelta`, `fallbackPasteDelta`) — one source of truth for `commitPaste`, `insertBlocks`, and the paste ghost.
+
 ## [0.2.4.0] - 2026-07-03
 
 ### Fixed

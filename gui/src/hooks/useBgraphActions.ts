@@ -1,8 +1,9 @@
 // ---------------------------------------------------------------------------
-// useBgraphActions — shared handlers + dialog state for the Import/Export
-// submenus. Lifted to a hook so Toolbar.tsx can render the bgraph-related
-// menu items in separate places while still sharing one import modal,
-// one examples panel, and one set of handlers.
+// useBgraphActions — shared handlers + dialog state for the Import and Export
+// menus. Lifted to a hook so Toolbar.tsx can render the bgraph-related items in
+// separate places (the Import menu, the Export menu, and the standalone
+// "Examples" button) while still sharing one import modal, one examples panel,
+// and one set of handlers.
 // ---------------------------------------------------------------------------
 
 import { useState } from "react";
