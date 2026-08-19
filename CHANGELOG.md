@@ -6,6 +6,7 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+<<<<<<< HEAD
 ## [0.3.0.0] - 2026-08-12
 
 ### Added
@@ -39,6 +40,23 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
   navigation back to drag-to-pan — even though the Settings menu still showed
   your chosen style (e.g. "Drag to orbit"). Your navigation-style preference
   now survives flow visualization and other re-renders.
+=======
+## [0.3.0.0] - 2026-07-03
+
+### Added
+- **Export HTML**: the I/O column's `Export ▾` menu gains an **Export HTML**
+  item that generates an embeddable, interactive `<iframe>` snippet of the
+  current scene to paste into your own webpage. A popup shows a live preview
+  with a block-opacity slider that updates the preview in real time, then copies
+  the snippet to your clipboard. The embed loads three.js from a CDN and keeps
+<<<<<<< HEAD
+  the diagram interactive (drag to rotate, scroll to zoom).
+>>>>>>> 2ec714a (Export HTML snippet option)
+=======
+  the diagram interactive (drag to rotate, scroll to zoom). Correlation surfaces
+  are included when they are being shown in 3D at export time (Analyze ▸ Flows ▸
+  View in 3D).
+>>>>>>> 84f7aca (Bake correlation surfaces into snippet)
 
 ## [0.2.3.1] - 2026-05-11
 

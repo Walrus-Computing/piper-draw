@@ -8,6 +8,7 @@
 
 import { BgraphImportModal } from "./PasteBgraphModal";
 import { BgraphGalleryPanel } from "./BgraphGalleryPanel";
+import { ExportHtmlModal } from "./ExportHtmlModal";
 import type { BgraphActions } from "../hooks/useBgraphActions";
 
 export function BgraphDialogs({ actions }: { actions: BgraphActions }) {
@@ -33,6 +34,7 @@ export function BgraphDialogs({ actions }: { actions: BgraphActions }) {
         onClose={() => setExamplesOpen(false)}
         onLoad={loadExample}
       />
+      <ExportHtmlModal />
     </>
   );
 }
