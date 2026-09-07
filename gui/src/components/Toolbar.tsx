@@ -14,6 +14,7 @@ import {
   encodeSnapshotToHashParam,
   isCompressionStreamSupported,
 } from "../utils/sceneShare";
+import { track } from "../utils/analytics";
 import { captureSnapshot } from "../utils/sceneSnapshot";
 import { evalCoordExpr } from "../utils/parseCoordExpr";
 import { usePreviewImages } from "./PreviewRenderer";
@@ -1265,6 +1266,7 @@ function ExportMenu({
         // Only advance the tutorial once a usable link reached the clipboard.
         // Oversized URLs and clipboard failures keep the step available.
         useTutorialStore.getState().recordShareLink();
+        track("share-link-created");
       }
     } catch {
       setShareStatus("error");
