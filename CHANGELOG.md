@@ -6,6 +6,16 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+### Added
+- **Export HTML**: the I/O column's `Export ▾` menu gains an **Export HTML**
+  item that generates an embeddable, interactive `<iframe>` snippet of the
+  current scene to paste into your own webpage. A popup shows a live preview
+  with a block-opacity slider that updates the preview in real time, then copies
+  the snippet to your clipboard. The embed loads three.js from a CDN and keeps
+  the diagram interactive (drag to rotate, scroll to zoom). Correlation surfaces
+  are included when they are being shown in 3D at export time (Analyze ▸ Flows ▸
+  View in 3D).
+
 ## [0.3.1.0] - 2026-09-07
 
 ### Added
