@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import math
+import time
+import urllib.error
+import urllib.request
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import numpy as np
 import pyzx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from tqec import gallery
 from tqec.computation.block_graph import BlockGraph
@@ -799,6 +803,93 @@ async def zx(req: ZXRequest) -> ZXResponse:
         circuit_error=circuit_error,
         error=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Umami analytics proxy. The tracker script is served first-party (`/pd.js`)
+# and its events are forwarded (`/api/send`) so hostname-based ad-block lists
+# (which match `cloud.umami.is`) don't silently drop most visitors. The data
+# collected is unchanged — anonymous, cookie-free umami telemetry.
+# ---------------------------------------------------------------------------
+
+UMAMI_HOST = "https://cloud.umami.is"
+_UMAMI_SCRIPT_TTL_SECONDS = 6 * 3600
+_umami_script_cache: tuple[float, bytes] | None = None
+
+
+def _fetch_umami_script() -> bytes:
+    # umami's CDN 403s Python's default urllib User-Agent; any real UA passes.
+    req = urllib.request.Request(
+        f"{UMAMI_HOST}/script.js",
+        headers={"User-Agent": "piper-draw-analytics-proxy"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.read()
+
+
+def _cached_umami_script(now: float) -> bytes | None:
+    """Return the tracker script, refreshing the in-memory copy when stale.
+
+    A failed refresh falls back to the stale copy; returns ``None`` only when
+    no copy was ever fetched (upstream down since process start).
+    """
+    global _umami_script_cache
+    if _umami_script_cache is None or now - _umami_script_cache[0] > _UMAMI_SCRIPT_TTL_SECONDS:
+        try:
+            _umami_script_cache = (now, _fetch_umami_script())
+        except OSError:
+            pass
+    return _umami_script_cache[1] if _umami_script_cache is not None else None
+
+
+@app.get("/pd.js")
+async def umami_script() -> Response:
+    script = await run_in_threadpool(_cached_umami_script, time.monotonic())
+    if script is None:
+        return Response(status_code=502)
+    return Response(
+        content=script,
+        media_type="text/javascript",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+def _forward_umami_send(body: bytes, user_agent: str, forwarded_for: str) -> tuple[int, bytes]:
+    req = urllib.request.Request(
+        f"{UMAMI_HOST}/api/send",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": user_agent,
+            "X-Forwarded-For": forwarded_for,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return (r.status, r.read())
+    except urllib.error.HTTPError as e:
+        return (e.code, e.read())
+
+
+@app.post("/api/send")
+async def umami_send(request: Request) -> Response:
+    body = await request.body()
+    # Preserve the visitor's User-Agent (umami's bot filter rejects events
+    # without a browser UA) and IP chain (visitor uniqueness hashes the client
+    # IP — without X-Forwarded-For every visitor would collapse into this
+    # server's IP). Fly's edge sets X-Forwarded-For on incoming requests.
+    user_agent = request.headers.get("user-agent", "")
+    forwarded_for = request.headers.get("x-forwarded-for") or (
+        request.client.host if request.client else ""
+    )
+    try:
+        status, payload = await run_in_threadpool(
+            _forward_umami_send, body, user_agent, forwarded_for
+        )
+    except OSError:
+        return Response(status_code=502)
+    return Response(content=payload, status_code=status, media_type="application/json")
 
 
 # Serve the built frontend (if present) at the root. Mounted last so all

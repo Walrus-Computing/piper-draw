@@ -25,6 +25,7 @@ export default defineConfig({
     strictPort: false,
     proxy: {
       '/api': `http://localhost:${process.env.BACKEND_PORT ?? 8000}`,
+      '/pd.js': `http://localhost:${process.env.BACKEND_PORT ?? 8000}`,
     },
   },
 })

@@ -6,6 +6,20 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.3.1.0] - 2026-09-07
+
+### Added
+- **Usage analytics now measure real engagement instead of bare pageviews.**
+  The umami tracker is served first-party by the backend (`/pd.js` +
+  `/api/send` proxy) so ad-block lists no longer silently drop most visitors;
+  a once-a-minute heartbeat — sent only while the tab is visible and the user
+  is interacting — makes the dashboard's "average visit time" reflect active
+  editing time; and feature events (first edit, ZX/Flows panel opens and
+  computes, `.dae` import/export, PNG export, share links, tutorial
+  start/completion/dismissal) show which capabilities get used. Collection
+  stays cookie-free and consent-free: no stored identifiers, and event
+  payloads never include scene contents or anything the user typed.
+
 ## [0.3.0.0] - 2026-08-12
 
 ### Added

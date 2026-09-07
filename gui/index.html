@@ -4,7 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Piper Draw</title>
-    <script defer src="https://cloud.umami.is/script.js" data-website-id="%VITE_UMAMI_WEBSITE_ID%"></script>
+    <!-- umami tracker, proxied first-party by the backend (see server.py) so
+         hostname blocklists don't drop it. data-host-url="/" makes the script
+         post to same-origin /api/send (its default is gateway.umami.is, which
+         is blocklisted like cloud.umami.is); the backend forwards from there. -->
+    <script defer src="/pd.js" data-host-url="/" data-website-id="%VITE_UMAMI_WEBSITE_ID%"></script>
   </head>
   <body>
     <div id="root"></div>

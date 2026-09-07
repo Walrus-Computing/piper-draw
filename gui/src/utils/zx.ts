@@ -1,4 +1,5 @@
 import type { Block, Position3D, PortMeta } from "../types";
+import { track } from "./analytics";
 
 export type ZXVertexKind = "Z" | "X" | "H" | "BOUNDARY";
 
@@ -99,7 +100,9 @@ export async function computeZX(
         error: `Server error: ${res.status}`,
       };
     }
-    return (await res.json()) as ZXResult;
+    const data = (await res.json()) as ZXResult;
+    if (data.ok) track("zx-computed", { simplify, extract });
+    return data;
   } catch {
     return {
       ok: false,
