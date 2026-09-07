@@ -5,6 +5,7 @@
 // ---------------------------------------------------------------------------
 
 import { useBlockStore } from "../stores/blockStore";
+import { useExportHtmlStore } from "../stores/exportHtmlStore";
 import { downloadDae } from "../utils/daeExport";
 import { RoundTripVerifyButton } from "./RoundTripVerifyButton";
 import type { BgraphActions } from "../hooks/useBgraphActions";
@@ -44,6 +45,17 @@ export function ExportSubmenu({
         onClick={() => void bgraph.exportScene()}
       >
         Export .bgraph
+      </button>
+      <button
+        style={blocksEmpty ? itemStyleDisabled : itemStyle}
+        disabled={blocksEmpty}
+        title="Export current scene as an embeddable HTML iframe"
+        onClick={() => {
+          useExportHtmlStore.getState().openModal();
+          onItemClick();
+        }}
+      >
+        Export HTML
       </button>
       <RoundTripVerifyButton itemStyle={itemStyle} onClick={onItemClick} />
     </>

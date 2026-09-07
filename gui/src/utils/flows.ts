@@ -1,4 +1,5 @@
 import type { Block, Position3D, PortMeta } from "../types";
+import { track } from "./analytics";
 
 export interface SurfacePiece {
   basis: "X" | "Z";
@@ -69,6 +70,7 @@ export async function computeFlows(
       flows: Flow[];
       error: string | null;
     };
+    if (data.ok) track("flows-computed", { flows: data.flows.length });
     return {
       ok: data.ok,
       orderedPorts: data.ordered_ports,

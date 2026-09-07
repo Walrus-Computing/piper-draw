@@ -8,6 +8,7 @@ import {
   rotateBlockKind,
 } from "./blockRotation";
 import { toastBus } from "./toastBus";
+import { track } from "./analytics";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -375,6 +376,7 @@ export function triggerDaeImport(onLoad: (blocks: Map<string, Block>) => void): 
           const msg = daeImportSummaryMessage(summary);
           if (msg) toastBus.info.emit(msg);
         });
+        track("dae-imported", { blocks: blocks.size });
         onLoad(blocks);
       } catch (err) {
         console.error("Failed to import DAE file:", err);

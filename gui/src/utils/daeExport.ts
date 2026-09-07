@@ -1,5 +1,6 @@
 import type { Block } from "../types";
 import { isPipeType } from "../types";
+import { track } from "./analytics";
 
 // ---------------------------------------------------------------------------
 // Constants matching tqec's Collada output
@@ -199,6 +200,7 @@ ${mat}
  * with a fallback to a traditional download for unsupported browsers.
  */
 export async function downloadDae(blocks: Map<string, Block>, filename = "diagram.dae"): Promise<void> {
+  track("dae-exported", { blocks: blocks.size });
   const xml = exportBlocksToDae(blocks);
   const blob = new Blob([xml], { type: "model/vnd.collada+xml" });
 

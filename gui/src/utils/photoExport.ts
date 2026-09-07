@@ -1,9 +1,12 @@
+import { track } from "./analytics";
+
 /**
  * Save a canvas as a PNG, prompting the user for save location and name.
  * Uses the File System Access API (showSaveFilePicker) when available,
  * with a fallback to a traditional download for unsupported browsers.
  */
 export async function downloadPng(canvas: HTMLCanvasElement, filename = "pipe-diagram.png"): Promise<void> {
+  track("png-exported");
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!blob) throw new Error("Failed to encode canvas as PNG");
 
