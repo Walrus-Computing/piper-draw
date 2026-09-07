@@ -29,9 +29,7 @@ class TestCachedUmamiScript:
     def test_fetches_once_within_ttl(self, monkeypatch):
         self._reset(monkeypatch)
         calls = []
-        monkeypatch.setattr(
-            server, "_fetch_umami_script", lambda: calls.append(1) or b"js-v1"
-        )
+        monkeypatch.setattr(server, "_fetch_umami_script", lambda: calls.append(1) or b"js-v1")
         assert server._cached_umami_script(1000.0) == b"js-v1"
         assert server._cached_umami_script(1000.0 + 60) == b"js-v1"
         assert len(calls) == 1

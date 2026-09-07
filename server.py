@@ -13,8 +13,8 @@ import numpy as np
 import pyzx
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
-from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from tqec import gallery
 from tqec.computation.block_graph import BlockGraph
 from tqec.interop.collada._correlation import CorrelationSurfaceTransformationHelper
