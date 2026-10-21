@@ -13,6 +13,7 @@ import {
   type SafeMargins,
 } from "../hooks/floatingPanelGeometry";
 import { PortsTable } from "./PortsTable";
+import { closeBtn, panelTitle, primaryBtn, secondaryBtn, sectionLabel } from "./menuStyles";
 
 const PANEL_MIN_WIDTH = 280;
 const PANEL_MIN_HEIGHT = 220;
@@ -61,12 +62,12 @@ function PauliCell({ pauli }: { pauli: string }) {
         minWidth: 20,
         padding: "1px 6px",
         textAlign: "center",
-        fontFamily: "monospace",
+        fontFamily: "var(--pd-mono)",
         fontWeight: 600,
         fontSize: 12,
         borderRadius: 4,
         background: color,
-        color: isI ? "#555" : "#000",
+        color: isI ? "var(--pd-body)" : "#000",
         opacity: isI ? 0.6 : 1,
       }}
     >
@@ -93,12 +94,12 @@ function EditablePauliCell({
         minWidth: 20,
         padding: "1px 6px",
         textAlign: "center",
-        fontFamily: "monospace",
+        fontFamily: "var(--pd-mono)",
         fontWeight: 600,
         fontSize: 12,
         borderRadius: 4,
         background: color,
-        color: isI ? "#555" : "#000",
+        color: isI ? "var(--pd-body)" : "#000",
         opacity: isI ? 0.6 : 1,
         border: "1px solid rgba(0,0,0,0.1)",
         cursor: "pointer",
@@ -312,14 +313,15 @@ export function FlowsPanel({
       style={{
         ...containerStyle,
         zIndex: 50,
-        background: "#fff",
-        borderRadius: 10,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+        background: "var(--pd-panel)",
+        border: "1px solid var(--pd-rule)",
+        borderRadius: 12,
+        boxShadow: "0 12px 36px rgba(11, 10, 9, 0.12)",
         display: "flex",
         flexDirection: "column",
-        fontFamily: "sans-serif",
-        fontSize: 12,
-        color: "#222",
+        fontFamily: "inherit",
+        fontSize: 12.5,
+        color: "var(--pd-body)",
         overflow: "hidden",
         outline: "none",
       }}
@@ -328,20 +330,21 @@ export function FlowsPanel({
         {...dragHandleProps}
         style={{
           ...dragHandleProps.style,
-          padding: "10px 12px",
-          borderBottom: "1px solid #eee",
+          padding: "10px 14px",
+          borderBottom: "1px solid var(--pd-rule-soft)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          gap: 8,
         }}
       >
-        <span style={{ fontWeight: 600, fontSize: 13 }}>
+        <span style={{ ...panelTitle, fontSize: 14 }}>
           Stabilizer flows (
           <a
             href="https://github.com/tqec/tqec"
             target="_blank"
             rel="noreferrer"
-            style={{ color: "#4a9eff", textDecoration: "underline" }}
+            style={{ color: "var(--pd-accent)", textDecoration: "underline" }}
           >
             tqec
           </a>
@@ -357,9 +360,9 @@ export function FlowsPanel({
               background: "none",
               border: "none",
               fontSize: 14,
-              fontWeight: 600,
+              fontWeight: 500,
               cursor: "pointer",
-              color: helpOpen ? "#4a9eff" : "#666",
+              color: helpOpen ? "var(--pd-accent)" : "var(--pd-muted)",
               padding: "0 4px",
             }}
           >
@@ -369,15 +372,7 @@ export function FlowsPanel({
             data-tutorial="flows-compute"
             onClick={handleCompute}
             disabled={loading || portCount === 0}
-            style={{
-              padding: "4px 10px",
-              fontSize: 12,
-              borderRadius: 4,
-              border: "1px solid #4a9eff",
-              background: loading ? "#eee" : "#4a9eff",
-              color: loading ? "#888" : "#fff",
-              cursor: loading || portCount === 0 ? "default" : "pointer",
-            }}
+            style={{ ...primaryBtn(loading || portCount === 0), padding: "4px 12px", fontSize: 12.5 }}
           >
             {loading ? "Computing…" : "Compute"}
           </button>
@@ -390,18 +385,11 @@ export function FlowsPanel({
                 : "Show the selected flow's correlation surfaces in 3D"
             }
             style={{
-              padding: "4px 10px",
-              fontSize: 12,
-              borderRadius: 4,
-              border: `1px solid ${flowVizMode ? "#4a9eff" : "#888"}`,
-              background: flowVizMode ? "#4a9eff" : "#fff",
-              color: flowVizMode ? "#fff" : "#333",
-              cursor:
-                !result?.ok || result.flows.length === 0 || stale
-                  ? "default"
-                  : "pointer",
-              opacity:
-                !result?.ok || result.flows.length === 0 || stale ? 0.5 : 1,
+              ...(flowVizMode
+                ? { ...secondaryBtn(), borderColor: "var(--pd-accent)", background: "var(--pd-accent-tint)", color: "var(--pd-accent)" }
+                : secondaryBtn(!result?.ok || result.flows.length === 0 || stale)),
+              padding: "4px 12px",
+              fontSize: 12.5,
             }}
           >
             View in 3D
@@ -409,14 +397,7 @@ export function FlowsPanel({
           <button
             onClick={() => setFlowsPanelOpen(false)}
             aria-label="Close flows panel"
-            style={{
-              background: "none",
-              border: "none",
-              fontSize: 16,
-              cursor: "pointer",
-              color: "#666",
-              padding: "0 4px",
-            }}
+            style={closeBtn}
           >
             ✕
           </button>
@@ -426,11 +407,11 @@ export function FlowsPanel({
       {helpOpen && (
         <section
           style={{
-            padding: "10px 12px",
-            background: "#f6f8fa",
-            borderBottom: "1px solid #eee",
-            color: "#333",
-            lineHeight: 1.45,
+            padding: "12px 14px",
+            background: "var(--pd-panel-2)",
+            borderBottom: "1px solid var(--pd-rule-soft)",
+            color: "var(--pd-body)",
+            lineHeight: 1.55,
           }}
         >
           <p style={{ margin: "0 0 8px" }}>
@@ -462,7 +443,7 @@ export function FlowsPanel({
             computed flows — a linear-algebra check over GF(2), ignoring
             phases.
           </p>
-          <p style={{ margin: 0, fontSize: 11, color: "#666" }}>
+          <p style={{ margin: 0, fontSize: 11, color: "var(--pd-body)" }}>
             More:{" "}
             <a
               href="https://tqec.github.io/tqec/user_guide/terminology.html"
@@ -476,16 +457,16 @@ export function FlowsPanel({
         </section>
       )}
 
-      <div style={{ padding: "10px 12px", overflowY: "auto", flex: 1 }}>
+      <div style={{ padding: "12px 14px", overflowY: "auto", flex: 1 }}>
         <PortsTable controlsRef={controlsRef} />
 
-        <hr style={{ margin: "12px 0", border: "none", borderTop: "1px solid #eee" }} />
+        <hr style={{ margin: "12px 0", border: "none", borderTop: "1px solid var(--pd-rule-soft)" }} />
 
         <section style={{ opacity: stale ? 0.45 : 1 }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+          <div style={{ ...sectionLabel, marginBottom: 8 }}>
             Generators{" "}
             {result?.ok && (
-              <span style={{ color: "#666", fontWeight: 400 }}>
+              <span style={{ color: "var(--pd-body)", fontWeight: 400 }}>
                 ({result.flows.length})
               </span>
             )}
@@ -496,7 +477,7 @@ export function FlowsPanel({
             )}
           </div>
           {result === null && (
-            <div style={{ color: "#888" }}>Click Compute to find flows.</div>
+            <div style={{ color: "var(--pd-muted)" }}>Click Compute to find flows.</div>
           )}
           {result && !result.ok && (
             <div style={{ color: "#b00", whiteSpace: "pre-wrap" }}>
@@ -504,7 +485,7 @@ export function FlowsPanel({
             </div>
           )}
           {result && result.ok && result.flows.length === 0 && (
-            <div style={{ color: "#888" }}>
+            <div style={{ color: "var(--pd-muted)" }}>
               No flows found (diagram has no correlation surfaces).
             </div>
           )}
@@ -519,22 +500,22 @@ export function FlowsPanel({
                         style={{
                           textAlign: "center",
                           padding: "4px 6px",
-                          fontFamily: "monospace",
-                          borderBottom: "1px solid #ddd",
+                          fontFamily: "var(--pd-mono)",
+                          borderBottom: "1px solid var(--pd-rule)",
                         }}
                       >
                         {label}
                       </th>
                     ))}
-                    <th style={{ padding: "0 4px", borderBottom: "1px solid #ddd" }}>→</th>
+                    <th style={{ padding: "0 4px", borderBottom: "1px solid var(--pd-rule)" }}>→</th>
                     {orderedOutputs.map((label) => (
                       <th
                         key={`out-${label}`}
                         style={{
                           textAlign: "center",
                           padding: "4px 6px",
-                          fontFamily: "monospace",
-                          borderBottom: "1px solid #ddd",
+                          fontFamily: "var(--pd-mono)",
+                          borderBottom: "1px solid var(--pd-rule)",
                         }}
                       >
                         {label}
@@ -555,8 +536,8 @@ export function FlowsPanel({
                         }}
                         style={{
                           cursor: result.ok && !stale ? "pointer" : "default",
-                          background: isActive ? "#e0efff" : undefined,
-                          outline: isActive ? "2px solid #4a9eff" : undefined,
+                          background: isActive ? "var(--pd-accent-tint)" : undefined,
+                          outline: isActive ? "2px solid var(--pd-accent)" : undefined,
                         }}
                       >
                         {orderedInputs.map((label) => (
@@ -567,7 +548,7 @@ export function FlowsPanel({
                             <PauliCell pauli={flow.inputs[label] ?? "I"} />
                           </td>
                         ))}
-                        <td style={{ padding: "0 4px", color: "#888" }}>→</td>
+                        <td style={{ padding: "0 4px", color: "var(--pd-muted)" }}>→</td>
                         {orderedOutputs.map((label) => (
                           <td
                             key={`out-${label}`}
@@ -587,7 +568,7 @@ export function FlowsPanel({
 
         {result && result.ok && result.flows.length > 0 && generatorSpan && (
           <>
-            <hr style={{ margin: "12px 0", border: "none", borderTop: "1px solid #eee" }} />
+            <hr style={{ margin: "12px 0", border: "none", borderTop: "1px solid var(--pd-rule-soft)" }} />
             <section style={{ opacity: stale ? 0.45 : 1 }}>
               <div
                 style={{
@@ -597,9 +578,9 @@ export function FlowsPanel({
                   marginBottom: 6,
                 }}
               >
-                <span style={{ fontWeight: 600 }}>
+                <span style={sectionLabel}>
                   Check membership{" "}
-                  <span style={{ color: "#666", fontWeight: 400 }}>
+                  <span style={{ color: "var(--pd-body)", fontWeight: 400 }}>
                     ({queries.length}/{result.flows.length})
                   </span>
                 </span>
@@ -607,18 +588,7 @@ export function FlowsPanel({
                   type="button"
                   onClick={addQuery}
                   disabled={stale || queries.length >= result.flows.length}
-                  style={{
-                    padding: "2px 8px",
-                    fontSize: 12,
-                    borderRadius: 4,
-                    border: "1px solid #4a9eff",
-                    background:
-                      stale || queries.length >= result.flows.length ? "#eee" : "#fff",
-                    color:
-                      stale || queries.length >= result.flows.length ? "#aaa" : "#4a9eff",
-                    cursor:
-                      stale || queries.length >= result.flows.length ? "default" : "pointer",
-                  }}
+                  style={{ ...secondaryBtn(stale || queries.length >= result.flows.length), padding: "2px 10px", fontSize: 12 }}
                 >
                   + Add query
                 </button>
@@ -639,7 +609,7 @@ export function FlowsPanel({
                 disconnected diagrams.
               </div>
               {queries.length === 0 && (
-                <div style={{ color: "#888" }}>
+                <div style={{ color: "var(--pd-muted)" }}>
                   Add a query row to check whether a Pauli flow lies in the span.
                 </div>
               )}
@@ -654,14 +624,14 @@ export function FlowsPanel({
                             style={{
                               textAlign: "center",
                               padding: "4px 6px",
-                              fontFamily: "monospace",
-                              borderBottom: "1px solid #ddd",
+                              fontFamily: "var(--pd-mono)",
+                              borderBottom: "1px solid var(--pd-rule)",
                             }}
                           >
                             {label}
                           </th>
                         ))}
-                        <th style={{ padding: "0 4px", borderBottom: "1px solid #ddd" }}>
+                        <th style={{ padding: "0 4px", borderBottom: "1px solid var(--pd-rule)" }}>
                           →
                         </th>
                         {orderedOutputs.map((label) => (
@@ -670,15 +640,15 @@ export function FlowsPanel({
                             style={{
                               textAlign: "center",
                               padding: "4px 6px",
-                              fontFamily: "monospace",
-                              borderBottom: "1px solid #ddd",
+                              fontFamily: "var(--pd-mono)",
+                              borderBottom: "1px solid var(--pd-rule)",
                             }}
                           >
                             {label}
                           </th>
                         ))}
-                        <th style={{ borderBottom: "1px solid #ddd" }} />
-                        <th style={{ borderBottom: "1px solid #ddd" }} />
+                        <th style={{ borderBottom: "1px solid var(--pd-rule)" }} />
+                        <th style={{ borderBottom: "1px solid var(--pd-rule)" }} />
                       </tr>
                     </thead>
                     <tbody>
@@ -697,7 +667,7 @@ export function FlowsPanel({
                                 />
                               </td>
                             ))}
-                            <td style={{ padding: "0 4px", color: "#888" }}>→</td>
+                            <td style={{ padding: "0 4px", color: "var(--pd-muted)" }}>→</td>
                             {orderedOutputs.map((label) => (
                               <td
                                 key={`qout-${label}`}
@@ -733,7 +703,7 @@ export function FlowsPanel({
                                 style={{
                                   background: "none",
                                   border: "none",
-                                  color: "#999",
+                                  color: "var(--pd-muted)",
                                   cursor: "pointer",
                                   fontSize: 14,
                                   lineHeight: 1,

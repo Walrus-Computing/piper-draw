@@ -8,6 +8,7 @@ import type { BlockType, CubeType, IsoAxis, PipeType, PipeVariant, Position3D } 
 import { useBgraphActions, type BgraphActions } from "../hooks/useBgraphActions";
 import { BgraphDialogs } from "./BgraphDialogs";
 import { ImportSubmenu } from "./ImportSubmenu";
+import { MENU_PANEL, menuItem } from "./menuStyles";
 import { ExportSubmenu } from "./ExportSubmenu";
 import {
   buildShareUrl,
@@ -45,11 +46,12 @@ function loadToolbarUserScale(): number {
 // ---------------------------------------------------------------------------
 
 const groupLabelStyle = {
-  fontSize: "11px",
-  fontFamily: "sans-serif",
-  color: "#888",
-  fontWeight: "bold" as const,
-  letterSpacing: "0.5px",
+  fontSize: "10px",
+  fontFamily: "inherit",
+  color: "var(--pd-muted)",
+  fontWeight: 500,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase" as const,
   textAlign: "center" as const,
 };
 
@@ -65,11 +67,12 @@ const previewWrapStyle: React.CSSProperties = {
 const btnStyle = (active: boolean) => ({
   padding: "4px 12px",
   fontSize: "13px",
-  fontFamily: "sans-serif" as const,
+  fontFamily: "inherit" as const,
   cursor: "pointer" as const,
-  border: active ? "2px solid #4a9eff" : "2px solid #ccc",
+  border: active ? "1px solid var(--pd-accent)" : "1px solid var(--pd-rule)",
   borderRadius: "4px",
-  background: active ? "#e8f0fe" : "#fff",
+  background: active ? "var(--pd-accent-tint)" : "var(--pd-panel)",
+  color: "var(--pd-ink)",
   fontWeight: "normal" as const,
 });
 
@@ -467,11 +470,11 @@ export function Toolbar({
         display: "flex",
         gap: "10px",
         alignItems: "stretch",
-        background: "rgba(255,255,255,0.9)",
+        background: "rgba(251,250,248,0.94)",
         padding: "8px 12px",
-        borderRadius: "8px",
-        border: "1px solid #ddd",
-        boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
+        borderRadius: "10px",
+        border: "1px solid var(--pd-rule)",
+        boxShadow: "0 6px 20px rgba(11,10,9,0.06)",
       }}
     >
       {/* Mode segmented control + Free Build + Undo/Redo */}
@@ -558,9 +561,9 @@ export function Toolbar({
             <span
               title="Active slice on the depth axis (TQEC units / 3)"
               style={{
-                fontFamily: "monospace",
+                fontFamily: "var(--pd-mono)",
                 fontSize: "11px",
-                color: "#555",
+                color: "var(--pd-body)",
                 minWidth: 28,
                 textAlign: "center",
               }}
@@ -623,7 +626,7 @@ export function Toolbar({
       </div>
 
       {/* Separator */}
-      <div style={{ width: 1, background: "#ddd" }} />
+      <div style={{ width: 1, background: "var(--pd-rule)" }} />
 
       {/* Tool group (Pointer) */}
       <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
@@ -648,7 +651,7 @@ export function Toolbar({
       </div>
 
       {/* Separator */}
-      <div style={{ width: 1, background: "#ddd" }} />
+      <div style={{ width: 1, background: "var(--pd-rule)" }} />
 
       {/* Blocks group (Port + ZXCubes + Y) */}
       <div data-tutorial="blocks-palette" style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
@@ -767,7 +770,7 @@ export function Toolbar({
       </div>
 
       {/* Separator */}
-      <div style={{ width: 1, background: "#ddd" }} />
+      <div style={{ width: 1, background: "var(--pd-rule)" }} />
 
       {/* Pipes group */}
       <div data-tutorial="pipes-palette" style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
@@ -815,8 +818,8 @@ export function Toolbar({
       </div>
 
       {/* Position display */}
-      <div style={{ width: 1, background: "#ddd" }} />
-      <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", fontFamily: "monospace", fontSize: "12px", color: "#555", lineHeight: "1.6", minWidth: 90 }}>
+      <div style={{ width: 1, background: "var(--pd-rule)" }} />
+      <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", fontFamily: "var(--pd-mono)", fontSize: "12px", color: "var(--pd-body)", lineHeight: "1.6", minWidth: 90 }}>
         <div style={{ display: "flex", flexDirection: "column" }}>
           <span style={groupLabelStyle}>Position</span>
           {mode === "build" && buildCursor ? (
@@ -886,7 +889,7 @@ export function Toolbar({
                 padding: "4px 8px",
                 borderRadius: 4,
                 fontSize: 11,
-                fontFamily: "sans-serif",
+                fontFamily: "inherit",
                 whiteSpace: "nowrap",
                 pointerEvents: "none",
                 zIndex: 100,
@@ -903,7 +906,7 @@ export function Toolbar({
 
       {selectedCount > 0 && mode === "edit" && (
         <>
-          <div style={{ width: 1, background: "#ddd" }} />
+          <div style={{ width: 1, background: "var(--pd-rule)" }} />
           <SelectionInspector
             count={selectedCount}
             onDelete={deleteSelected}
@@ -1040,13 +1043,13 @@ function PositionEditor({ pos, onCommit }: { pos: Position3D; onCommit: (p: Posi
         onKeyDown={onKeyDown}
         style={{
           width: 42,
-          fontFamily: "monospace",
+          fontFamily: "var(--pd-mono)",
           fontSize: 12,
           padding: "1px 2px",
-          border: "1px solid #ccc",
+          border: "1px solid var(--pd-rule)",
           borderRadius: 2,
-          background: "#fff",
-          color: "#333",
+          background: "var(--pd-panel)",
+          color: "var(--pd-ink)",
         }}
       />
     </label>
@@ -1069,11 +1072,11 @@ function ModeSegmented({
   const segStyle = (active: boolean): React.CSSProperties => ({
     padding: "4px 12px",
     fontSize: "13px",
-    fontFamily: "sans-serif",
+    fontFamily: "inherit",
     cursor: "pointer",
     border: "none",
-    background: active ? "#4a9eff" : "transparent",
-    color: active ? "#fff" : "#555",
+    background: active ? "var(--pd-accent)" : "transparent",
+    color: active ? "#fff" : "var(--pd-ink)",
     fontWeight: active ? 600 : "normal",
     borderRadius: 3,
     whiteSpace: "nowrap",
@@ -1084,11 +1087,11 @@ function ModeSegmented({
       style={{
         display: "inline-flex",
         flexDirection: "column",
-        border: "2px solid #4a9eff",
+        border: "1px solid var(--pd-rule)",
         borderRadius: 6,
         overflow: "hidden",
         padding: 2,
-        background: "#fff",
+        background: "var(--pd-panel)",
       }}
     >
       <button onClick={() => setMode("edit")} style={segStyle(mode === "edit")}>
@@ -1120,7 +1123,7 @@ function SelectionInspector({
       <button
         onClick={onFlip}
         title="Swap X↔Z colors on all selected blocks"
-        style={{ ...btnStyle(false), borderColor: "#4a9eff", color: "#4a9eff" }}
+        style={{ ...btnStyle(false), borderColor: "var(--pd-accent)", color: "var(--pd-accent)" }}
       >
         Flip
       </button>
@@ -1166,14 +1169,7 @@ function ImportMenu({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  const item = (disabled: boolean): React.CSSProperties => ({
-    ...btnStyle(false),
-    textAlign: "left",
-    padding: "4px 10px",
-    opacity: disabled ? 0.4 : 1,
-    cursor: disabled ? "default" : "pointer",
-    whiteSpace: "nowrap",
-  });
+  const item = (disabled: boolean): React.CSSProperties => menuItem(disabled);
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
@@ -1239,14 +1235,7 @@ function ExportMenu({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  const item = (disabled: boolean): React.CSSProperties => ({
-    ...btnStyle(false),
-    textAlign: "left",
-    padding: "4px 10px",
-    opacity: disabled ? 0.4 : 1,
-    cursor: disabled ? "default" : "pointer",
-    whiteSpace: "nowrap",
-  });
+  const item = (disabled: boolean): React.CSSProperties => menuItem(disabled);
 
   const onShare = async () => {
     if (!compressionSupported || blocksEmpty) return;
@@ -1309,23 +1298,7 @@ function ExportMenu({
         Export ▾
       </button>
       {open && (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            left: 0,
-            background: "#fff",
-            border: "1px solid #ccc",
-            borderRadius: 4,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-            padding: 4,
-            minWidth: 140,
-            zIndex: 1000,
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-          }}
-        >
+        <div className="pd-menu" style={{ ...MENU_PANEL, minWidth: 140 }}>
           <ExportSubmenu
             itemStyle={item(false)}
             itemStyleDisabled={item(true)}
@@ -1392,7 +1365,7 @@ function AnalyzeMenu() {
   const verifyBackground =
     validationStatus === "valid" ? "#d4edda" :
     validationStatus === "invalid" ? "#f8d7da" :
-    validationStatus === "loading" ? "#e8f0fe" :
+    validationStatus === "loading" ? "var(--pd-accent-tint)" :
     null;
 
   const anyPanelOpen = flowsPanelOpen || zxPanelOpen;
@@ -1423,37 +1396,19 @@ function AnalyzeMenu() {
         title={triggerTitle}
         style={triggerStyle}
       >
-        Analyze {openDots && <span style={{ color: "#4a9eff" }}>{openDots}</span>}▾
+        Analyze {openDots && <span style={{ color: "var(--pd-accent)" }}>{openDots}</span>}▾
       </button>
       {open && (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            left: 0,
-            background: "#fff",
-            border: "1px solid #ccc",
-            borderRadius: 4,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-            padding: 8,
-            minWidth: 180,
-            zIndex: 1000,
-            display: "flex",
-            flexDirection: "column",
-            gap: 6,
-            fontFamily: "sans-serif",
-          }}
-        >
+        <div className="pd-menu" style={{ ...MENU_PANEL, minWidth: 180 }}>
           <button
             onClick={() => { runValidation(); }}
             disabled={verifyDisabled}
             title="Server-side validation via the TQEC library"
             style={{
-              ...btnStyle(false),
-              opacity: blocksEmpty ? 0.4 : 1,
+              ...menuItem(blocksEmpty),
               cursor: verifyDisabled ? "default" : "pointer",
-              borderColor: verifyBorder ?? "#ccc",
-              background: verifyBackground ?? "#fff",
+              color: verifyBorder ?? (blocksEmpty ? "var(--pd-muted)" : "var(--pd-ink)"),
+              background: verifyBackground ?? "transparent",
             }}
           >
             {validationStatus === "loading" ? "Verifying..." : "Verify (tqec)"}
@@ -1462,11 +1417,7 @@ function AnalyzeMenu() {
             data-tutorial="flows-menu-item"
             onClick={() => useBlockStore.getState().toggleFlowsPanel()}
             title="Show stabilizer flows for the current diagram (computed by the tqec package)"
-            style={{
-              ...btnStyle(flowsPanelOpen),
-              borderColor: flowsPanelOpen ? "#4a9eff" : "#ccc",
-              background: flowsPanelOpen ? "#e8f0fe" : "#fff",
-            }}
+            style={menuItem(false, flowsPanelOpen)}
           >
             Flows (tqec)
           </button>
@@ -1474,11 +1425,7 @@ function AnalyzeMenu() {
             data-tutorial="zx-menu-item"
             onClick={() => useBlockStore.getState().toggleZXPanel()}
             title="Show the ZX-calculus diagram corresponding to this pipe diagram (tqec builds the graph, pyzx owns the .qgraph export and full_reduce simplification)"
-            style={{
-              ...btnStyle(zxPanelOpen),
-              borderColor: zxPanelOpen ? "#4a9eff" : "#ccc",
-              background: zxPanelOpen ? "#e8f0fe" : "#fff",
-            }}
+            style={menuItem(false, zxPanelOpen)}
           >
             ZX (tqec + pyzx)
           </button>
@@ -1581,8 +1528,8 @@ function SettingsMenu({
             position: "absolute",
             top: "calc(100% + 4px)",
             left: 0,
-            background: "#fff",
-            border: "1px solid #ccc",
+            background: "var(--pd-panel)",
+            border: "1px solid var(--pd-rule)",
             borderRadius: 4,
             boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
             padding: 8,
@@ -1591,7 +1538,7 @@ function SettingsMenu({
             display: "flex",
             flexDirection: "column",
             gap: 8,
-            fontFamily: "sans-serif",
+            fontFamily: "inherit",
             fontSize: 12,
           }}
         >
@@ -1599,16 +1546,16 @@ function SettingsMenu({
             <input type="checkbox" checked={showYDefects} onChange={toggleShowYDefects} style={{ marginTop: 2 }} />
             <span>
               Highlight Y defects
-              <div style={{ fontSize: 10, color: "#888", whiteSpace: "nowrap" }}>
+              <div style={{ fontSize: 10, color: "var(--pd-muted)", whiteSpace: "nowrap" }}>
                 (magenta cylinders along edges where X and Z faces meet)
               </div>
             </span>
           </label>
 
-          <div style={{ height: 1, background: "#eee" }} />
+          <div style={{ height: 1, background: "var(--pd-rule-soft)" }} />
 
           <div>
-            <div style={{ fontWeight: 600, color: "#555", marginBottom: 4 }}>Navigation style</div>
+            <div style={{ fontWeight: 600, color: "var(--pd-body)", marginBottom: 4 }}>Navigation style</div>
             {(["pan", "rotate"] as NavStyle[]).map((v) => (
               <label key={v} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "2px 0" }}>
                 <input
@@ -1620,16 +1567,16 @@ function SettingsMenu({
                 {NAV_STYLE_LABELS[v]}
               </label>
             ))}
-            <div style={{ fontSize: 10, color: "#888", marginTop: 4 }}>
+            <div style={{ fontSize: 10, color: "var(--pd-muted)", marginTop: 4 }}>
               Middle/right-click drag does the opposite gesture — pan when set
               to orbit, orbit when set to pan.
             </div>
           </div>
 
-          <div style={{ height: 1, background: "#eee" }} />
+          <div style={{ height: 1, background: "var(--pd-rule-soft)" }} />
 
           <div>
-            <div style={{ fontWeight: 600, color: "#555", marginBottom: 4 }}>Keyboard Build</div>
+            <div style={{ fontWeight: 600, color: "var(--pd-body)", marginBottom: 4 }}>Keyboard Build</div>
             <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "2px 0" }}>
               <input type="checkbox" checked={cameraFollowsBuild} onChange={toggleCameraFollowsBuild} />
               <span title="When off, the camera stays put while you build with the keyboard">
@@ -1644,10 +1591,10 @@ function SettingsMenu({
             </label>
           </div>
 
-          <div style={{ height: 1, background: "#eee" }} />
+          <div style={{ height: 1, background: "var(--pd-rule-soft)" }} />
 
           <div>
-            <div style={{ fontWeight: 600, color: "#555", marginBottom: 4 }}>Keybindings</div>
+            <div style={{ fontWeight: 600, color: "var(--pd-body)", marginBottom: 4 }}>Keybindings</div>
             <button
               onClick={() => { onOpenKeybindEditor("edit"); setOpen(false); }}
               style={{ ...btnStyle(false), padding: "4px 8px", width: "100%" }}

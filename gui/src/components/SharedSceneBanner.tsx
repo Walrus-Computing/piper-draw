@@ -24,7 +24,7 @@ export function SharedSceneBanner({
         borderRadius: 6,
         boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
         padding: "8px 12px",
-        fontFamily: "sans-serif",
+        fontFamily: "inherit",
         fontSize: 13,
         color: "#5b4a00",
         display: "flex",
@@ -40,7 +40,7 @@ export function SharedSceneBanner({
           padding: "4px 10px",
           border: "1px solid #b89a30",
           borderRadius: 4,
-          background: "#fff",
+          background: "var(--pd-panel)",
           cursor: "pointer",
           color: "#5b4a00",
         }}

@@ -107,12 +107,12 @@ export function KeybindEditor({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        fontFamily: "sans-serif",
+        fontFamily: "inherit",
       }}
     >
       <div
         style={{
-          background: "#fff",
+          background: "var(--pd-panel)",
           borderRadius: "12px",
           padding: "20px 24px",
           minWidth: 360,
@@ -138,7 +138,7 @@ export function KeybindEditor({
               border: "none",
               fontSize: 18,
               cursor: "pointer",
-              color: "#666",
+              color: "var(--pd-body)",
               padding: "0 4px",
             }}
           >
@@ -151,7 +151,7 @@ export function KeybindEditor({
             display: "flex",
             gap: 4,
             padding: 3,
-            background: "#f0f4f9",
+            background: "var(--pd-panel-2)",
             borderRadius: 6,
             marginBottom: 12,
           }}
@@ -167,12 +167,12 @@ export function KeybindEditor({
                   padding: "4px 12px",
                   border: "none",
                   borderRadius: 4,
-                  background: active ? "#fff" : "transparent",
-                  color: active ? "#1a5ec8" : "#555",
+                  background: active ? "var(--pd-panel)" : "transparent",
+                  color: active ? "var(--pd-accent)" : "var(--pd-ink)",
                   fontWeight: active ? 600 : "normal",
                   cursor: "pointer",
                   fontSize: 13,
-                  fontFamily: "sans-serif",
+                  fontFamily: "inherit",
                   boxShadow: active ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
                 }}
               >
@@ -211,20 +211,20 @@ function GeneralList() {
               alignItems: "center",
               padding: "6px 8px",
               borderRadius: 6,
-              background: "#f8f8f8",
+              background: "var(--pd-panel-2)",
             }}
           >
-            <span style={{ fontSize: 13, color: "#333" }}>{action}</span>
+            <span style={{ fontSize: 13, color: "var(--pd-ink)" }}>{action}</span>
             <span
               style={{
                 minWidth: 60,
                 padding: "4px 10px",
-                border: "1px solid #ddd",
+                border: "1px solid var(--pd-rule)",
                 borderRadius: 4,
-                background: "#fafafa",
+                background: "var(--pd-panel-2)",
                 fontSize: 13,
-                fontFamily: "monospace",
-                color: "#666",
+                fontFamily: "var(--pd-mono)",
+                color: "var(--pd-body)",
                 textAlign: "center",
               }}
             >
@@ -233,7 +233,7 @@ function GeneralList() {
           </div>
         ))}
       </div>
-      <p style={{ margin: "12px 2px 0", fontSize: 11, color: "#888" }}>
+      <p style={{ margin: "12px 2px 0", fontSize: 11, color: "var(--pd-muted)" }}>
         General shortcuts are fixed and not rebindable.
       </p>
     </>
@@ -270,22 +270,22 @@ function BindableList({
                 alignItems: "center",
                 padding: "6px 8px",
                 borderRadius: 6,
-                background: isListeningThis ? "#e8f0fe" : "#f8f8f8",
+                background: isListeningThis ? "var(--pd-accent-tint)" : "var(--pd-panel-2)",
               }}
             >
-              <span style={{ fontSize: 13, color: "#333" }}>{labels[action]}</span>
+              <span style={{ fontSize: 13, color: "var(--pd-ink)" }}>{labels[action]}</span>
               <button
                 onClick={() => setListening(isListeningThis ? null : action)}
                 style={{
                   minWidth: 60,
                   padding: "4px 10px",
-                  border: isListeningThis ? "2px solid #4285f4" : "1px solid #ccc",
+                  border: isListeningThis ? "2px solid var(--pd-accent)" : "1px solid var(--pd-rule)",
                   borderRadius: 4,
-                  background: "#fff",
+                  background: "var(--pd-panel)",
                   cursor: "pointer",
                   fontSize: 13,
-                  fontFamily: "monospace",
-                  color: isListeningThis ? "#4285f4" : "#333",
+                  fontFamily: "var(--pd-mono)",
+                  color: isListeningThis ? "var(--pd-accent)" : "var(--pd-ink)",
                   textAlign: "center",
                 }}
               >
@@ -301,12 +301,12 @@ function BindableList({
           onClick={onReset}
           style={{
             background: "none",
-            border: "1px solid #ccc",
+            border: "1px solid var(--pd-rule)",
             borderRadius: 6,
             padding: "5px 12px",
             fontSize: 12,
             cursor: "pointer",
-            color: "#555",
+            color: "var(--pd-body)",
           }}
         >
           Reset {TAB_LABELS[mode]} to defaults

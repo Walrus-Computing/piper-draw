@@ -4,6 +4,7 @@ import { useBlockStore } from "../stores/blockStore";
 import { useLocateStore } from "../stores/locateStore";
 import { getOrderedPortPositions, posKey, tqecToThree, type Position3D } from "../types";
 import { animateCamera } from "../utils/cameraAnim";
+import { sectionLabel } from "./menuStyles";
 
 function PortLabelInput({
   pos,
@@ -51,9 +52,9 @@ function PortLabelInput({
         flex: 1,
         fontSize: 12,
         padding: "2px 6px",
-        border: "1px solid #ccc",
+        border: "1px solid var(--pd-rule)",
         borderRadius: 4,
-        fontFamily: "monospace",
+        fontFamily: "var(--pd-mono)",
       }}
     />
   );
@@ -128,11 +129,11 @@ export function PortsTable({
 
   return (
     <section>
-      <div style={{ fontWeight: 600, marginBottom: 6 }}>
+      <div style={{ ...sectionLabel, marginBottom: 8 }}>
         Ports ({portList.length})
       </div>
       {portList.length === 0 && (
-        <div style={{ color: "#888" }}>
+        <div style={{ color: "var(--pd-muted)" }}>
           No open ports. Add open pipes or place port markers.
         </div>
       )}
@@ -165,8 +166,8 @@ export function PortsTable({
               marginBottom: 4,
               padding: "2px 0",
               opacity: isDragging ? 0.4 : 1,
-              borderTop: showDropAbove ? "2px solid #4a9eff" : "2px solid transparent",
-              borderBottom: showDropBelow ? "2px solid #4a9eff" : "2px solid transparent",
+              borderTop: showDropAbove ? "2px solid var(--pd-accent)" : "2px solid transparent",
+              borderBottom: showDropBelow ? "2px solid var(--pd-accent)" : "2px solid transparent",
             }}
           >
             <span
@@ -184,7 +185,7 @@ export function PortsTable({
               title="Drag to reorder"
               style={{
                 cursor: "grab",
-                color: "#aaa",
+                color: "var(--pd-muted)",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -204,7 +205,7 @@ export function PortsTable({
                 border: "none",
                 padding: 2,
                 cursor: "pointer",
-                color: "#666",
+                color: "var(--pd-body)",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -228,7 +229,7 @@ export function PortsTable({
             </select>
             <span
               title={`(${pos.x / 3}, ${pos.y / 3}, ${pos.z / 3})`}
-              style={{ color: "#aaa", fontFamily: "monospace", fontSize: 10 }}
+              style={{ color: "var(--pd-muted)", fontFamily: "var(--pd-mono)", fontSize: 10 }}
             >
               {pos.x / 3},{pos.y / 3},{pos.z / 3}
             </span>
