@@ -44,17 +44,17 @@ function ProgressHeader({
   onDismiss: () => void;
 }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-      <span style={{ fontSize: 12, color: "#666", whiteSpace: "nowrap" }}>
-        {stepIndex + 1} of {TUTORIAL_STEPS.length}
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+      <span style={{ fontSize: 10.5, fontWeight: 500, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--pd-muted)", whiteSpace: "nowrap" }}>
+        Step {stepIndex + 1} of {TUTORIAL_STEPS.length}
       </span>
-      <div style={{ flex: 1, height: 4, background: "#e4e9f0", borderRadius: 2 }}>
+      <div style={{ flex: 1, height: 2, background: "var(--pd-rule-soft)", borderRadius: 1 }}>
         <div
           style={{
             width: `${(stepIndex / (TUTORIAL_STEPS.length - 1)) * 100}%`,
             height: "100%",
-            background: celebrating ? "#34a853" : "#4a9eff",
-            borderRadius: 2,
+            background: celebrating ? "#34a853" : "var(--pd-accent)",
+            borderRadius: 1,
             transition: "width 0.25s, background 0.2s",
           }}
         />
@@ -67,7 +67,7 @@ function ProgressHeader({
           background: "none",
           border: "none",
           cursor: "pointer",
-          color: "#888",
+          color: "var(--pd-muted)",
           fontSize: 15,
           padding: "0 2px",
           lineHeight: 1,
@@ -89,7 +89,7 @@ function BackButton({ visible, onBack }: { visible: boolean; onBack: () => void 
         border: "none",
         padding: "3px 0",
         cursor: "pointer",
-        color: "#555",
+        color: "var(--pd-muted)",
         fontSize: 13,
       }}
     >
@@ -122,25 +122,25 @@ function StepFooter({
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
-        marginTop: 10,
+        marginTop: 14,
       }}
     >
       <BackButton visible={!isFirst && !celebrating} onBack={onBack} />
       {waitsForAction ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 13, color: celebrating ? "#34a853" : "#4a9eff" }}>
+          <span style={{ fontSize: 12.5, color: celebrating ? "#34a853" : "var(--pd-accent)" }}>
             {celebrating ? "Nice — moving on…" : "Do it in the scene to continue"}
           </span>
           <button
             onClick={onAdvance}
             style={{
               background: "none",
-              border: "1px solid #ccc",
-              borderRadius: 4,
+              border: "1px solid var(--pd-rule)",
+              borderRadius: 5,
               padding: "3px 10px",
               cursor: "pointer",
-              color: "#555",
-              fontSize: 13,
+              color: "var(--pd-ink)",
+              fontSize: 12.5,
             }}
           >
             Skip
@@ -150,14 +150,14 @@ function StepFooter({
         <button
           onClick={onAdvance}
           style={{
-            background: "#4a9eff",
+            background: "var(--pd-accent)",
             border: "none",
-            borderRadius: 4,
-            padding: "5px 14px",
+            borderRadius: 6,
+            padding: "6px 16px",
             cursor: "pointer",
             color: "#fff",
-            fontWeight: 600,
-            fontSize: 14,
+            fontWeight: 500,
+            fontSize: 13.5,
           }}
         >
           {isLast ? "Finish" : reviewing ? "Next" : isFirst ? "Start tour" : "Continue"}
@@ -194,15 +194,15 @@ export function TutorialPanel() {
         bottom: 56,
         width: 340,
         zIndex: 60,
-        background: "#fff",
-        border: `2px solid ${celebrating ? "#34a853" : "#4a9eff"}`,
-        borderRadius: 10,
-        boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
-        padding: "14px 16px",
-        fontFamily: "sans-serif",
-        fontSize: 16,
-        color: "#222",
-        lineHeight: 1.5,
+        background: "var(--pd-panel)",
+        border: `1px solid ${celebrating ? "#34a853" : "var(--pd-rule)"}`,
+        borderRadius: 12,
+        boxShadow: "0 12px 36px rgba(11,10,9,0.14)",
+        padding: "16px 18px",
+        fontFamily: "inherit",
+        fontSize: 14,
+        color: "var(--pd-body)",
+        lineHeight: 1.55,
         transition: "border-color 0.2s",
       }}
     >
@@ -211,7 +211,7 @@ export function TutorialPanel() {
         celebrating={celebrating}
         onDismiss={dismiss}
       />
-      <div style={{ fontWeight: 600, fontSize: 17, marginBottom: 5 }}>
+      <div style={{ fontWeight: 500, fontSize: 17, letterSpacing: "-0.01em", color: "var(--pd-ink)", marginBottom: 6 }}>
         {celebrating ? "✓ " : ""}
         {step.title}
       </div>

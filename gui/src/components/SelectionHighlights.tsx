@@ -18,7 +18,7 @@ const SELECTION_SCALE = 1.04;
 const MAX_PULSING_HIGHLIGHTS = 200;
 
 const highlightMaterial = new THREE.MeshBasicMaterial({
-  color: 0x4a9eff,
+  color: 0x6f87cc,
   transparent: true,
   opacity: 0.2,
   depthWrite: false,
@@ -26,7 +26,7 @@ const highlightMaterial = new THREE.MeshBasicMaterial({
 });
 
 const outlineMaterial = new THREE.LineBasicMaterial({
-  color: 0x4a9eff,
+  color: 0x6f87cc,
   linewidth: 2,
 });
 

@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import type { Block } from "../types";
+import { MENU_PANEL } from "./menuStyles";
 import { triggerDaeImport } from "../utils/daeImport";
 import type { BgraphActions } from "../hooks/useBgraphActions";
 
@@ -17,21 +18,7 @@ interface Props {
   bgraph: BgraphActions;
 }
 
-const SUBMENU_STYLE: React.CSSProperties = {
-  position: "absolute",
-  top: "calc(100% + 4px)",
-  left: 0,
-  background: "#fff",
-  border: "1px solid #ccc",
-  borderRadius: 4,
-  boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-  padding: 4,
-  minWidth: 180,
-  zIndex: 1001,
-  display: "flex",
-  flexDirection: "column",
-  gap: 2,
-};
+const SUBMENU_STYLE: React.CSSProperties = { ...MENU_PANEL, minWidth: 180, zIndex: 1001 };
 
 export function ImportSubmenu({
   itemStyle,
@@ -42,7 +29,7 @@ export function ImportSubmenu({
 }: Props) {
   const close = onItemClick;
   return (
-    <div style={SUBMENU_STYLE}>
+    <div className="pd-menu" style={SUBMENU_STYLE}>
       <button
         style={itemStyle}
         title="Load a .dae file (replaces current scene)"
@@ -63,7 +50,7 @@ export function ImportSubmenu({
       >
         Insert .dae…
       </button>
-      <div style={{ height: 1, background: "#eee", margin: "2px 0" }} />
+      <div style={{ height: 1, background: "var(--pd-rule-soft)", margin: "2px 0" }} />
       <button
         style={itemStyle}
         title="Open a .bgraph file or paste a bgraph string (replaces current scene)"

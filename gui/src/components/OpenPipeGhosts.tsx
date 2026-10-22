@@ -37,7 +37,7 @@ const ghostLineMaterial = new THREE.LineBasicMaterial({
 });
 
 const selectionHighlightMaterial = new THREE.MeshBasicMaterial({
-  color: 0x4a9eff,
+  color: 0x6f87cc,
   transparent: true,
   opacity: 0.2,
   depthWrite: false,
@@ -45,7 +45,7 @@ const selectionHighlightMaterial = new THREE.MeshBasicMaterial({
 });
 
 const selectionOutlineMaterial = new THREE.LineBasicMaterial({
-  color: 0x4a9eff,
+  color: 0x6f87cc,
   linewidth: 2,
 });
 

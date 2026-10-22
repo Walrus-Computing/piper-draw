@@ -588,7 +588,7 @@ function PlacementWarning({ toolbarRef }: { toolbarRef: React.RefObject<HTMLDivE
         border: "1px solid #f5c6cb",
         padding: "8px 16px",
         borderRadius: "6px",
-        fontFamily: "sans-serif",
+        fontFamily: "inherit",
         fontSize: "13px",
         // The container stays click-through so it never shadows canvas
         // hover/build interactions in the strip below the toolbar; only the
@@ -1325,14 +1325,14 @@ export default function App() {
           width: 32,
           height: 32,
           borderRadius: "50%",
-          border: "1px solid #ddd",
+          border: "1px solid var(--pd-rule)",
           background: "rgba(255,255,255,0.9)",
           boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
           cursor: "pointer",
-          fontFamily: "sans-serif",
+          fontFamily: "inherit",
           fontSize: 16,
           fontWeight: 600,
-          color: "#555",
+          color: "var(--pd-body)",
           padding: 0,
           lineHeight: 1,
         }}

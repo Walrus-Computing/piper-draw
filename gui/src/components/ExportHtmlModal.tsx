@@ -19,6 +19,7 @@ import { useBlockStore } from "../stores/blockStore";
 import { bakeScene, renderIframeDoc, buildIframeSnippet } from "../utils/htmlExport";
 import { captureSnapshot } from "../utils/sceneSnapshot";
 import { encodeSnapshotToHashParam, buildShareUrl } from "../utils/sceneShare";
+import { panelTitle, primaryBtn, secondaryBtn } from "./menuStyles";
 
 type CopyStatus = "idle" | "copied" | "error";
 
@@ -46,7 +47,8 @@ async function buildOpenUrl(): Promise<string> {
 const BACKDROP_STYLE: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0,0,0,0.5)",
+  background: "rgba(11, 10, 9, 0.28)",
+  backdropFilter: "blur(2px)",
   display: "flex",
   overflow: "auto",
   padding: 16,
@@ -57,31 +59,19 @@ const PANEL_STYLE: React.CSSProperties = {
   width: 640,
   maxWidth: "92vw",
   margin: "auto",
-  background: "#fff",
-  borderRadius: 6,
-  boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
-  padding: 16,
+  background: "var(--pd-panel)",
+  border: "1px solid var(--pd-rule)",
+  borderRadius: 12,
+  boxShadow: "0 16px 48px rgba(11, 10, 9, 0.16)",
+  padding: "22px 24px",
   display: "flex",
   flexDirection: "column",
-  gap: 10,
+  gap: 14,
+  color: "var(--pd-body)",
 };
 
-const primaryBtn = (disabled: boolean): React.CSSProperties => ({
-  padding: "6px 12px",
-  border: "1px solid #0066cc",
-  background: disabled ? "#cce0f5" : "#0066cc",
-  color: "#fff",
-  borderRadius: 4,
-  cursor: disabled ? "default" : "pointer",
-});
 
-const plainBtn: React.CSSProperties = {
-  padding: "6px 12px",
-  border: "1px solid #ccc",
-  background: "#fff",
-  borderRadius: 4,
-  cursor: "pointer",
-};
+const plainBtn = secondaryBtn();
 
 function OpacityRow({ opacity, setOpacity }: { opacity: number; setOpacity: (v: number) => void }) {
   // The number field keeps its own text so it can be transiently empty while
@@ -105,7 +95,7 @@ function OpacityRow({ opacity, setOpacity }: { opacity: number; setOpacity: (v: 
   };
 
   return (
-    <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+    <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 13, color: "var(--pd-ink)" }}>
       <span style={{ whiteSpace: "nowrap" }}>Block opacity</span>
       <input
         type="range"
@@ -122,7 +112,7 @@ function OpacityRow({ opacity, setOpacity }: { opacity: number; setOpacity: (v: 
         value={text}
         onChange={(e) => onText(e.target.value)}
         onBlur={() => setText(String(opacity))}
-        style={{ width: 60, padding: "4px 6px", border: "1px solid #ccc", borderRadius: 4, fontSize: 13 }}
+        style={{ width: 60, padding: "4px 6px", fontSize: 13 }}
       />
       <span>%</span>
     </label>
@@ -141,7 +131,7 @@ function DialogFrame({ onClose, children }: { onClose: () => void; children: Rea
       }}
     >
       <div style={PANEL_STYLE}>
-        <div style={{ fontWeight: 600, fontFamily: "Arial", fontSize: 16 }}>Export HTML</div>
+        <div style={{ ...panelTitle, fontSize: 17 }}>Export HTML</div>
         {children}
       </div>
     </div>
@@ -183,7 +173,7 @@ function DialogBody({
   const notReady = innerDoc == null;
   return (
     <>
-      <div style={{ fontSize: 13, fontFamily: "Arial", color: "#555" }}>
+      <div style={{ fontSize: 13, fontFamily: "inherit", color: "var(--pd-body)" }}>
         Simply paste the snippet into your webpage's HTML. Drag to rotate, scroll to zoom, cmd + drag to move.
       </div>
       <OpacityRow opacity={opacity} setOpacity={setOpacity} />
@@ -192,12 +182,12 @@ function DialogBody({
           style={{
             width: "100%",
             height: "min(55vh, 400px)",
-            border: "1px solid #ccc",
-            borderRadius: 4,
+            border: "1px solid var(--pd-rule)",
+            borderRadius: 8,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            color: "#888",
+            color: "var(--pd-muted)",
             fontSize: 13,
           }}
         >
@@ -211,7 +201,7 @@ function DialogBody({
           onLoad={() =>
             iframeRef.current?.contentWindow?.postMessage({ __piperOpacity: opacity / 100 }, "*")
           }
-          style={{ width: "100%", height: "min(55vh, 400px)", border: "1px solid #ccc", borderRadius: 4 }}
+          style={{ width: "100%", height: "min(55vh, 400px)", border: "1px solid var(--pd-rule)", borderRadius: 8 }}
         />
       )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10 }}>
