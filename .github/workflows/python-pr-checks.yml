@@ -3,7 +3,6 @@ name: Python PR Checks
 on:
   pull_request:
     branches:
-      - dev
       - main
 
 jobs:

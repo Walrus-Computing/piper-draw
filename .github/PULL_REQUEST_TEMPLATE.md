@@ -1,5 +1,5 @@
 <!--
-  Target branch: dev (see CONTRIBUTING.md). Main is for releases.
+  Target branch: main (see CONTRIBUTING.md). Merges to main deploy to production.
 -->
 
 ## Summary
