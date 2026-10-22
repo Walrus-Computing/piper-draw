@@ -11,6 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import { useEffect, useRef, useState } from "react";
+import { panelTitle, primaryBtn, secondaryBtn } from "./menuStyles";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const PLACEHOLDER = `BLOCKGRAPH 0.1.0;
@@ -31,7 +32,8 @@ interface Props {
 const BACKDROP_STYLE: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0,0,0,0.5)",
+  background: "rgba(11, 10, 9, 0.28)",
+  backdropFilter: "blur(2px)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -41,18 +43,22 @@ const BACKDROP_STYLE: React.CSSProperties = {
 const PANEL_STYLE: React.CSSProperties = {
   width: 600,
   height: 460,
-  background: "#fff",
-  borderRadius: 6,
-  boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
-  padding: 16,
+  maxWidth: "calc(100vw - 32px)",
+  boxSizing: "border-box",
+  background: "var(--pd-panel)",
+  border: "1px solid var(--pd-rule)",
+  borderRadius: 12,
+  boxShadow: "0 16px 48px rgba(11, 10, 9, 0.16)",
+  padding: "22px 24px",
   display: "flex",
   flexDirection: "column",
-  gap: 8,
+  gap: 12,
+  color: "var(--pd-body)",
 };
 
 function SizeIndicator({ byteSize, overCap }: { byteSize: number; overCap: boolean }) {
   return (
-    <div style={{ fontSize: 11, color: overCap ? "#c00" : "#666" }}>
+    <div style={{ fontSize: 11, color: overCap ? "#c00" : "var(--pd-muted)" }}>
       {(byteSize / 1024).toFixed(1)} KB / 5 MB
       {overCap && " — Pasted text exceeds 5 MB cap"}
     </div>
@@ -90,27 +96,20 @@ function FileSourceRow({
         display: "flex",
         alignItems: "center",
         gap: 8,
-        padding: "8px 10px",
-        background: "#f4f6fa",
-        border: "1px solid #e0e4ec",
-        borderRadius: 4,
-        fontSize: 12,
+        padding: "10px 12px",
+        background: "var(--pd-panel-2)",
+        border: "1px solid var(--pd-rule-soft)",
+        borderRadius: 8,
+        fontSize: 12.5,
       }}
     >
       <button
         onClick={onPickFile}
-        style={{
-          padding: "4px 10px",
-          fontSize: 12,
-          border: "1px solid #ccc",
-          background: "#fff",
-          borderRadius: 3,
-          cursor: "pointer",
-        }}
+        style={{ ...secondaryBtn(), fontSize: 12.5 }}
       >
         Choose file…
       </button>
-      <span style={{ color: "#666" }}>
+      <span style={{ color: "var(--pd-body)" }}>
         {pickedName ? pickedName : "or paste the bgraph below"}
       </span>
     </div>
@@ -135,27 +134,14 @@ function FooterButtons({
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
       <button
         onClick={onCancel}
-        style={{
-          padding: "6px 12px",
-          border: "1px solid #ccc",
-          background: "#fff",
-          borderRadius: 4,
-          cursor: "pointer",
-        }}
+        style={secondaryBtn()}
       >
         Cancel
       </button>
       <button
         onClick={onSubmit}
         disabled={disabled}
-        style={{
-          padding: "6px 12px",
-          border: "1px solid #0066cc",
-          background: disabled ? "#cce0f5" : "#0066cc",
-          color: "#fff",
-          borderRadius: 4,
-          cursor: disabled ? "default" : "pointer",
-        }}
+        style={primaryBtn(disabled)}
         title={`${label} (⌘/Ctrl+Enter)`}
       >
         {submitting ? `${label}ing…` : label}
@@ -166,12 +152,13 @@ function FooterButtons({
 
 const TEXTAREA_STYLE: React.CSSProperties = {
   flex: 1,
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+  fontFamily: "var(--pd-mono)",
   fontSize: 12,
-  padding: 8,
-  border: "1px solid #ccc",
-  borderRadius: 4,
+  padding: 10,
+  border: "1px solid var(--pd-rule)",
+  borderRadius: 8,
   resize: "none",
+  lineHeight: 1.5,
 };
 
 interface BodyProps {
@@ -217,7 +204,7 @@ function ModalBody({
   };
   return (
     <div style={PANEL_STYLE}>
-      <div style={{ fontWeight: 600, fontSize: 14 }}>{title}</div>
+      <div style={{ ...panelTitle, fontSize: 17 }}>{title}</div>
       <FileSourceRow
         onPickFile={() => fileInputRef.current?.click()}
         pickedName={pickedName}

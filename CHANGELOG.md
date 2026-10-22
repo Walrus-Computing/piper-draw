@@ -6,6 +6,16 @@ a four-digit version: `MAJOR.MINOR.PATCH.MICRO`.
 
 ## [Unreleased]
 
+## [0.3.2.0] - 2026-10-22
+
+### Changed
+- **Walrus Computing look.** The editor now uses the Walrus Computing brand:
+  warm panels, a brand-blue accent, the Stack Sans Text typeface and the walrus
+  favicon. Toolbar dropdowns, the About dialog, the tutorial card, Customize,
+  Examples, Flows, ZX, Export HTML and bgraph import all share one calmer
+  style. The green landscape, the X/Z face colours and the status colours are
+  unchanged, and no feature or keyboard shortcut moved.
+
 ## [0.3.1.0] - 2026-09-07
 
 ### Added

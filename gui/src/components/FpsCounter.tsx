@@ -7,9 +7,9 @@ export function FpsDisplay({ spanRef }: { spanRef: React.RefObject<HTMLSpanEleme
     <span
       ref={spanRef}
       style={{
-        color: "#555",
+        color: "var(--pd-body)",
         fontSize: "13px",
-        fontFamily: "monospace",
+        fontFamily: "var(--pd-mono)",
         userSelect: "none",
       }}
     >

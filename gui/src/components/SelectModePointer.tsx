@@ -550,8 +550,8 @@ export function SelectModePointer({
         top: marqueeRect.y,
         width: marqueeRect.w,
         height: marqueeRect.h,
-        border: "1px solid #4a9eff",
-        background: "rgba(74, 158, 255, 0.1)",
+        border: "1px solid var(--pd-accent)",
+        background: "rgba(111, 135, 204, 0.12)",
         pointerEvents: "none",
         zIndex: 10,
       }}

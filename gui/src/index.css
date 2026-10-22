@@ -1,3 +1,20 @@
+/* Walrus Computing brand tokens (same palette as walruscomputing.com). The UI chrome reads these;
+   diagram colours (X/Z faces, axes, ZX graphs) stay hard-coded because they carry meaning. */
+:root {
+  --pd-sand: #F2F1EF;        /* page ground */
+  --pd-scene: #CBDFC6;       /* 3D background: the green landscape stays, for contrast with the cubes */
+  --pd-panel: #FBFAF8;       /* panels, dialogs, buttons */
+  --pd-panel-2: #F2F1EF;     /* disabled / secondary fills */
+  --pd-ink: #0B0A09;         /* headings, primary text */
+  --pd-body: #4D4842;        /* running text */
+  --pd-muted: #736D67;       /* labels, hints */
+  --pd-rule: #CFCDCA;        /* borders */
+  --pd-rule-soft: #E4E2DF;   /* dividers */
+  --pd-accent: #6F87CC;      /* the one accent: the waves' blue */
+  --pd-accent-tint: #E6EAF5; /* selected fill */
+  --pd-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
 html, body, #root {
   margin: 0;
   padding: 0;
@@ -6,14 +23,94 @@ html, body, #root {
   overflow: hidden;
 }
 
+body {
+  font-family: "Stack Sans Text", "Helvetica Neue", Arial, sans-serif;
+  color: var(--pd-ink);
+  background: var(--pd-scene);
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, select, textarea { font-family: inherit; }
+a { color: var(--pd-accent); }
+
 /* Interactive tutorial target ring. Menu items mounted after their trigger is
    opened are picked up by TutorialPanel's MutationObserver. */
 @keyframes tutorial-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.9); }
-  50%      { box-shadow: 0 0 0 6px rgba(74, 158, 255, 0.25); }
+  0%, 100% { box-shadow: 0 0 0 2px rgba(111, 135, 204, 0.9); }
+  50%      { box-shadow: 0 0 0 6px rgba(111, 135, 204, 0.25); }
 }
 
 .tutorial-target {
   animation: tutorial-pulse 1.2s ease-in-out infinite;
   border-radius: 4px;
 }
+
+/* every button text in ink unless a component sets its own (e.g. white on the blue active state) */
+button { color: var(--pd-ink); }
+
+/* toolbar dropdowns (menuStyles.ts): flat rows, brand-blue tint on hover */
+.pd-menu button { transition: background-color 0.12s; }
+.pd-menu button:not(:disabled):hover { background-color: var(--pd-accent-tint) !important; }
+
+/* keyboard keys in the About dialog: small keycaps instead of plain text (the hint bar styles its own) */
+.pd-dialog kbd {
+  font-family: var(--pd-mono);
+  font-size: 0.85em;
+  padding: 1px 5px;
+  border: 1px solid var(--pd-rule);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--pd-panel-2);
+  color: var(--pd-ink);
+  white-space: nowrap;
+}
+code { font-family: var(--pd-mono); font-size: 0.9em; }
+
+/* About dialog (HelpPanel): label-over-text sections divided by hairlines, like walruscomputing.com */
+.pd-backdrop { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+  background: rgba(11, 10, 9, 0.28); backdrop-filter: blur(2px); }
+.pd-dialog { background: var(--pd-panel); border: 1px solid var(--pd-rule); border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(11, 10, 9, 0.16); width: min(720px, calc(100vw - 32px)); max-height: 86vh;
+  overflow-y: auto; box-sizing: border-box; padding: 30px 40px 24px; color: var(--pd-body); font-size: 13.5px; line-height: 1.6; }
+.pd-dialog-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+.pd-dialog h3 { margin: 0; font-size: 20px; font-weight: 500; letter-spacing: -0.01em; color: var(--pd-ink); }
+.pd-close { background: none; border: none; cursor: pointer; color: var(--pd-muted); font-size: 16px; padding: 2px 4px; line-height: 1; }
+.pd-close:hover { color: var(--pd-ink); }
+.pd-lede { margin: 10px 0 18px; font-size: 14px; }
+.pd-cta { display: block; width: 100%; padding: 10px 14px; background: var(--pd-accent); color: #fff; border: none;
+  border-radius: 6px; font-size: 13.5px; font-weight: 500; cursor: pointer; transition: filter .15s; }
+.pd-cta:hover { filter: brightness(0.94); }
+.pd-cta-note { margin: 6px 0 0; font-size: 12px; color: var(--pd-muted); text-align: center; }
+.pd-section { border-top: 1px solid var(--pd-rule-soft); margin-top: 18px; padding-top: 14px; }
+.pd-section h4 { margin: 0 0 8px; font-size: 10.5px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--pd-muted); }
+.pd-section ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.pd-section b { font-weight: 600; color: inherit; }   /* emphasis in the same grey as the text, not a contrasting black */
+.pd-dialog-foot { border-top: 1px solid var(--pd-rule-soft); margin-top: 18px; padding-top: 14px; display: flex;
+  align-items: center; justify-content: space-between; gap: 16px; font-size: 12px; color: var(--pd-muted); }
+.pd-dialog-foot p { margin: 0; }
+.pd-dialog-foot img { height: 16px; width: auto; display: block; }
+
+/* form controls on the palette: checkboxes, sliders and radios take the brand blue; fields get hairlines */
+:root { accent-color: var(--pd-accent); }
+input:not([type]), input[type="text"], input[type="number"], input[type="search"], select, textarea {
+  background-color: var(--pd-panel);
+  color: var(--pd-ink);
+  border: 1px solid var(--pd-rule);
+  border-radius: 5px;
+  font-family: inherit;
+}
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 20px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M.5.5 4 4 7.5.5' fill='none' stroke='%23736D67' stroke-width='1.1'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  cursor: pointer;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--pd-accent) !important;
+  box-shadow: 0 0 0 3px var(--pd-accent-tint);
+}
+textarea::placeholder, input::placeholder { color: var(--pd-muted); opacity: 0.8; }

@@ -25,7 +25,7 @@ const baseStyle: React.CSSProperties = {
   zIndex: 2,
   padding: "8px 16px",
   borderRadius: "6px",
-  fontFamily: "sans-serif",
+  fontFamily: "inherit",
   fontSize: "13px",
   boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
   maxWidth: "500px",
@@ -33,7 +33,7 @@ const baseStyle: React.CSSProperties = {
 };
 
 const styleVariants: Record<string, React.CSSProperties> = {
-  loading: { background: "#e8f0fe", color: "#1a56db", cursor: "default" },
+  loading: { background: "var(--pd-accent-tint)", color: "var(--pd-accent)", cursor: "default" },
   valid: { background: "#d4edda", color: "#155724", border: "1px solid #c3e6cb", cursor: "pointer" },
   invalid: { background: "#f8d7da", color: "#721c24", border: "1px solid #f5c6cb" },
   error: { background: "#fff3cd", color: "#856404", border: "1px solid #ffeeba" },

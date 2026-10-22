@@ -23,6 +23,7 @@ import {
   type ZXVertex,
 } from "../utils/zx";
 import type { Position3D } from "../types";
+import { closeBtn, panelTitle, secondaryBtn, sectionLabel } from "./menuStyles";
 
 const Z_COLOR = "#5bc466";
 const X_COLOR = "#ff7f7f";
@@ -207,7 +208,7 @@ function ZXSvg({ result }: { result: ZXResult }) {
 
   if (result.vertices.length === 0) {
     return (
-      <div style={{ padding: "24px 12px", color: "#888", textAlign: "center" }}>
+      <div style={{ padding: "24px 12px", color: "var(--pd-muted)", textAlign: "center" }}>
         Graph has no vertices.
       </div>
     );
@@ -393,14 +394,15 @@ export function ZXPanel({
       style={{
         ...containerStyle,
         zIndex: 50,
-        background: "#fff",
-        borderRadius: 10,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+        background: "var(--pd-panel)",
+        border: "1px solid var(--pd-rule)",
+        borderRadius: 12,
+        boxShadow: "0 12px 36px rgba(11, 10, 9, 0.12)",
         display: "flex",
         flexDirection: "column",
-        fontFamily: "sans-serif",
-        fontSize: 12,
-        color: "#222",
+        fontFamily: "inherit",
+        fontSize: 12.5,
+        color: "var(--pd-body)",
         overflow: "hidden",
         outline: "none",
       }}
@@ -409,20 +411,21 @@ export function ZXPanel({
         {...dragHandleProps}
         style={{
           ...dragHandleProps.style,
-          padding: "10px 12px",
-          borderBottom: "1px solid #eee",
+          padding: "10px 14px",
+          borderBottom: "1px solid var(--pd-rule-soft)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          gap: 8,
         }}
       >
-        <span style={{ fontWeight: 600, fontSize: 13 }}>
+        <span style={{ ...panelTitle, fontSize: 14 }}>
           ZX diagram (
           <a
             href="https://github.com/tqec/tqec"
             target="_blank"
             rel="noreferrer"
-            style={{ color: "#4a9eff", textDecoration: "underline" }}
+            style={{ color: "var(--pd-accent)", textDecoration: "underline" }}
           >
             tqec
           </a>
@@ -431,7 +434,7 @@ export function ZXPanel({
             href="https://github.com/Quantomatic/pyzx"
             target="_blank"
             rel="noreferrer"
-            style={{ color: "#4a9eff", textDecoration: "underline" }}
+            style={{ color: "var(--pd-accent)", textDecoration: "underline" }}
           >
             pyzx
           </a>
@@ -440,23 +443,16 @@ export function ZXPanel({
         <button
           onClick={() => setZXPanelOpen(false)}
           aria-label="Close ZX panel"
-          style={{
-            background: "none",
-            border: "none",
-            fontSize: 16,
-            cursor: "pointer",
-            color: "#666",
-            padding: "0 4px",
-          }}
+          style={closeBtn}
         >
           ✕
         </button>
       </header>
 
-      <div style={{ padding: "10px 12px", overflowY: "auto", flex: 1 }}>
+      <div style={{ padding: "12px 14px", overflowY: "auto", flex: 1 }}>
         <PortsTable controlsRef={controlsRef} />
 
-        <hr style={{ margin: "12px 0", border: "none", borderTop: "1px solid #eee" }} />
+        <hr style={{ margin: "12px 0", border: "none", borderTop: "1px solid var(--pd-rule-soft)" }} />
 
         <div
           style={{
@@ -512,25 +508,17 @@ export function ZXPanel({
             }}
             disabled={!result?.ok}
             title="Save as .qasm / .qc / .qsim / .qgraph (format picked in the save dialog)"
-            style={{
-              padding: "3px 10px",
-              fontSize: 12,
-              borderRadius: 4,
-              border: "1px solid #4a9eff",
-              background: !result?.ok ? "#eee" : "#fff",
-              color: !result?.ok ? "#aaa" : "#4a9eff",
-              cursor: !result?.ok ? "default" : "pointer",
-            }}
+            style={{ ...secondaryBtn(!result?.ok), padding: "3px 12px", fontSize: 12 }}
           >
             Export…
           </button>
           {stats && (
-            <span style={{ color: "#666", marginLeft: "auto" }}>{stats}</span>
+            <span style={{ color: "var(--pd-body)", marginLeft: "auto" }}>{stats}</span>
           )}
         </div>
 
         {loading && !result && (
-          <div style={{ color: "#888", padding: "24px 0", textAlign: "center" }}>
+          <div style={{ color: "var(--pd-muted)", padding: "24px 0", textAlign: "center" }}>
             Computing ZX graph…
           </div>
         )}
@@ -559,7 +547,7 @@ export function ZXPanel({
                 gap: 12,
                 marginTop: 8,
                 flexWrap: "wrap",
-                color: "#555",
+                color: "var(--pd-body)",
               }}
             >
               <LegendDot color={Z_COLOR} label="Z-spider" />
@@ -608,12 +596,12 @@ function CircuitSection({
   }
   if (!circuit) {
     return (
-      <div style={{ marginTop: 12, color: "#888" }}>Extracting circuit…</div>
+      <div style={{ marginTop: 12, color: "var(--pd-muted)" }}>Extracting circuit…</div>
     );
   }
   return (
     <div style={{ marginTop: 12 }}>
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>
+      <div style={{ ...sectionLabel, marginBottom: 6 }}>
         Circuit: {circuit.qubits} qubit{circuit.qubits === 1 ? "" : "s"},{" "}
         {circuit.gate_count} gate{circuit.gate_count === 1 ? "" : "s"}
       </div>
@@ -627,7 +615,7 @@ function CircuitSection({
           color: "#d4d4d4",
           borderRadius: 4,
           fontSize: 11,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontFamily: "var(--pd-mono)",
           overflowX: "auto",
           maxHeight: 200,
           overflowY: "auto",
@@ -667,7 +655,7 @@ function VerificationBadge({ circuit }: { circuit: ZXCircuit }) {
     text = circuit.verification_error
       ? `Verification skipped: ${circuit.verification_error}`
       : "Verification skipped";
-    bg = "#f6f6f6";
+    bg = "var(--pd-panel-2)";
     border = "#ddd";
     color = "#666";
   }
@@ -732,7 +720,7 @@ function gateLabel(g: ZXGate): string {
 function CircuitDiagram({ circuit }: { circuit: ZXCircuit }) {
   if (circuit.qubits === 0 || circuit.gates.length === 0) {
     return (
-      <div style={{ marginTop: 8, color: "#888", fontStyle: "italic" }}>
+      <div style={{ marginTop: 8, color: "var(--pd-muted)", fontStyle: "italic" }}>
         Empty circuit (identity).
       </div>
     );
@@ -751,7 +739,7 @@ function CircuitDiagram({ circuit }: { circuit: ZXCircuit }) {
         viewBox={`0 0 ${width} ${height}`}
         width={width}
         height={height}
-        style={{ display: "block", background: "#fafafa", borderRadius: 4 }}
+        style={{ display: "block", background: "var(--pd-panel-2)", borderRadius: 4 }}
       >
         {/* qubit lines + labels */}
         {Array.from({ length: circuit.qubits }, (_, q) => (
@@ -918,7 +906,7 @@ function LegendDot({
           height: 10,
           borderRadius: "50%",
           background: color,
-          border: outlined ? "1.5px solid #333" : "1px solid #333",
+          border: outlined ? "1.5px solid var(--pd-ink)" : "1px solid var(--pd-ink)",
           display: "inline-block",
         }}
       />
@@ -935,7 +923,7 @@ function LegendSquare({ color, label }: { color: string; label: string }) {
           width: 10,
           height: 10,
           background: color,
-          border: "1px solid #333",
+          border: "1px solid var(--pd-ink)",
           display: "inline-block",
         }}
       />

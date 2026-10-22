@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { useFloatingPanel } from "../hooks/useFloatingPanel";
 import { ResizeGrip } from "../hooks/ResizeGrip";
 import type { ImportMode } from "./PasteBgraphModal";
+import { FLOAT_PANEL, PANEL_HEADER, closeBtn, primaryBtn, secondaryBtn } from "./menuStyles";
 
 interface ManifestEntry {
   name: string;
@@ -27,15 +28,9 @@ function GalleryHeader({ onClose }: { onClose: () => void }) {
       <button
         onClick={onClose}
         aria-label="Close panel"
-        style={{
-          background: "transparent",
-          border: "none",
-          fontSize: 16,
-          cursor: "pointer",
-          padding: "0 4px",
-        }}
+        style={closeBtn}
       >
-        ×
+        ✕
       </button>
     </>
   );
@@ -43,19 +38,12 @@ function GalleryHeader({ onClose }: { onClose: () => void }) {
 
 function ErrorState({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
-    <div style={{ padding: "16px", textAlign: "center", color: "#666" }}>
+    <div style={{ padding: "16px", textAlign: "center", color: "var(--pd-body)" }}>
       <div style={{ fontSize: 12, marginBottom: 8 }}>Could not load examples</div>
-      <div style={{ fontSize: 10, marginBottom: 8, color: "#999" }}>{error}</div>
+      <div style={{ fontSize: 10, marginBottom: 8, color: "var(--pd-muted)" }}>{error}</div>
       <button
         onClick={onRetry}
-        style={{
-          padding: "4px 10px",
-          fontSize: 11,
-          border: "1px solid #ccc",
-          borderRadius: 4,
-          background: "#fff",
-          cursor: "pointer",
-        }}
+        style={{ ...secondaryBtn(), fontSize: 12 }}
       >
         Retry
       </button>
@@ -77,8 +65,8 @@ function GalleryRow({
       onClick={() => onLoad(entry, "load")}
       title="Click to load (replaces scene); use + to insert next to scene"
       style={{
-        padding: "8px 10px",
-        borderBottom: "1px solid #f0f0f0",
+        padding: "10px 14px",
+        borderBottom: "1px solid var(--pd-rule-soft)",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
@@ -88,10 +76,10 @@ function GalleryRow({
       }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 13 }}>{entry.name}</div>
-        <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>{entry.description}</div>
+        <div style={{ fontWeight: 500, fontSize: 13.5, color: "var(--pd-ink)" }}>{entry.name}</div>
+        <div style={{ fontSize: 12, color: "var(--pd-body)", marginTop: 2, lineHeight: 1.45 }}>{entry.description}</div>
       </div>
-      <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -99,15 +87,7 @@ function GalleryRow({
           }}
           disabled={busy}
           title={`Load (replace scene): ${entry.name}`}
-          style={{
-            padding: "3px 10px",
-            fontSize: 11,
-            border: "1px solid #0066cc",
-            background: busy ? "#cce0f5" : "#0066cc",
-            color: "#fff",
-            borderRadius: 3,
-            cursor: busy ? "default" : "pointer",
-          }}
+          style={{ ...primaryBtn(busy), padding: "3px 12px", fontSize: 12 }}
         >
           Load
         </button>
@@ -118,15 +98,7 @@ function GalleryRow({
           }}
           disabled={busy}
           title={`Insert next to current scene: ${entry.name}`}
-          style={{
-            padding: "3px 8px",
-            fontSize: 11,
-            border: "1px solid #ccc",
-            background: "#fff",
-            borderRadius: 3,
-            cursor: busy ? "default" : "pointer",
-            fontWeight: "bold",
-          }}
+          style={{ ...secondaryBtn(busy), padding: "3px 9px", fontSize: 12 }}
         >
           +
         </button>
@@ -177,31 +149,19 @@ function useManifestFetch(open: boolean, fetchKey: number): FetchState {
 }
 
 const PANEL_BG_STYLE: React.CSSProperties = {
-  background: "#fff",
-  border: "1px solid #ccc",
-  borderRadius: 6,
-  boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+  ...FLOAT_PANEL,
   display: "flex",
   flexDirection: "column",
   zIndex: 1500,
 };
 
-const HEADER_INNER_STYLE: React.CSSProperties = {
-  padding: "6px 10px",
-  borderBottom: "1px solid #eee",
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  fontWeight: 600,
-  fontSize: 13,
-};
+const HEADER_INNER_STYLE: React.CSSProperties = PANEL_HEADER;
 
 const FOOTER_STYLE: React.CSSProperties = {
-  padding: "6px 10px",
-  borderTop: "1px solid #eee",
-  fontSize: 10,
-  fontStyle: "italic",
-  color: "#999",
+  padding: "8px 14px",
+  borderTop: "1px solid var(--pd-rule-soft)",
+  fontSize: 11,
+  color: "var(--pd-muted)",
 };
 
 function GalleryBody({
@@ -218,7 +178,7 @@ function GalleryBody({
   if (state.status === "error") return <ErrorState error={state.message} onRetry={onRetry} />;
   if (state.status !== "ready") {
     return (
-      <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: 12 }}>
+      <div style={{ padding: "16px", textAlign: "center", color: "var(--pd-muted)", fontSize: 12 }}>
         Loading…
       </div>
     );

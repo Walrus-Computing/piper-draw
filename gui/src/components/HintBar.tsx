@@ -36,7 +36,7 @@ export function HintBar({
         padding: "0 14px",
         borderRadius: "8px",
         fontSize: "12px",
-        fontFamily: "sans-serif",
+        fontFamily: "inherit",
         pointerEvents: "none",
         boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
         whiteSpace: "nowrap",
