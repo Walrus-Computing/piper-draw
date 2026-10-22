@@ -99,5 +99,5 @@ Rules:
 
 If you change module boundaries (move helpers between `utils/`, `stores/`,
 `components/`, or change what a store owns), update ARCHITECTURE.md in the
-same PR — the PR template has the checklist item and CI gates merges to `dev`
+same PR — the PR template has the checklist item and CI gates merges to `main`
 on it.

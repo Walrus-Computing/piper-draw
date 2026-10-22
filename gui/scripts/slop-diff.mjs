@@ -6,7 +6,7 @@
 // so shifting code doesn't create false positives.
 //
 // Usage:
-//   npm run slop:diff                    # diff against origin/dev
+//   npm run slop:diff                    # diff against origin/main
 //   npm run slop:diff -- origin/release  # diff against another base
 //
 // Vendored from gstack 1.14.0.0; ported from .ts to .mjs to match repo conventions.
@@ -16,7 +16,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-const base = process.argv[2] || "origin/dev";
+const base = process.argv[2] || "origin/main";
 
 // 1. Find changed files
 const diffResult = spawnSync("git", ["diff", "--name-only", `${base}...HEAD`], {

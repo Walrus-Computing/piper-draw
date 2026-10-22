@@ -2,22 +2,20 @@
 
 ## Branching strategy
 
-- **`dev`** is the integration branch. All pull requests should target `dev`.
-  Merges to `dev` auto-deploy to <https://piper-draw-dev.walruscomputing.com>.
-- **`main`** is the stable/release branch. Changes are merged from `dev` into
-  `main` for releases. Merges to `main` auto-deploy to
-  <https://piper-draw.walruscomputing.com>.
+- **`main`** is the only long-lived branch. Merges to `main` auto-deploy to
+  <https://piper-draw.walruscomputing.com>, so test your change locally first
+  (see [Development setup](#development-setup)).
 
 ## How to contribute
 
-1. Create a feature branch from `dev`:
+1. Create a feature branch from `main`:
    ```sh
-   git checkout dev
-   git pull origin dev
+   git checkout main
+   git pull origin main
    git checkout -b your-branch-name
    ```
 2. Make your changes and commit them.
-3. Push your branch and open a pull request **targeting `dev`** (not `main`).
+3. Push your branch and open a pull request **targeting `main`**.
 4. Ensure CI checks pass before requesting review.
 
 ## Development setup
