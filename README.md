@@ -1,6 +1,6 @@
 <p align="center">
   <img src="assets/logo.svg" alt="piper-draw" width="560" valign="middle">
-  <a href="https://walruscomputing.com" title="Made by Walrus Computing"><img src="assets/walrus-logo.png" alt="Made by Walrus Computing" width="96" valign="middle"></a>
+  <a href="https://walruscomputing.com" title="Made by Walrus Computing"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/walrus-mark-light.svg"><img src="assets/walrus-mark.svg" alt="Made by Walrus Computing" width="97" valign="middle"></picture></a>
 </p>
 
 An open source web application for building pipe diagrams for topological quantum error correction. 
